@@ -1,5 +1,5 @@
 // Copyright (c) Microsoft Corporation.
-// Licensed under the MIT License. See LICENSE file in the project root for full license information.
+// Licensed under the MIT License.
 
 // Package preview contains API Schema definitions for the db preview API group.
 // +kubebuilder:object:generate=true

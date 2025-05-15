@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
 

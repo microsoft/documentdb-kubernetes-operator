@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 # Build the manager binary
 FROM mcr.microsoft.com/oss/go/microsoft/golang:1.24-azurelinux3.0 AS builder
 ARG TARGETOS

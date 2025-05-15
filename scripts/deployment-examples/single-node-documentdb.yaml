@@ -1,0 +1,12 @@
+# To Deploy: kubectl apply -f single-node-documentdb.yaml
+apiVersion: db.microsoft.com/preview
+kind: DocumentDB
+metadata:
+  name: documentdb-preview
+  namespace: documentdb-preview-ns
+spec:
+  nodeCount: 1
+  instancesPerNode: 1
+  documentDBImage: pgcosmoscontroller.azurecr.io/documentdb-pg:16
+  resource:
+    pvcSize: 10Gi

@@ -1,0 +1,39 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: documentdb-operator-cluster-role
+  labels:
+    app.kubernetes.io/name: "documentdb-operator"
+    app.kubernetes.io/managed-by: "Helm"
+rules:
+- apiGroups: ["db.microsoft.com"] # documentdb.microsoft.com permissions
+  resources: ["documentdb", "documentdb/status", "documentdb/finalizers", "documentdbs"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["statefulsets", "deployments"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["services", "pods", "endpoints", "leases", "serviceaccounts", "configmaps", "namespaces"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["roles", "rolebindings", "clusterrolebindings"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["networking.fleet.azure.com"] # fleet permissions for multi-cluster services
+  resources: ["serviceexports", "multiclusterservices"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["create", "get", "list", "watch", "update", "delete"]
+- apiGroups: ["postgresql.cnpg.io"]
+  resources: ["clusters", "publications", "subscriptions"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+

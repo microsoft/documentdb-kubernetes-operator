@@ -1,0 +1,12 @@
+namespace: documentdb-operator
+replicaCount: 1
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: "documentdb-operator"
+image:
+  documentdbk8soperator:
+    repository: pgcosmoscontroller.azurecr.io/documentdb-k8s-operator
+    pullPolicy: Always
+    tag: v80

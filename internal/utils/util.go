@@ -19,7 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	dbpreview "github.com/azure/documentdb-operator/api/preview"
+	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
 )
 
 // DeleteLoadbalancer deletes the LoadBalancer Service for a given CosmosDB instance

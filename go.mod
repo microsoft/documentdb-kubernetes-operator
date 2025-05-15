@@ -1,4 +1,4 @@
-module github.com/azure/documentdb-operator
+module github.com/microsoft/documentdb-operator
 
 go 1.23.5
 

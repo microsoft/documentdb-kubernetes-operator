@@ -24,9 +24,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	dbpreview "github.com/azure/documentdb-operator/api/preview"
-	"github.com/azure/documentdb-operator/internal/controller"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
+	"github.com/microsoft/documentdb-operator/internal/controller"
 	fleetv1alpha1 "go.goms.io/fleet-networking/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )

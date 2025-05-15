@@ -18,9 +18,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	dbpreview "github.com/azure/documentdb-operator/api/preview"
-	cnpg "github.com/azure/documentdb-operator/internal/cnpg"
-	util "github.com/azure/documentdb-operator/internal/utils"
+	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
+	cnpg "github.com/microsoft/documentdb-operator/internal/cnpg"
+	util "github.com/microsoft/documentdb-operator/internal/utils"
 )
 
 const (
@@ -53,7 +53,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if errors.IsNotFound(err) {
 			// DocumentDB resource not found, handle cleanup
 			log.Info("DocumentDB resource not found. Cleaning up associated resources.")
-			if err := r.cleanupResources(ctx, req); err != nil {
+			if err := r.cleanupResources(ctx, req, documentdb); err != nil {
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{}, nil
@@ -62,23 +62,26 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	// Define the Public LoadBalancer Service for this DocumentDB instance
-	loadBalancer := util.GetDocumentDBLoadBalancerDefinition(documentdb, req.Namespace)
+	// Only create/manage the public LoadBalancer if enabled in the CRD spec
+	if documentdb.Spec.PublicLoadBalancer.Enabled {
+		// Define the Public LoadBalancer Service for this DocumentDB instance
+		loadBalancer := util.GetDocumentDBLoadBalancerDefinition(documentdb, req.Namespace)
 
-	// Check if the LoadBalancer Service already exists for this instance
-	foundService, err := util.GetOrCreateService(ctx, r.Client, loadBalancer)
-	if err != nil {
-		log.Info("Failed to create DocumentDB LoadBalancer Service; Requeuing.")
-		return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
-	}
+		// Check if the LoadBalancer Service already exists for this instance
+		foundService, err := util.GetOrCreateService(ctx, r.Client, loadBalancer)
+		if err != nil {
+			log.Info("Failed to create DocumentDB LoadBalancer Service; Requeuing.")
+			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+		}
 
-	// Ensure LoadBalancer has an IP assigned
-	loadBalancerIP, err := util.EnsureLoadBalancerIP(ctx, foundService)
-	if err != nil {
-		log.Info("DocumentDB LoadBalancer External IP not assigned, Requeuing.")
-		return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+		// Ensure LoadBalancer has an IP assigned
+		loadBalancerIP, err := util.EnsureLoadBalancerIP(ctx, foundService)
+		if err != nil {
+			log.Info("DocumentDB LoadBalancer External IP not assigned, Requeuing.")
+			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+		}
+		log.Info("DocumentDB LoadBalancer IP assigned", "LoadBalancerIP", loadBalancerIP)
 	}
-	log.Info("DocumentDB LoadBalancer IP assigned", "LoadBalancerIP", loadBalancerIP)
 
 	// Ensure App ServiceAccount, Role and RoleBindings are created
 	if err := r.EnsureServiceAccountRoleAndRoleBinding(ctx, documentdb, req.Namespace); err != nil {
@@ -124,15 +127,16 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 // cleanupResources handles the cleanup of associated resources when a DocumentDB resource is not found
-func (r *DocumentDBReconciler) cleanupResources(ctx context.Context, req ctrl.Request) error {
+func (r *DocumentDBReconciler) cleanupResources(ctx context.Context, req ctrl.Request, documentdb *dbpreview.DocumentDB) error {
 	log := log.FromContext(ctx)
 
 	// Cleanup DocumentDB LoadBalancer Service
-	loadBalancerName := util.LOADBALANCER_PREFIX + req.Name
-	if err := util.DeleteLoadbalancer(ctx, r.Client, loadBalancerName, req.Namespace); err != nil {
-		return err
+	if documentdb.Spec.PublicLoadBalancer.Enabled {
+		loadBalancerName := util.LOADBALANCER_PREFIX + req.Name
+		if err := util.DeleteLoadbalancer(ctx, r.Client, loadBalancerName, req.Namespace); err != nil {
+			return err
+		}
 	}
-
 	// Cleanup CNPG Cluster
 	cnpgCluster := cnpg.GetCnpgClusterSpec(req, dbpreview.DocumentDB{}, "", req.Name, log)
 	if err := r.Client.Delete(ctx, cnpgCluster); err != nil {

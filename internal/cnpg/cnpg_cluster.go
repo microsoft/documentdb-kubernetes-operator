@@ -8,15 +8,15 @@ import (
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	dbpreview "github.com/azure/documentdb-operator/api/preview"
-	util "github.com/azure/documentdb-operator/internal/utils"
+	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
+	util "github.com/microsoft/documentdb-operator/internal/utils"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, documentdb_image string, serviceAccountName string, log logr.Logger) *cnpgv1.Cluster {
-	cnpgSidecarPluginName := documentdb.Spec.CNPGSidecarPlugin
-	if cnpgSidecarPluginName == "" {
-		cnpgSidecarPluginName = util.DEFAULT_CNPG_SIDECAR_PLUGIN
+	sidecarPluginName := documentdb.Spec.SidecarInjectorPluginName
+	if sidecarPluginName == "" {
+		sidecarPluginName = util.DEFAULT_SIDECAR_INJECTOR_PLUGIN
 	}
 	return &cnpgv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
@@ -33,7 +33,7 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 			InheritedMetadata: GetInheritedMetadataLabels(documentdb),
 			Plugins: []cnpgv1.PluginConfiguration{
 				{
-					Name: cnpgSidecarPluginName,
+					Name: sidecarPluginName,
 				},
 			},
 			PostgresUID: 105,

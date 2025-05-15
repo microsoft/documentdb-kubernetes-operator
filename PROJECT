@@ -6,7 +6,7 @@ domain: microsoft.com
 layout:
 - go.kubebuilder.io/v4
 projectName: documentdb-operator
-repo: github.com/azure/documentdb-operator
+repo: github.com/microsoft/documentdb-operator
 resources:
 - api:
     crdVersion: v1
@@ -15,6 +15,6 @@ resources:
   domain: microsoft.com
   group: db
   kind: DocumentDB
-  path: github.com/azure/documentdb-operator/api/preview
+  path: github.com/microsoft/documentdb-operator/api/preview
   version: preview
 version: "3"

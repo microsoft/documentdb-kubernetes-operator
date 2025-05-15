@@ -37,9 +37,11 @@ func (r *DocumentDBReconciler) AddPhysicalReplicationToClusterSpec(
 		return err
 	}
 
-	err = r.CreateServiceImportAndExport(ctx, source, self, documentdb)
-	if err != nil {
-		return err
+	if documentdb.Spec.PhysicalReplication.FleetEnabled {
+		err = r.CreateServiceImportAndExport(ctx, source, self, documentdb)
+		if err != nil {
+			return err
+		}
 	}
 
 	// No more errors possible, so we can edit the spec
@@ -64,7 +66,10 @@ func (r *DocumentDBReconciler) AddPhysicalReplicationToClusterSpec(
 		Self:    self,
 	}
 
-	sourceHost := documentdb.Namespace + "-" + source + "-rw.fleet-system.svc"
+	sourceHost := source + "-rw." + documentdb.Namespace + ".svc"
+	if documentdb.Spec.PhysicalReplication.FleetEnabled {
+		sourceHost = documentdb.Namespace + "-" + source + "-rw.fleet-system.svc"
+	}
 	selfHost := documentdb.Name + "-rw." + documentdb.Namespace + ".svc"
 	cnpgCluster.Spec.ExternalClusters = []cnpgv1.ExternalCluster{
 		{
@@ -92,15 +97,20 @@ func (r *DocumentDBReconciler) AddPhysicalReplicationToClusterSpec(
 
 func (r *DocumentDBReconciler) GetSelfAndSource(ctx context.Context, documentdb dbpreview.DocumentDB) (string, string, error) {
 	clusterMapName := "cluster-name"
-	clusterNameConfigMap := &corev1.ConfigMap{}
-	err := r.Get(ctx, types.NamespacedName{Name: clusterMapName, Namespace: "kube-system"}, clusterNameConfigMap)
-	if err != nil {
-		return "", "", err
-	}
 
-	self := clusterNameConfigMap.Data["name"]
-	if self == "" {
-		return "", "", fmt.Errorf("name key not found in kube-system:cluster-name configmap")
+	self := documentdb.Name
+
+	if documentdb.Spec.PhysicalReplication.FleetEnabled {
+		clusterNameConfigMap := &corev1.ConfigMap{}
+		err := r.Get(ctx, types.NamespacedName{Name: clusterMapName, Namespace: "kube-system"}, clusterNameConfigMap)
+		if err != nil {
+			return "", "", err
+		}
+
+		self = clusterNameConfigMap.Data["name"]
+		if self == "" {
+			return "", "", fmt.Errorf("name key not found in kube-system:cluster-name configmap")
+		}
 	}
 
 	// Set the source to be the first cluster in the list that isn't self
@@ -195,7 +205,7 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 		}
 
 		// push out the  promotion token
-		err = r.CreateTokenService(ctx, current.Status.DemotionToken, documentdb.Namespace)
+		err = r.CreateTokenService(ctx, current.Status.DemotionToken, documentdb.Namespace, documentdb.Spec.PhysicalReplication.FleetEnabled)
 		if err != nil {
 			return err, time.Second * 10
 		}
@@ -208,7 +218,7 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 
 		// If the old primary is available, we can read the token from it
 		if oldPrimaryAvailable {
-			token, err, refreshTime := r.ReadTokenService(ctx, documentdb.Namespace)
+			token, err, refreshTime := r.ReadToken(ctx, documentdb.Namespace, documentdb.Spec.PhysicalReplication.FleetEnabled)
 			if err != nil || refreshTime > 0 {
 				return err, refreshTime
 			}
@@ -227,8 +237,22 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 	return nil, -1
 }
 
-func (r *DocumentDBReconciler) ReadTokenService(ctx context.Context, namespace string) (string, error, time.Duration) {
+func (r *DocumentDBReconciler) ReadToken(ctx context.Context, namespace string, fleetEnabled bool) (string, error, time.Duration) {
 	tokenServiceName := "promotion-token"
+
+	// If we are not using fleet, we only need to read the token from the configmap
+	if !fleetEnabled {
+		configMap := &corev1.ConfigMap{}
+		err := r.Get(ctx, types.NamespacedName{Name: tokenServiceName, Namespace: namespace}, configMap)
+		if err != nil {
+			return "", err, time.Second * 10
+		}
+		if configMap.Data["index.html"] == "" {
+			return "", fmt.Errorf("token not found in configmap"), time.Second * 10
+		}
+		return configMap.Data["index.html"], nil, -1
+	}
+
 	foundMCS := &fleetv1alpha1.MultiClusterService{}
 	err := r.Get(ctx, types.NamespacedName{Name: tokenServiceName, Namespace: namespace}, foundMCS)
 	if err != nil && errors.IsNotFound(err) {
@@ -283,7 +307,7 @@ func (r *DocumentDBReconciler) PromotionTokenNeedsUpdate(ctx context.Context, na
 	return configMap.Data["index.html"] == "", nil
 }
 
-func (r *DocumentDBReconciler) CreateTokenService(ctx context.Context, token string, namespace string) error {
+func (r *DocumentDBReconciler) CreateTokenService(ctx context.Context, token string, namespace string, fleetEnabled bool) error {
 	tokenServiceName := "promotion-token"
 	labels := map[string]string{
 		"app": tokenServiceName,
@@ -315,6 +339,11 @@ func (r *DocumentDBReconciler) CreateTokenService(ctx context.Context, token str
 
 	if token == "" {
 		return fmt.Errorf("No token found yet")
+	}
+
+	// When not using fleet, just transfer with the configmap
+	if !fleetEnabled {
+		return nil
 	}
 
 	// Create nginx Pod

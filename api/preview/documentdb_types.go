@@ -26,8 +26,9 @@ type Resource struct {
 }
 
 type PhysicalReplication struct {
-	Primary     string   `json:"primary"`
-	ClusterList []string `json:"clusterList"`
+	FleetEnabled bool     `json:"fleetEnabled,omitempty"`
+	Primary      string   `json:"primary"`
+	ClusterList  []string `json:"clusterList"`
 }
 
 // DocumentDBStatus defines the observed state of DocumentDB.

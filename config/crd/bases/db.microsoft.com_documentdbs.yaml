@@ -57,6 +57,8 @@ spec:
                     items:
                       type: string
                     type: array
+                  fleetEnabled:
+                    type: boolean
                   primary:
                     type: string
                 required:

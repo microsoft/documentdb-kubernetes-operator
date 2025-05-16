@@ -1,6 +1,9 @@
 name: Copy documentdb-sidecar-injector to GHCR
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       source_registry:

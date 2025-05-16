@@ -6,7 +6,7 @@ on:
       - main
 
 env:
-  CHART_NAME: documentdb-operator
+  CHART_NAME: documentdb-chart
   CHART_VERSION: 0.0.1
   GHCR_REPO: ghcr.io/${{ github.repository }}/documentdb-chart
 
@@ -31,5 +31,5 @@ jobs:
 
       - name: Push Helm chart to GHCR
         run: |
-          helm push /home/runner/work/documentdb-kubernetes-operator/documentdb-kubernetes-operator/${CHART_NAME}-${CHART_VERSION}.tgz oci://${GHCR_REPO}
+          helm push /home/runner/work/documentdb-kubernetes-operator/documentdb-kubernetes-operator/documentdb-operator-${CHART_VERSION}.tgz oci://${GHCR_REPO}
 

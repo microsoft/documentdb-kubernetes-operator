@@ -1,9 +1,6 @@
 name: Copy documentdb-k8s-operator to GHCR
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       source_registry:

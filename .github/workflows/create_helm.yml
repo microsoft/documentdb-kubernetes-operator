@@ -8,7 +8,7 @@ on:
 env:
   CHART_NAME: documentdb-chart
   CHART_VERSION: 0.0.1
-  GHCR_REPO: ghcr.io/${{ github.repository }}/documentdb-chart
+  GHCR_REPO: ghcr.io/${{ github.repository }}
 
 jobs:
   publish:

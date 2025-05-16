@@ -3,7 +3,7 @@ from pprint import pprint
 import ssl
 
 # Connection parameters
-host = "0.0.0.0" // Document DB Public Load Balancer IP
+host = "0.0.0.0" # Document DB Public Load Balancer IP
 port = 10260
 username = "default_user"
 password = "YourDatabasePassword"

@@ -75,12 +75,10 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		// Ensure LoadBalancer has an IP assigned
-		loadBalancerIP, err := util.EnsureLoadBalancerIP(ctx, foundService)
-		if err != nil {
+		if err := util.EnsureLoadBalancerIP(ctx, foundService); err != nil {
 			log.Info("DocumentDB LoadBalancer External IP not assigned, Requeuing.")
 			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 		}
-		log.Info("DocumentDB LoadBalancer IP assigned", "LoadBalancerIP", loadBalancerIP)
 	}
 
 	// Ensure App ServiceAccount, Role and RoleBindings are created

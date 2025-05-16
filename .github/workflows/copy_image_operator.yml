@@ -18,7 +18,7 @@ on:
       source_tag:
         description: 'Source image tag'
         required: true
-        default: 'v13'
+        default: '0.0.224'
       target_tag:
         description: 'Target image tag'
         required: true

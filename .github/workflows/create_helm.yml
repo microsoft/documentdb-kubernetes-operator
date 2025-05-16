@@ -22,7 +22,9 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      packages: read, write, delete
+      packages: read
+      packages: write
+      packages: delete
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

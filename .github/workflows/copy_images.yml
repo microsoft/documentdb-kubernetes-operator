@@ -3,16 +3,24 @@ name: Copy ACR Image to GHCR
 on:
   workflow_dispatch:
     inputs:
-      registry:
+      source_registry:
         description: 'ACR registry name'
         required: true
         default: 'pgcosmoscontroller'
       repo:
-        description: 'Repository name'
+        description: 'Source repository name'
         required: true
         default: 'cnpg-plugin'
-      tag:
-        description: 'Image tag'
+      target_repo:
+        description: 'Target GHCR repository name'
+        required: true
+        default: 'cnpg-plugin'
+      source_tag:
+        description: 'Source image tag'
+        required: true
+        default: 'v13'
+      target_tag:
+        description: 'Target image tag'
         required: true
         default: 'v13'
 
@@ -33,19 +41,19 @@ jobs:
 
       - name: Docker login to ACR
         run: |
-          az acr login --name ${{ github.event.inputs.registry }}
+          az acr login --name ${{ github.event.inputs.source_registry }}
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Pull image from ACR
         run: |
-          docker pull ${{ github.event.inputs.registry }}.azurecr.io/${{ github.event.inputs.repo }}:${{ github.event.inputs.tag }}
+          docker pull ${{ github.event.inputs.source_registry }}.azurecr.io/${{ github.event.inputs.repo }}:${{ github.event.inputs.source_tag }}
 
       - name: Tag image for GHCR
         run: |
-          docker tag ${{ github.event.inputs.registry }}.azurecr.io/${{ github.event.inputs.repo }}:${{ github.event.inputs.tag }} ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.event.inputs.repo }}:${{ github.event.inputs.tag }}
+          docker tag ${{ github.event.inputs.source_registry }}.azurecr.io/${{ github.event.inputs.repo }}:${{ github.event.inputs.source_tag }} ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.event.inputs.target_repo }}:${{ github.event.inputs.target_tag }}
 
       - name: Push image to GHCR
         run: |
-          docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.event.inputs.repo }}:${{ github.event.inputs.tag }}
+          docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.event.inputs.target_repo }}:${{ github.event.inputs.target_tag }}

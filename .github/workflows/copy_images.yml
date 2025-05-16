@@ -1,0 +1,38 @@
+name: Copy ACR Image to GHCR
+
+on:
+  workflow_dispatch:
+
+jobs:
+  copy-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Docker login to ACR
+        run: |
+          az acr login --name pgcosmoscontroller
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Pull image from ACR
+        run: |
+          docker pull pgcosmoscontroller.azurecr.io/cnpg-plugin:v13
+
+      - name: Tag image for GHCR
+        run: |
+          docker tag pgcosmoscontroller.azurecr.io/cnpg-plugin:v13 ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:cnpg-plugin:v13
+
+      - name: Push image to GHCR
+        run: |
+          docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:cnpg-plugin:v13

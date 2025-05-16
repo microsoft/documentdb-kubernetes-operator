@@ -35,5 +35,5 @@ jobs:
 
       - name: Push Helm chart to GHCR
         run: |
-          helm push ${CHART_NAME}-${CHART_VERSION}.tgz oci://${GHCR_REPO}
+          helm push ./documentdb-kubernetes-operator/${CHART_NAME}-${CHART_VERSION}.tgz oci://${GHCR_REPO}
 

@@ -1,13 +1,19 @@
 name: Publish Helm Chart to GHCR
 
 on:
+  workflow_dispatch:
+    inputs:
+      chart_version:
+        description: 'Helm chart version'
+        required: false
+        default: '0.0.1'
   push:
     branches:
       - main
 
 env:
   CHART_NAME: documentdb-chart
-  CHART_VERSION: 0.0.1
+  CHART_VERSION: ${{ github.event.inputs.chart_version || '0.0.1' }}
   GHCR_REPO: ghcr.io/${{ github.repository }}
 
 jobs:

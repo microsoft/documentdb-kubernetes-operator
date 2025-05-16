@@ -1,0 +1,39 @@
+name: Publish Helm Chart to GHCR
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  CHART_NAME: documentdb-chart
+  CHART_VERSION: 0.0.1
+  GHCR_REPO: ghcr.io/${{ github.repository }}/documentdb-chart
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up chart version
+        id: version
+        run: echo "CHART_VERSION=0.0.${{ github.run_number }}" >> $GITHUB_ENV
+
+      - name: Package Helm chart
+        run: |
+          helm package $CHART_NAME --version $CHART_VERSION
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+
+      - name: Push Helm chart to GHCR
+        run: |
+          helm push ${CHART_NAME}-${CHART_VERSION}.tgz oci://${GHCR_REPO}
+

@@ -6,7 +6,7 @@ on:
       - main
 
 env:
-  CHART_NAME: documentdb-chart
+  CHART_NAME: documentdb-operator
   CHART_VERSION: 0.0.1
   GHCR_REPO: ghcr.io/${{ github.repository }}/documentdb-chart
 

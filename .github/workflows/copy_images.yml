@@ -1,4 +1,4 @@
-name: Copy ACR Image to GHCR
+name: Copy documentdb-sidecar-injector to GHCR
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ on:
       target_repo:
         description: 'Target GHCR repository name'
         required: true
-        default: 'cnpg-plugin'
+        default: 'documentdb-sidecar-injector'
       source_tag:
         description: 'Source image tag'
         required: true
@@ -22,7 +22,7 @@ on:
       target_tag:
         description: 'Target image tag'
         required: true
-        default: 'v13'
+        default: 'preview'
 
 jobs:
   copy-image:

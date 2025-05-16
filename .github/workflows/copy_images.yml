@@ -2,6 +2,19 @@ name: Copy ACR Image to GHCR
 
 on:
   workflow_dispatch:
+    inputs:
+      registry:
+        description: 'ACR registry name'
+        required: true
+        default: 'pgcosmoscontroller'
+      repo:
+        description: 'Repository name'
+        required: true
+        default: 'cnpg-plugin'
+      tag:
+        description: 'Image tag'
+        required: true
+        default: 'v13'
 
 jobs:
   copy-image:
@@ -20,19 +33,19 @@ jobs:
 
       - name: Docker login to ACR
         run: |
-          az acr login --name pgcosmoscontroller
+          az acr login --name ${{ github.event.inputs.registry }}
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Pull image from ACR
         run: |
-          docker pull pgcosmoscontroller.azurecr.io/cnpg-plugin:v13
+          docker pull ${{ github.event.inputs.registry }}.azurecr.io/${{ github.event.inputs.repo }}:${{ github.event.inputs.tag }}
 
       - name: Tag image for GHCR
         run: |
-          docker tag pgcosmoscontroller.azurecr.io/cnpg-plugin:v13 ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:cnpg-plugin:v13
+          docker tag ${{ github.event.inputs.registry }}.azurecr.io/${{ github.event.inputs.repo }}:${{ github.event.inputs.tag }} ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.event.inputs.repo }}:${{ github.event.inputs.tag }}
 
       - name: Push image to GHCR
         run: |
-          docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:cnpg-plugin:v13
+          docker push ghcr.io/${{ github.repository_owner }}/${{ github.repository }}:${{ github.event.inputs.repo }}:${{ github.event.inputs.tag }}

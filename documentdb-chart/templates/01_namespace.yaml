@@ -5,12 +5,3 @@ metadata:
   labels:
     app.kubernetes.io/name: {{ include "documentdb-chart.name" . }}
     app.kubernetes.io/managed-by: "Helm"
-
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: {{ .Values.namespace | default .Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: {{ include "documentdb-chart.name" . }}
-    app.kubernetes.io/managed-by: "Helm"

@@ -6,7 +6,7 @@ import ssl
 host = "0.0.0.0" # Document DB Public Load Balancer IP
 port = 10260
 username = "default_user"
-password = "YourDatabasePassword"
+password = "YourDatabasePassword" # Default is Admin100
 auth_db = "admin"  # Default auth source unless otherwise needed
 
 # Connect with TLS and skip cert validation

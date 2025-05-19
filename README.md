@@ -8,10 +8,15 @@ The DocumentDB Kubernetes Operator is an open-source project to run and manage [
 
 ## Prerequisites
 
-- Helm installed
-- kubectl installed
-- Azure CLI installed (if you are using Azure Kubernetes Service (AKS))
-- Install `cert-manager`
+- [Helm](https://helm.sh/docs/intro/install/) installed
+- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/) installed
+- [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli?view=azure-cli-latest) installed (if you are using Azure Kubernetes Service (AKS))
+- Install [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/) for testing.
+
+### One-time installation (Skip if you have already installed)
+
+**1. Install cert-manager:**
+
   ```sh
   helm repo add jetstack https://charts.jetstack.io
   helm repo update
@@ -86,7 +91,7 @@ You shouold see LoadBalancer service `documentdb-service-documentdb-preview` onl
 
 ```yaml
 publicLoadBalancer:
-    enabled: ture
+    enabled: true
 ```
 
 ```sh
@@ -95,7 +100,7 @@ NAME                   READY   STATUS    RESTARTS   AGE
 documentdb-preview-1   2/2     Running   0          26m
 ```
 
-### 5. Test pushing some dummy documents into your DocumentDB
+### 5. Test pushing some example documents into your DocumentDB
 
 We have a test Python script that uses a PyMongo client to push a test document into DocumentDB and read it back. Update the script with the external IP of your `documentdb-service-documentdb-preview` load balancer service and the DocumentDB test-default password `Admin100`.
 
@@ -103,13 +108,13 @@ We have a test Python script that uses a PyMongo client to push a test document 
 python3 scripts/test-scripts/mongo-python-data-pusher.py
 ```
 
-**Note:** If you are not using a public load balancer, you can connect directly to your DocumentDB pod on Gateway port 10260. If you are using Minikube or Kind on your local machine, you need to forward the DocumentDB Gateway port first.
+**Note:** If you are not using a public load balancer, you can connect directly to your DocumentDB pod on Gateway port 10260. If you are using Minikube or Kind or similar software on your local machine, you need to forward the DocumentDB Gateway port first.
 
 ```sh
 kubectl port-forward pod/documentdb-preview-1 10260:10260 -n documentdb-preview-ns
 ```
 
-Then you can connect to the pod using mongosh:
+Then you can connect to the pod using [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/):
 
 ```sh
 mongosh 127.0.0.1:10260 -u default_user -p Admin100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates

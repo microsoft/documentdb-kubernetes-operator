@@ -32,6 +32,7 @@ jobs:
 
       - name: Package Helm chart
         run: |
+          helm dependency update documentdb-chart
           helm package $CHART_NAME --version $CHART_VERSION
 
       - name: Log in to GHCR

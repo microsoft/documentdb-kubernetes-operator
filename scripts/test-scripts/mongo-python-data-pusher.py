@@ -3,7 +3,7 @@ from pprint import pprint
 import ssl
 
 # Connection parameters
-host = "0.0.0.0" # Or use the Document DB Public Load Balancer IP
+host = "127.0.0.1" # Use localhost for local testing or replace with the actual load balancer endpoint
 port = 10260
 username = "default_user"
 password = "Admin100" # Default is Admin100

@@ -49,7 +49,7 @@ https://learn.microsoft.com/en-us/azure/kubernetes-fleet/overview
 Adding an AKS cluster to the fleet is very simple with the Azure portal: 
 https://learn.microsoft.com/en-us/azure/kubernetes-fleet/quickstart-create-fleet-and-members-portal
 
-### Adding on-prem Cluster to Fleet
+### Adding other Cluster to Fleet
 
 See also the guide here: 
 https://github.com/Azure/fleet/blob/main/docs/tutorials/Azure/JoinOnPremClustersToFleet.md
@@ -73,6 +73,8 @@ cd fleet-networking
 ./hack/membership/joinMC.sh v0.14.8 v0.3.8 hub $clusterName
 cd ..
 ```
+
+These commands also will work to add clusters from other cloud providers 
 
 ## Installing Operators and Dependencies
 

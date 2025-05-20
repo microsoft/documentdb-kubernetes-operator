@@ -24,10 +24,12 @@ A clear and concise description of what you expected to happen.
 **Screenshots**
 If applicable, add screenshots to help explain your problem.
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+**Kubernetes Environment (please complete the following information):**
+ - DocumentDB Operator Version [e.g. 123]
+ - Kubernetes Version [e.g. 23]
+ - Kubernetes Environment [e.g. AKS, KIND]
+ - Cert Bot Version [e.g. 123]
+ - CNPG Version (if not installed by our helm chart) [e.g. 123] 
 
 **Additional context**
 Add any other context about the problem here.

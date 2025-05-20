@@ -1,8 +1,10 @@
 # Multi-Cloud DocumentDB Deployment Guide
 
 This guide provides step-by-step instructions for setting up a multi-cloud
-deployment of DocumentDB using Kubernetes Fleet to manage clusters across
+deployment of DocumentDB using KubeFleet to manage clusters across
 clouds. This setup enables high availability and disaster recovery.
+We assume the use of an AKS cluster and an on-prem Kubernetes cluster
+that have network access to one another.
 
 ## Table of Contents
 
@@ -18,15 +20,17 @@ clouds. This setup enables high availability and disaster recovery.
 
 ## Prerequisites
 
+- Azure account
 - Azure CLI installed and configured with appropriate permissions
 - kubectl installed
 - helm installed
 - Git client
-- SSH client (for K3s setup)
+- `kazure` alias like `alias kazure="kubectl --kubeconfig=/path/to/azure-kubeconfig"`
+- The same for `konprem`
 
 ## Architecture Overview
 
-This multi-cloud deployment uses Kubernetes Fleet to manage DocumentDB instances across different cloud providers:
+This multi-cloud deployment uses KubeFleet to manage DocumentDB instances across different cloud providers:
 
 - **Hub Cluster**: Central control plane for managing all member clusters
 - **Member Clusters**: Clusters in different cloud environments (Azure, On-prem)
@@ -93,7 +97,7 @@ kazure apply -f https://github.com/cert-manager/cert-manager/releases/download/v
 konprem apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.1/cert-manager.yaml
 ```
 
-3. Install sidecar injector
+3. Install sidecar injector on the hub:
 ```bash
 cat <<EOF > sidecar-injector.yaml
 apiVersion: v1
@@ -350,9 +354,37 @@ Physical replication provides high availability and disaster recovery capabiliti
 1. Create configuration maps to identify clusters:
 
 ```bash
-kube-replica create configmap cluster-name -n kube-system --from-literal=name=replica-cluster
-kube-primary create configmap cluster-name -n kube-system --from-literal=name=primary-cluster
+konprem create configmap cluster-name -n kube-system --from-literal=name=replica-cluster
+kazure create configmap cluster-name -n kube-system --from-literal=name=primary-cluster
 ```
+
+OR
+
+```bash
+cat <<EOF > primary-name.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-name
+  namespace: kube-system
+data:
+  name: "primary-cluster"
+EOF
+
+cat <<EOF > replica-name.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-name
+  namespace: kube-system
+data:
+  name: "replica-cluster"
+EOF
+
+kazure apply -f ./primary-name.yaml
+konprem apply -f ./replica-name.yaml
+```
+
 
 2. Apply the DocumentDB resource configuration:
 

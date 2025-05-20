@@ -400,5 +400,9 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 
+# Helm chart dependencies and lock file
+charts/
+Chart.lock
+
 # Test output
 *.out

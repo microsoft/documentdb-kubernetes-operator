@@ -9,26 +9,49 @@ import (
 
 // DocumentDBSpec defines the desired state of DocumentDB.
 type DocumentDBSpec struct {
+	// NodeCount is the number of nodes in the DocumentDB cluster. Must be 1.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=1
 	NodeCount int `json:"nodeCount"`
+
+	// InstancesPerNode is the number of DocumentDB instances per node. Must be 1.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=1
-	InstancesPerNode    int                  `json:"instancesPerNode"`
-	Resource            Resource             `json:"resource"`
-	DocumentDBImage     string               `json:"documentDBImage"`
-	PhysicalReplication *PhysicalReplication `json:"physicalReplication,omitempty"`
-	CNPGSidecarPlugin   string               `json:"cnpgSidecarPlugin,omitempty"`
+	InstancesPerNode int `json:"instancesPerNode"`
+
+	// Resource specifies the storage resources for DocumentDB.
+	Resource Resource `json:"resource"`
+
+	// DocumentDBImage is the container image to use for DocumentDB.
+	DocumentDBImage string `json:"documentDBImage"`
+
+	// ClusterReplication configures cross-cluster replication for DocumentDB.
+	ClusterReplication *ClusterReplication `json:"clusterReplication,omitempty"`
+
+	// SidecarInjectorPluginName is the name of the sidecar injector plugin to use.
+	SidecarInjectorPluginName string `json:"sidecarInjectorPluginName,omitempty"`
+
+	// PublicLoadBalancer configures the public load balancer for DocumentDB.
+	PublicLoadBalancer PublicLoadBalancer `json:"publicLoadBalancer,omitempty"`
 }
 
 type Resource struct {
+	// PvcSize is the size of the persistent volume claim for DocumentDB storage (e.g., "10Gi").
 	PvcSize string `json:"pvcSize"`
 }
 
 type PhysicalReplication struct {
+  // FleetEnabled determines whether to use KubeFleet mechanics for the replication
 	FleetEnabled bool     `json:"fleetEnabled,omitempty"`
+  // Primary is the name of the primary cluster for replication.
 	Primary      string   `json:"primary"`
+  // ClusterList is the list of clusters participating in replication.
 	ClusterList  []string `json:"clusterList"`
+}
+
+type PublicLoadBalancer struct {
+	// Enabled determines whether a public load balancer is created for DocumentDB.
+	Enabled bool `json:"enabled"`
 }
 
 // DocumentDBStatus defines the observed state of DocumentDB.

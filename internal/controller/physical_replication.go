@@ -11,9 +11,9 @@ import (
 	"slices"
 	"time"
 
-	dbpreview "github.com/azure/documentdb-operator/api/preview"
-	util "github.com/azure/documentdb-operator/internal/utils"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
+	util "github.com/microsoft/documentdb-operator/internal/utils"
 	fleetv1alpha1 "go.goms.io/fleet-networking/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -28,7 +28,7 @@ func (r *DocumentDBReconciler) AddPhysicalReplicationToClusterSpec(
 	documentdb dbpreview.DocumentDB,
 	cnpgCluster *cnpgv1.Cluster,
 ) error {
-	if documentdb.Spec.PhysicalReplication == nil {
+	if documentdb.Spec.ClusterReplication == nil {
 		return nil
 	}
 
@@ -45,7 +45,7 @@ func (r *DocumentDBReconciler) AddPhysicalReplicationToClusterSpec(
 	}
 
 	// No more errors possible, so we can edit the spec
-	isPrimary := documentdb.Spec.PhysicalReplication.Primary == self
+	isPrimary := documentdb.Spec.ClusterReplication.Primary == self
 
 	cnpgCluster.Name = self
 
@@ -53,7 +53,7 @@ func (r *DocumentDBReconciler) AddPhysicalReplicationToClusterSpec(
 		cnpgCluster.Spec.InheritedMetadata.Labels[util.LABEL_REPLICATION_CLUSTER_TYPE] = "replica"
 		cnpgCluster.Spec.Bootstrap = &cnpgv1.BootstrapConfiguration{
 			PgBaseBackup: &cnpgv1.BootstrapPgBaseBackup{
-				Source:   documentdb.Spec.PhysicalReplication.Primary,
+				Source:   documentdb.Spec.ClusterReplication.Primary,
 				Database: "postgres",
 				Owner:    "postgres",
 			},
@@ -62,7 +62,7 @@ func (r *DocumentDBReconciler) AddPhysicalReplicationToClusterSpec(
 
 	cnpgCluster.Spec.ReplicaCluster = &cnpgv1.ReplicaClusterConfiguration{
 		Source:  source,
-		Primary: documentdb.Spec.PhysicalReplication.Primary,
+		Primary: documentdb.Spec.ClusterReplication.Primary,
 		Self:    self,
 	}
 
@@ -114,8 +114,8 @@ func (r *DocumentDBReconciler) GetSelfAndSource(ctx context.Context, documentdb 
 	}
 
 	// Set the source to be the first cluster in the list that isn't self
-	source := documentdb.Spec.PhysicalReplication.ClusterList[0]
-	for _, c := range documentdb.Spec.PhysicalReplication.ClusterList {
+	source := documentdb.Spec.ClusterReplication.ClusterList[0]
+	for _, c := range documentdb.Spec.ClusterReplication.ClusterList {
 		if c != self {
 			source = c
 			break
@@ -213,7 +213,7 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 		// Replica => primary
 		// Look for the token
 		oldPrimaryAvailable := slices.Contains(
-			documentdb.Spec.PhysicalReplication.ClusterList,
+			documentdb.Spec.ClusterReplication.ClusterList,
 			current.Spec.ReplicaCluster.Primary)
 
 		// If the old primary is available, we can read the token from it

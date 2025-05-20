@@ -39,39 +39,65 @@ spec:
           spec:
             description: DocumentDBSpec defines the desired state of DocumentDB.
             properties:
-              cnpgSidecarPlugin:
-                type: string
-              documentDBImage:
-                type: string
-              instancesPerNode:
-                maximum: 1
-                minimum: 1
-                type: integer
-              nodeCount:
-                maximum: 1
-                minimum: 1
-                type: integer
-              physicalReplication:
+              clusterReplication:
+                description: ClusterReplication configures cross-cluster replication
+                  for DocumentDB.
                 properties:
                   clusterList:
+                    description: ClusterList is the list of clusters participating
+                      in replication.
                     items:
                       type: string
                     type: array
                   fleetEnabled:
                     type: boolean
                   primary:
+                    description: Primary is the name of the primary cluster for replication.
                     type: string
                 required:
                 - clusterList
                 - primary
                 type: object
+              documentDBImage:
+                description: DocumentDBImage is the container image to use for DocumentDB.
+                type: string
+              instancesPerNode:
+                description: InstancesPerNode is the number of DocumentDB instances
+                  per node. Must be 1.
+                maximum: 1
+                minimum: 1
+                type: integer
+              nodeCount:
+                description: NodeCount is the number of nodes in the DocumentDB cluster.
+                  Must be 1.
+                maximum: 1
+                minimum: 1
+                type: integer
+              publicLoadBalancer:
+                description: PublicLoadBalancer configures the public load balancer
+                  for DocumentDB.
+                properties:
+                  enabled:
+                    description: Enabled determines whether a public load balancer
+                      is created for DocumentDB.
+                    type: boolean
+                required:
+                - enabled
+                type: object
               resource:
+                description: Resource specifies the storage resources for DocumentDB.
                 properties:
                   pvcSize:
+                    description: PvcSize is the size of the persistent volume claim
+                      for DocumentDB storage (e.g., "10Gi").
                     type: string
                 required:
                 - pvcSize
                 type: object
+              sidecarInjectorPluginName:
+                description: SidecarInjectorPluginName is the name of the sidecar
+                  injector plugin to use.
+                type: string
             required:
             - documentDBImage
             - instancesPerNode

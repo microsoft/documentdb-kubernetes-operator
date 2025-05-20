@@ -12,7 +12,7 @@ const (
 	DOCUMENTDB_SIDECAR_IMAGE_ENV  = "DOCUMENTDB_SIDECAR_IMAGE"
 	ENABLE_SCALING_CONTROLLER_ENV = "ENABLE_SCALING_CONTROLLER"
 
-	DEFAULT_DOCUMENTDB_IMAGE = "ghcr.io/cloudnative-pg/postgresql:16"
+	DEFAULT_DOCUMENTDB_IMAGE = "ghcr.io/microsoft/documentdb/documentdb-local:16"
 
 	LABEL_APP                      = "app"
 	LABEL_REPLICA_TYPE             = "replica_type"
@@ -24,5 +24,5 @@ const (
 
 	LOADBALANCER_PREFIX = "documentdb-service-"
 
-	DEFAULT_CNPG_SIDECAR_PLUGIN = "cnpg-i-hello-world.cloudnative-pg.io"
+	DEFAULT_SIDECAR_INJECTOR_PLUGIN = "cnpg-i-hello-world.cloudnative-pg.io"
 )

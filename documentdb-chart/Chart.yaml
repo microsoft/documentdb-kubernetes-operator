@@ -3,3 +3,7 @@ name: documentdb-operator
 version: 0.1.0
 description: A Helm chart for deploying the DocumentDB operator
 appVersion: "1.0.0"
+dependencies:
+  - name: cloudnative-pg
+    version: "0.23.2"
+    repository: "https://cloudnative-pg.github.io/charts/"

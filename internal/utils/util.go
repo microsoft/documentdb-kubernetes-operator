@@ -56,15 +56,15 @@ func GetDocumentDBLoadBalancerDefinition(documentdb *dbpreview.DocumentDB, names
 }
 
 // EnsureLoadBalancerIP ensures that the LoadBalancer has an IP assigned
-func EnsureLoadBalancerIP(ctx context.Context, service *corev1.Service) (string, error) {
+func EnsureLoadBalancerIP(ctx context.Context, service *corev1.Service) error {
 	retries := 5
 	for i := 0; i < retries; i++ {
 		if len(service.Status.LoadBalancer.Ingress) > 0 && service.Status.LoadBalancer.Ingress[0].IP != "" {
-			return service.Status.LoadBalancer.Ingress[0].IP, nil
+			return nil
 		}
 		time.Sleep(time.Second * 10)
 	}
-	return "", fmt.Errorf("LoadBalancer IP not assigned after two retries")
+	return fmt.Errorf("LoadBalancer IP not assigned after two retries")
 }
 
 // GetOrCreateService checks if the Service already exists, and creates it if not.

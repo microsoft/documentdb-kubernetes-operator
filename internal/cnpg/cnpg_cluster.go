@@ -30,7 +30,7 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 				StorageClass: nil,
 				Size:         documentdb.Spec.Resource.PvcSize,
 			},
-			InheritedMetadata: GetInheritedMetadataLabels(documentdb),
+			InheritedMetadata: getInheritedMetadataLabels(documentdb),
 			Plugins: []cnpgv1.PluginConfiguration{
 				{
 					Name: sidecarPluginName,
@@ -39,8 +39,7 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 			PostgresUID: 105,
 			PostgresGID: 108,
 			PostgresConfiguration: cnpgv1.PostgresConfiguration{
-				AdditionalLibraries: []string{
-					"citus", "pg_cron", "pg_documentdb_core", "pg_documentdb"},
+				AdditionalLibraries: []string{"pg_cron", "pg_documentdb_core", "pg_documentdb"},
 				Parameters: map[string]string{
 					"cron.database_name":    "postgres",
 					"max_replication_slots": "10",
@@ -52,12 +51,12 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 					"host replication all all trust",
 				},
 			},
-			Bootstrap: GetBootstrapConfiguration(documentdb),
+			Bootstrap: getBootstrapConfiguration(documentdb),
 		},
 	}
 }
 
-func GetInheritedMetadataLabels(documentdb dbpreview.DocumentDB) *cnpgv1.EmbeddedObjectMetadata {
+func getInheritedMetadataLabels(documentdb dbpreview.DocumentDB) *cnpgv1.EmbeddedObjectMetadata {
 	return &cnpgv1.EmbeddedObjectMetadata{
 		Labels: map[string]string{
 			util.LABEL_APP:          documentdb.Name,
@@ -66,7 +65,7 @@ func GetInheritedMetadataLabels(documentdb dbpreview.DocumentDB) *cnpgv1.Embedde
 	}
 }
 
-func GetBootstrapConfiguration(documentdb dbpreview.DocumentDB) *cnpgv1.BootstrapConfiguration {
+func getBootstrapConfiguration(documentdb dbpreview.DocumentDB) *cnpgv1.BootstrapConfiguration {
 	return &cnpgv1.BootstrapConfiguration{
 		InitDB: &cnpgv1.BootstrapInitDB{
 			PostInitSQL: []string{

@@ -54,10 +54,11 @@ type PublicLoadBalancer struct {
 
 // DocumentDBStatus defines the observed state of DocumentDB.
 type DocumentDBStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Status reflects the status field from the underlying CNPG Cluster.
+	Status string `json:"status,omitempty"`
 }
 
+// +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.status",description="CNPG Cluster Status"
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 

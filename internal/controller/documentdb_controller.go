@@ -121,6 +121,17 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if requeueTime > 0 {
 		return ctrl.Result{RequeueAfter: requeueTime}, nil
 	}
+
+	// Update DocumentDB status with CNPG Cluster status
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: desiredCnpgCluster.Name, Namespace: req.Namespace}, currentCnpgCluster); err == nil {
+		if currentCnpgCluster.Status.Phase != "" {
+			documentdb.Status.Status = currentCnpgCluster.Status.Phase
+			if err := r.Status().Update(ctx, documentdb); err != nil {
+				log.Error(err, "Failed to update DocumentDB status with CNPG Cluster status")
+			}
+		}
+	}
+
 	return ctrl.Result{RequeueAfter: RequeueAfterLong}, nil
 }
 

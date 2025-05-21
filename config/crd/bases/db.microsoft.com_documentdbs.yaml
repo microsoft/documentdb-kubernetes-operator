@@ -14,7 +14,12 @@ spec:
     singular: documentdb
   scope: Namespaced
   versions:
-  - name: preview
+  - additionalPrinterColumns:
+    - description: CNPG Cluster Status
+      jsonPath: .status.status
+      name: Status
+      type: string
+    name: preview
     schema:
       openAPIV3Schema:
         description: DocumentDB is the Schema for the documentdbs API.
@@ -104,6 +109,11 @@ spec:
             type: object
           status:
             description: DocumentDBStatus defines the observed state of DocumentDB.
+            properties:
+              status:
+                description: Status reflects the status field from the underlying
+                  CNPG Cluster.
+                type: string
             type: object
         type: object
     served: true

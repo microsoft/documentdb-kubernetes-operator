@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/managed-by: "Helm"
 rules:
 - apiGroups: ["db.microsoft.com"] # documentdb.microsoft.com permissions
-  resources: ["documentdb", "documentdb/status", "documentdb/finalizers", "documentdbs"]
+  resources: ["documentdbs", "documentdbs/status", "documentdbs/finalizers"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 - apiGroups: ["apps"]
   resources: ["statefulsets", "deployments"]

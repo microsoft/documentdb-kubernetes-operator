@@ -33,6 +33,8 @@ type DocumentDBSpec struct {
 
 	// PublicLoadBalancer configures the public load balancer for DocumentDB.
 	PublicLoadBalancer PublicLoadBalancer `json:"publicLoadBalancer,omitempty"`
+
+	Timeouts Timeouts `json:"timeouts,omitempty"`
 }
 
 type Resource struct {
@@ -50,6 +52,12 @@ type ClusterReplication struct {
 type PublicLoadBalancer struct {
 	// Enabled determines whether a public load balancer is created for DocumentDB.
 	Enabled bool `json:"enabled"`
+}
+
+type Timeouts struct {
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1800
+	StopDelay int32 `json:"stopDelay,omitempty"`
 }
 
 // DocumentDBStatus defines the observed state of DocumentDB.

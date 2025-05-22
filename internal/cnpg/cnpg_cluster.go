@@ -23,36 +23,40 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 			Name:      req.Name,
 			Namespace: req.Namespace,
 		},
-		Spec: cnpgv1.ClusterSpec{
-			Instances: documentdb.Spec.InstancesPerNode,
-			ImageName: documentdb_image,
-			StorageConfiguration: cnpgv1.StorageConfiguration{
-				StorageClass: nil,
-				Size:         documentdb.Spec.Resource.PvcSize,
-			},
-			InheritedMetadata: getInheritedMetadataLabels(documentdb),
-			Plugins: []cnpgv1.PluginConfiguration{
-				{
-					Name: sidecarPluginName,
+		Spec: func() cnpgv1.ClusterSpec {
+			spec := cnpgv1.ClusterSpec{
+				Instances: documentdb.Spec.InstancesPerNode,
+				ImageName: documentdb_image,
+				StorageConfiguration: cnpgv1.StorageConfiguration{
+					StorageClass: nil,
+					Size:         documentdb.Spec.Resource.PvcSize,
 				},
-			},
-			PostgresUID: 105,
-			PostgresGID: 108,
-			PostgresConfiguration: cnpgv1.PostgresConfiguration{
-				AdditionalLibraries: []string{"pg_cron", "pg_documentdb_core", "pg_documentdb"},
-				Parameters: map[string]string{
-					"cron.database_name":    "postgres",
-					"max_replication_slots": "10",
-					"max_wal_senders":       "10",
+				InheritedMetadata: getInheritedMetadataLabels(documentdb),
+				Plugins: []cnpgv1.PluginConfiguration{
+					{
+						Name: sidecarPluginName,
+					},
 				},
-				PgHBA: []string{
-					"host all all 0.0.0.0/0 trust",
-					"host all all ::0/0 trust",
-					"host replication all all trust",
+				PostgresUID: 105,
+				PostgresGID: 108,
+				PostgresConfiguration: cnpgv1.PostgresConfiguration{
+					AdditionalLibraries: []string{"pg_cron", "pg_documentdb_core", "pg_documentdb"},
+					Parameters: map[string]string{
+						"cron.database_name":    "postgres",
+						"max_replication_slots": "10",
+						"max_wal_senders":       "10",
+					},
+					PgHBA: []string{
+						"host all all 0.0.0.0/0 trust",
+						"host all all ::0/0 trust",
+						"host replication all all trust",
+					},
 				},
-			},
-			Bootstrap: getBootstrapConfiguration(documentdb),
-		},
+				Bootstrap: getBootstrapConfiguration(documentdb),
+			}
+			spec.MaxStopDelay = getMaxStopDelayOrDefault(documentdb)
+			return spec
+		}(),
 	}
 }
 
@@ -75,4 +79,12 @@ func getBootstrapConfiguration(documentdb dbpreview.DocumentDB) *cnpgv1.Bootstra
 			},
 		},
 	}
+}
+
+// getMaxStopDelayOrDefault returns StopDelay if set, otherwise util.CNPG_DEFAULT_STOP_DELAY
+func getMaxStopDelayOrDefault(documentdb dbpreview.DocumentDB) int32 {
+	if documentdb.Spec.Timeouts.StopDelay != 0 {
+		return documentdb.Spec.Timeouts.StopDelay
+	}
+	return util.CNPG_DEFAULT_STOP_DELAY
 }

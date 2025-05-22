@@ -25,4 +25,6 @@ const (
 	LOADBALANCER_PREFIX = "documentdb-service-"
 
 	DEFAULT_SIDECAR_INJECTOR_PLUGIN = "cnpg-i-hello-world.cloudnative-pg.io"
+
+	CNPG_DEFAULT_STOP_DELAY = 30
 )

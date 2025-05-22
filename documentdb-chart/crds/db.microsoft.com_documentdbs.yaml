@@ -101,6 +101,14 @@ spec:
                 description: SidecarInjectorPluginName is the name of the sidecar
                   injector plugin to use.
                 type: string
+              timeouts:
+                properties:
+                  stopDelay:
+                    format: int32
+                    maximum: 1800
+                    minimum: 0
+                    type: integer
+                type: object
             required:
             - documentDBImage
             - instancesPerNode

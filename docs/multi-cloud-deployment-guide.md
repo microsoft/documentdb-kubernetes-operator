@@ -40,7 +40,7 @@ This multi-cloud deployment uses KubeFleet to manage DocumentDB instances across
 ## Setting Up the Hub Cluster
 
 The hub cluster serves as the central controller for managing the member clusters, find setup instructions here:
-https://learn.microsoft.com/en-us/azure/kubernetes-fleet/overview
+https://learn.microsoft.com/en-us/azure/kubernetes-fleet/quickstart-create-fleet-and-members?tabs=without-hub-cluster
 
 ## Adding Clusters to Fleet
 
@@ -78,108 +78,27 @@ These commands also will work to add clusters from other cloud providers
 
 ## Installing Operators and Dependencies
 
-1. Create necessary namespaces on the hub cluster:
+1. Install cert-manager on each cluster:
 
 ```bash
-kubectl create namespace cnpg-system || true
+# Install on primary
+helm --kubeconfig /primary/kubeconfig/ repo add jetstack https://charts.jetstack.io
+helm --kubeconfig /primary/kubeconfig/ repo update
+helm --kubeconfig /primary/kubeconfig/ install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
+
+# Install on replica
+helm --kubeconfig /replica/kubeconfig/ repo add jetstack https://charts.jetstack.io
+helm --kubeconfig /replica/kubeconfig/ repo update
+helm --kubeconfig /replica/kubeconfig/ install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
 ```
 
-2. Install CloudNativePG operator on the hub cluster:
+2. Install the DocumentDB operator on the hub:
 
 ```bash
-helm repo add cnpg https://cloudnative-pg.github.io/charts
-helm repo update
-helm install cnpg-operator cnpg/cloudnative-pg --namespace cnpg-system --wait
+helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator --version 0.0.1 --namespace documentdb-operator --create-namespace
 ```
 
-3. Install cert-manager on each cluster:
-
-```bash
-kazure apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.1/cert-manager.yaml
-konprem apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.1/cert-manager.yaml
-```
-
-3. Install sidecar injector on the hub:
-```bash
-cat <<EOF > sidecar-injector.yaml
-apiVersion: v1
-kind: Service
-metadata:
-  annotations:
-    cnpg.io/pluginClientSecret: helloworld-client-tls
-    cnpg.io/pluginPort: "9090"
-    cnpg.io/pluginServerSecret: helloworld-server-tls
-  labels:
-    app: hello-world
-    cnpg.io/pluginName: cnpg-i-hello-world.cloudnative-pg.io
-  name: hello-world
-  namespace: cnpg-system
-spec:
-  ports:
-  - port: 9090
-    protocol: TCP
-    targetPort: 9090
-  selector:
-    app: hello-world
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  labels:
-    app: hello-world
-  name: hello-world
-  namespace: cnpg-system
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: hello-world
-  strategy: {}
-  template:
-    metadata:
-      creationTimestamp: null
-      labels:
-        app: hello-world
-    spec:
-      containers:
-      - args:
-        - plugin
-        - --server-cert=/server/tls.crt
-        - --server-key=/server/tls.key
-        - --client-cert=/client/tls.crt
-        - --server-address=:9090
-        image: pgcosmoscontroller.azurecr.io/cnpg-plugin:v15
-        name: cnpg-i-hello-world
-        ports:
-        - containerPort: 9090
-          protocol: TCP
-        resources: {}
-        volumeMounts:
-        - mountPath: /server
-          name: server
-        - mountPath: /client
-          name: client
-      volumes:
-      - name: server
-        secret:
-          secretName: helloworld-server-tls
-      - name: client
-        secret:
-          secretName: helloworld-client-tls
-EOF
-
-kubectl apply -f sidecar-injector.yaml
-```
-
-4. Install the DocumentDB operator on the hub:
-
-```bash
-VERSION=36  # Replace with your current version
-helm package documentdb-chart --version 0.0.${VERSION}
-helm install documentdb-operator ./documentdb-operator-0.0.${VERSION}.tgz --namespace documentdb-operator-ns 
-```
-
-5. Deploy certificates on each cluster:
+3. Deploy certificates on each cluster:
 
 ```bash
 cat <<EOF > certs.yaml
@@ -187,9 +106,7 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: cnpg-system
-
 ---
-
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -251,10 +168,6 @@ metadata:
   name: documentdb-base
 spec:
   resourceSelectors:
-    - group: ""
-      version: v1
-      kind: Namespace
-      name: documentdb-operator-ns
     - group: ""
       version: v1
       kind: Namespace
@@ -407,10 +320,10 @@ metadata:
 spec:
   nodeCount: 1
   instancesPerNode: 1
-  documentDBImage: <IMAGE LOCATION>
+  documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   resource:
     pvcSize: 10Gi
-  physicalReplication:
+  clusterReplication:
     fleetEnabled: true
     primary: primary-cluster
     clusterList:
@@ -444,8 +357,8 @@ kubectl apply -f ./documentdb-resource.yaml
 ```bash
 kubectl patch documentdb documentdb-preview -n documentdb-preview-ns \
   --type='json' -p='[
-  {"op": "replace", "path": "/spec/physicalReplication/primary", "value":"replica-cluster"},
-  {"op": "replace", "path": "/spec/physicalReplication/clusterList", "value":["replica-cluster"]}
+  {"op": "replace", "path": "/spec/clusterReplication/primary", "value":"replica-cluster"},
+  {"op": "replace", "path": "/spec/clusterReplication/clusterList", "value":["replica-cluster"]}
   ]'
 ```
 
@@ -454,8 +367,8 @@ kubectl patch documentdb documentdb-preview -n documentdb-preview-ns \
 1. Test connection to DocumentDB:
 
 ```bash
-# Get the service IP
-service_ip=$(kubectl get service documentdb-service-documentdb-preview -n documentdb-preview-ns -o jsonpath="{.status.loadBalancer.ingress[0].ip}")
+# Get the service IP from primary (azure)
+service_ip=$(kazure get service documentdb-service-documentdb-preview -n documentdb-preview-ns -o jsonpath="{.status.loadBalancer.ingress[0].ip}")
 
 # Connect using mongosh
 mongosh $service_ip:10260 -u default_user -p Admin100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates
@@ -479,8 +392,8 @@ To initiate a failover from the primary to a replica cluster:
 ```bash
 kubectl patch documentdb documentdb-preview -n documentdb-preview-ns \
   --type='json' -p='[
-  {"op": "replace", "path": "/spec/physicalReplication/primary", "value":"replica-cluster"},
-  {"op": "replace", "path": "/spec/physicalReplication/clusterList", "value":["replica-cluster"]}
+  {"op": "replace", "path": "/spec/clusterReplication/primary", "value":"replica-cluster"},
+  {"op": "replace", "path": "/spec/clusterReplication/clusterList", "value":["replica-cluster"]}
   ]'
 ```
 

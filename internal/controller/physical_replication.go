@@ -23,7 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func (r *DocumentDBReconciler) AddPhysicalReplicationToClusterSpec(
+func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 	ctx context.Context,
 	documentdb dbpreview.DocumentDB,
 	cnpgCluster *cnpgv1.Cluster,
@@ -37,7 +37,7 @@ func (r *DocumentDBReconciler) AddPhysicalReplicationToClusterSpec(
 		return err
 	}
 
-	if documentdb.Spec.PhysicalReplication.FleetEnabled {
+	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
 		err = r.CreateServiceImportAndExport(ctx, source, self, documentdb)
 		if err != nil {
 			return err
@@ -67,7 +67,7 @@ func (r *DocumentDBReconciler) AddPhysicalReplicationToClusterSpec(
 	}
 
 	sourceHost := source + "-rw." + documentdb.Namespace + ".svc"
-	if documentdb.Spec.PhysicalReplication.FleetEnabled {
+	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
 		sourceHost = documentdb.Namespace + "-" + source + "-rw.fleet-system.svc"
 	}
 	selfHost := documentdb.Name + "-rw." + documentdb.Namespace + ".svc"
@@ -100,7 +100,7 @@ func (r *DocumentDBReconciler) GetSelfAndSource(ctx context.Context, documentdb 
 
 	self := documentdb.Name
 
-	if documentdb.Spec.PhysicalReplication.FleetEnabled {
+	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
 		clusterNameConfigMap := &corev1.ConfigMap{}
 		err := r.Get(ctx, types.NamespacedName{Name: clusterMapName, Namespace: "kube-system"}, clusterNameConfigMap)
 		if err != nil {
@@ -205,7 +205,7 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 		}
 
 		// push out the  promotion token
-		err = r.CreateTokenService(ctx, current.Status.DemotionToken, documentdb.Namespace, documentdb.Spec.PhysicalReplication.FleetEnabled)
+		err = r.CreateTokenService(ctx, current.Status.DemotionToken, documentdb.Namespace, documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud)
 		if err != nil {
 			return err, time.Second * 10
 		}
@@ -218,7 +218,7 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 
 		// If the old primary is available, we can read the token from it
 		if oldPrimaryAvailable {
-			token, err, refreshTime := r.ReadToken(ctx, documentdb.Namespace, documentdb.Spec.PhysicalReplication.FleetEnabled)
+			token, err, refreshTime := r.ReadToken(ctx, documentdb.Namespace, documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud)
 			if err != nil || refreshTime > 0 {
 				return err, refreshTime
 			}

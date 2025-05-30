@@ -89,8 +89,6 @@ helm install cert-manager jetstack/cert-manager --namespace cert-manager --creat
 
 # Install on replica
 kubectl config use-context $ON_PREM_MEMBER
-helm repo add jetstack https://charts.jetstack.io
-helm repo update
 helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
 ```
 
@@ -100,6 +98,8 @@ helm install cert-manager jetstack/cert-manager --namespace cert-manager --creat
 kubectl config use-context hub
 helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator --version 0.0.1 --namespace documentdb-operator --create-namespace
 ```
+
+NOTE: this will print errors regarding Certificates and Issuers, that's fine for now, we'll manually install those in the next step individually
 
 3. Deploy certificates on each cluster:
 
@@ -263,6 +263,10 @@ spec:
       version: v1
       kind: ClusterRole
       name: cnpg-operator-cloudnative-pg-edit
+  policy:
+    placementType: PickAll
+  strategy:
+    type: RollingUpdate
 EOF
 
 kubectl config use-context hub

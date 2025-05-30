@@ -96,7 +96,7 @@ helm install cert-manager jetstack/cert-manager --namespace cert-manager --creat
 
 ```bash
 kubectl config use-context hub
-helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator --version 0.0.1 --namespace documentdb-operator --create-namespace
+helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator --version 0.0.111 --namespace documentdb-operator --create-namespace
 ```
 
 NOTE: this will print errors regarding Certificates and Issuers, that's fine for now, we'll manually install those in the next step individually

@@ -96,7 +96,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	currentCnpgCluster := &cnpgv1.Cluster{}
 	desiredCnpgCluster := cnpg.GetCnpgClusterSpec(req, *documentdb, documentdbImage, documentdb.Name, log)
 
-	err = r.AddClusterReplicationToClusterSpec(ctx, *documentdb, desiredCnpgCluster)
+	err = r.AddPhysicalReplicationToClusterSpec(ctx, *documentdb, desiredCnpgCluster)
 	if err != nil {
 		log.Error(err, "Failed to add physical replication features cnpg Cluster spec; Proceeding as single cluster.")
 		return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil

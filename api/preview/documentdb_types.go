@@ -41,8 +41,6 @@ type Resource struct {
 }
 
 type ClusterReplication struct {
-	// EnableFleetForCrossCloud determines whether to use KubeFleet mechanics for the replication
-	EnableFleetForCrossCloud bool `json:"enableFleetForCrossCloud,omitempty"`
 	// Primary is the name of the primary cluster for replication.
 	Primary string `json:"primary"`
 	// ClusterList is the list of clusters participating in replication.

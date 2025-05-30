@@ -49,10 +49,6 @@ spec:
                     items:
                       type: string
                     type: array
-                  enableFleetForCrossCloud:
-                    description: EnableFleetForCrossCloud determines whether to use
-                      KubeFleet mechanics for the replication
-                    type: boolean
                   primary:
                     description: Primary is the name of the primary cluster for replication.
                     type: string

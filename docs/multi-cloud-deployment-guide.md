@@ -25,8 +25,8 @@ that have network access to one another.
 - kubectl installed
 - helm installed
 - Git client
-- `kazure` alias like `alias kazure="kubectl --kubeconfig=/path/to/azure-kubeconfig"`
-- The same for `konprem`
+- Two kubernetes clusters that are network connected to each other
+- ENV variables `$AZURE_MEMBER` and `$ON_PREM_MEMBER` with the kubectl context names for your clusters
 
 ## Architecture Overview
 
@@ -82,19 +82,22 @@ These commands also will work to add clusters from other cloud providers
 
 ```bash
 # Install on primary
-helm --kubeconfig /primary/kubeconfig/ repo add jetstack https://charts.jetstack.io
-helm --kubeconfig /primary/kubeconfig/ repo update
-helm --kubeconfig /primary/kubeconfig/ install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
+kubectl config use-context $AZURE_MEMBER
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
 
 # Install on replica
-helm --kubeconfig /replica/kubeconfig/ repo add jetstack https://charts.jetstack.io
-helm --kubeconfig /replica/kubeconfig/ repo update
-helm --kubeconfig /replica/kubeconfig/ install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
+kubectl config use-context $ON_PREM_MEMBER
+helm repo add jetstack https://charts.jetstack.io
+helm repo update
+helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
 ```
 
 2. Install the DocumentDB operator on the hub:
 
 ```bash
+kubectl config use-context hub
 helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator --version 0.0.1 --namespace documentdb-operator --create-namespace
 ```
 
@@ -154,8 +157,11 @@ spec:
   selfSigned: {}
 EOF
 
-kazure apply -f certs.yaml
-konprem apply -f certs.yaml
+
+kubectl config use-context $AZURE_MEMBER
+kubectl apply -f certs.yaml
+kubectl config use-context $ON_PREM_MEMBER
+kubectl apply -f certs.yaml
 ```
 
 ## Deploying DocumentDB Operator to fleet
@@ -259,6 +265,7 @@ spec:
       name: cnpg-operator-cloudnative-pg-edit
 EOF
 
+kubectl config use-context hub
 kubectl apply -f ./documentdb-base.yaml
 ```
 
@@ -269,8 +276,10 @@ Physical replication provides high availability and disaster recovery capabiliti
 1. Create configuration maps to identify clusters:
 
 ```bash
-konprem create configmap cluster-name -n kube-system --from-literal=name=replica-cluster
-kazure create configmap cluster-name -n kube-system --from-literal=name=primary-cluster
+kubectl config use-context $ON_PREM_MEMBER
+kubectl create configmap cluster-name -n kube-system --from-literal=name=replica-cluster
+kubectl config use-context $AZURE_MEMBER
+kubectl create configmap cluster-name -n kube-system --from-literal=name=primary-cluster
 ```
 
 OR
@@ -296,8 +305,10 @@ data:
   name: "replica-cluster"
 EOF
 
-kazure apply -f ./primary-name.yaml
-konprem apply -f ./replica-name.yaml
+kubectl config use-context $AZURE_MEMBER
+kubectl apply -f ./primary-name.yaml
+kubectl config use-context $ON_PREM_MEMBER
+kubectl apply -f ./replica-name.yaml
 ```
 
 
@@ -348,18 +359,8 @@ spec:
     type: RollingUpdate
 EOF
 
+kubectl config use-context hub
 kubectl apply -f ./documentdb-resource.yaml
-```
-
-
-4. To perform a failover:
-
-```bash
-kubectl patch documentdb documentdb-preview -n documentdb-preview-ns \
-  --type='json' -p='[
-  {"op": "replace", "path": "/spec/clusterReplication/primary", "value":"replica-cluster"},
-  {"op": "replace", "path": "/spec/clusterReplication/clusterList", "value":["replica-cluster"]}
-  ]'
 ```
 
 ## Testing and Verification
@@ -368,6 +369,8 @@ kubectl patch documentdb documentdb-preview -n documentdb-preview-ns \
 
 ```bash
 # Get the service IP from primary (azure)
+kubectl config use-context $AZURE_MEMBER
+kubectl apply -f certs.yaml
 service_ip=$(kazure get service documentdb-service-documentdb-preview -n documentdb-preview-ns -o jsonpath="{.status.loadBalancer.ingress[0].ip}")
 
 # Connect using mongosh
@@ -387,9 +390,10 @@ db.testCollection.find()
 
 ### Physical Replication Failover
 
-To initiate a failover from the primary to a replica cluster:
+To initiate a failover from the primary to a replica cluster, run this against the hub:
 
 ```bash
+kubectl config use-context hub
 kubectl patch documentdb documentdb-preview -n documentdb-preview-ns \
   --type='json' -p='[
   {"op": "replace", "path": "/spec/clusterReplication/primary", "value":"replica-cluster"},

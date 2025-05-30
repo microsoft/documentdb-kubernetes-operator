@@ -254,6 +254,14 @@ spec:
     - group: "rbac.authorization.k8s.io"
       version: v1
       kind: ClusterRole
+      name: cnpg-cloudnative-pg
+    - group: "rbac.authorization.k8s.io"
+      version: v1
+      kind: ClusterRoleBinding
+      name: cnpg-cloudnative-pg
+    - group: "rbac.authorization.k8s.io"
+      version: v1
+      kind: ClusterRole
       name: cnpg-operator-cloudnative-pg
     - group: "rbac.authorization.k8s.io"
       version: v1

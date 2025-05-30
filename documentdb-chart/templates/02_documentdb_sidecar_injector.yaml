@@ -62,49 +62,49 @@ spec:
       - name: client
         secret:
           secretName: helloworld-client-tls
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: helloworld-client
-  namespace: cnpg-system
-spec:
-  commonName: helloworld-client
-  duration: 2160h
-  isCA: false
-  issuerRef:
-    group: cert-manager.io
-    kind: Issuer
-    name: selfsigned-issuer
-  renewBefore: 360h
-  secretName: helloworld-client-tls
-  usages:
-  - client auth
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: helloworld-server
-  namespace: cnpg-system
-spec:
-  commonName: hello-world
-  dnsNames:
-  - hello-world
-  duration: 2160h
-  isCA: false
-  issuerRef:
-    group: cert-manager.io
-    kind: Issuer
-    name: selfsigned-issuer
-  renewBefore: 360h
-  secretName: helloworld-server-tls
-  usages:
-  - server auth
----
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: selfsigned-issuer
-  namespace: cnpg-system
-spec:
-  selfSigned: {}
+# ---
+# apiVersion: cert-manager.io/v1
+# kind: Certificate
+# metadata:
+#   name: helloworld-client
+#   namespace: cnpg-system
+# spec:
+#   commonName: helloworld-client
+#   duration: 2160h
+#   isCA: false
+#   issuerRef:
+#     group: cert-manager.io
+#     kind: Issuer
+#     name: selfsigned-issuer
+#   renewBefore: 360h
+#   secretName: helloworld-client-tls
+#   usages:
+#   - client auth
+# ---
+# apiVersion: cert-manager.io/v1
+# kind: Certificate
+# metadata:
+#   name: helloworld-server
+#   namespace: cnpg-system
+# spec:
+#   commonName: hello-world
+#   dnsNames:
+#   - hello-world
+#   duration: 2160h
+#   isCA: false
+#   issuerRef:
+#     group: cert-manager.io
+#     kind: Issuer
+#     name: selfsigned-issuer
+#   renewBefore: 360h
+#   secretName: helloworld-server-tls
+#   usages:
+#   - server auth
+# ---
+# apiVersion: cert-manager.io/v1
+# kind: Issuer
+# metadata:
+#   name: selfsigned-issuer
+#   namespace: cnpg-system
+# spec:
+#   selfSigned: {}

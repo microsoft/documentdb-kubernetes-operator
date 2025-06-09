@@ -189,19 +189,7 @@ spec:
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
-      name: clusters.postgresql.cnpg.io
-    - group: "apiextensions.k8s.io"
-      version: v1
-      kind: CustomResourceDefinition
-      name: databases.postgresql.cnpg.io
-    - group: "apiextensions.k8s.io"
-      version: v1
-      kind: CustomResourceDefinition
       name: publications.postgresql.cnpg.io
-    - group: "apiextensions.k8s.io"
-      version: v1
-      kind: CustomResourceDefinition
-      name: subscriptions.postgresql.cnpg.io
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
@@ -209,11 +197,11 @@ spec:
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
-      name: backups.postgresql.cnpg.io
+      name: clusterimagecatalogs.postgresql.cnpg.io
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
-      name: clusterimagecatalogs.postgresql.cnpg.io
+      name: imagecatalogs.postgresql.cnpg.io
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
@@ -221,16 +209,20 @@ spec:
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
-      name: imagecatalogs.postgresql.cnpg.io
+      name: backups.postgresql.cnpg.io
+    - group: "apiextensions.k8s.io"
+      version: v1
+      kind: CustomResourceDefinition
+      name: subscriptions.postgresql.cnpg.io
+    - group: "apiextensions.k8s.io"
+      version: v1
+      kind: CustomResourceDefinition
+      name: databases.postgresql.cnpg.io
+    - group: "apiextensions.k8s.io"
+      version: v1
+      kind: CustomResourceDefinition
+      name: clusters.postgresql.cnpg.io
     # RBAC roles and bindings
-    - group: "rbac.authorization.k8s.io"
-      version: v1
-      kind: ClusterRole
-      name: manager-role
-    - group: "rbac.authorization.k8s.io"
-      version: v1
-      kind: ClusterRoleBinding
-      name: manager-rolebinding
     - group: "rbac.authorization.k8s.io"
       version: v1
       kind: ClusterRole
@@ -238,39 +230,31 @@ spec:
     - group: "rbac.authorization.k8s.io"
       version: v1
       kind: ClusterRole
-      name: documentdb-operator-admin-role
+      name: documentdb-operator-cloudnative-pg
     - group: "rbac.authorization.k8s.io"
       version: v1
       kind: ClusterRole
-      name: documentdb-operator-editor-role
+      name: documentdb-operator-cloudnative-pg-edit
     - group: "rbac.authorization.k8s.io"
       version: v1
       kind: ClusterRole
-      name: documentdb-operator-viewer-role
+      name: documentdb-operator-cloudnative-pg-view
     - group: "rbac.authorization.k8s.io"
       version: v1
       kind: ClusterRoleBinding
       name: documentdb-operator-cluster-rolebinding
     - group: "rbac.authorization.k8s.io"
       version: v1
-      kind: ClusterRole
-      name: cnpg-cloudnative-pg
-    - group: "rbac.authorization.k8s.io"
-      version: v1
       kind: ClusterRoleBinding
-      name: cnpg-cloudnative-pg
-    - group: "rbac.authorization.k8s.io"
+      name: documentdb-operator-cloudnative-pg
+    - group: "admissionregistration.k8s.io"
       version: v1
-      kind: ClusterRole
-      name: cnpg-operator-cloudnative-pg
-    - group: "rbac.authorization.k8s.io"
+      kind: MutatingWebhookConfiguration
+      name: cnpg-mutating-webhook-configuration
+    - group: "admissionregistration.k8s.io"
       version: v1
-      kind: ClusterRoleBinding
-      name: cnpg-operator-cloudnative-pg
-    - group: "rbac.authorization.k8s.io"
-      version: v1
-      kind: ClusterRole
-      name: cnpg-operator-cloudnative-pg-edit
+      kind: ValidatingWebhookConfiguration
+      name: cnpg-validating-webhook-configuration
   policy:
     placementType: PickAll
   strategy:

@@ -5,6 +5,6 @@
     <title>Redirecting...</title>
   </head>
   <body>
-    <p>If you are not redirected automatically, follow this <a href="v1/">link to v1/index.md</a>.</p>
+    <p>If you are not redirected automatically, follow this <a href="v1/quick-start.md">link to v1/index.md</a>.</p>
   </body>
 </html>

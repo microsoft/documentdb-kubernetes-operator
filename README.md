@@ -61,12 +61,3 @@ For security concerns, please review our [Security Policy](SECURITY.md).
 
 - Create an [issue](https://github.com/microsoft/documentdb-kubernetes-operator/issues) for bug reports and feature requests
 - Check our [documentation](https://microsoft.github.io/documentdb-kubernetes-operator) for common questions
-- Review existing [discussions](https://github.com/microsoft/documentdb-kubernetes-operator/discussions) in the community
-
-## 🏷️ Project Status
-
-This project is currently in **preview** and actively developed. APIs may change as we work toward a stable release.
-
----
-
-**Made with ❤️ by Microsoft**

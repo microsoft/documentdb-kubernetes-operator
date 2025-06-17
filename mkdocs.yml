@@ -1,0 +1,16 @@
+site_name: DocumentDB-Kubernetes-Operator
+repo_url: https://github.com/microsoft/documentdb-kubernetes-operator
+theme:
+  name: readthedocs
+
+nav:
+  - Version 1.0:
+      - Get Started: v1/quick-start.md
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true

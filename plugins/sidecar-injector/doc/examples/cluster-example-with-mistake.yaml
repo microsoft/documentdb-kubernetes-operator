@@ -1,0 +1,23 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cluster-example
+spec:
+  instances: 3
+
+  plugins:
+  - name: cnpg-i-sidecar-injector.documentdb.io
+    parameters:
+      labels: |
+        {
+          "first-label": "first-label-value",
+          "second-label": "second-label-value"
+        }
+      annotations: |
+        {
+          "first-annotation": "first-annotation-value",
+          this is a mistake
+        }
+
+  storage:
+    size: 1Gi

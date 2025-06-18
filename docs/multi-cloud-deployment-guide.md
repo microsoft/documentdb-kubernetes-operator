@@ -65,16 +65,22 @@ git clone https://github.com/kubefleet-dev/kubefleet.git
 cd kubefleet
 ./hack/membership/joinMC.sh v0.14.8 hub $clusterName
 cd ..
+```
 
-# Wait until the cluster shows the correct number of nodes, usually about a minute
+Wait until the cluster shows the correct number of nodes, usually about a minute,
+by using the `NODE-COUNT` column from this command `kubectl get membercluster -A`
 
+Then add it to the fleet network
+
+```bash
 git clone https://github.com/Azure/fleet-networking
 cd fleet-networking
 ./hack/membership/joinMC.sh v0.14.8 v0.3.8 hub $clusterName
 cd ..
 ```
 
-These commands also will work to add clusters from other cloud providers 
+These commands also will work to add clusters from other cloud providers. 
+Run `kubectl get membercluster -A` again and see `True` under `JOINED` to confirm.
 
 ## Installing Operators and Dependencies
 
@@ -92,14 +98,28 @@ kubectl config use-context $ON_PREM_MEMBER
 helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
 ```
 
+Verify that `cert-manager` is installed correctly on each cluster:
+
+```sh
+kubectl get pods -n cert-manager
+```
+
+Output:
+
+```text
+NAMESPACE           NAME                                            READY   STATUS    RESTARTS
+cert-manager        cert-manager-6795b8d569-d7lwd                   1/1     Running   0
+cert-manager        cert-manager-cainjector-8f69cd69f7-pd9bc        1/1     Running   0          
+cert-manager        cert-manager-webhook-7cc5dccc4b-7jmrh           1/1     Running   0          
+```
+
+
 2. Install the DocumentDB operator on the hub:
 
 ```bash
 kubectl config use-context hub
 helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator --version 0.0.111 --namespace documentdb-operator --create-namespace
 ```
-
-NOTE: this will print errors regarding Certificates and Issuers, that's fine for now, we'll manually install those in the next step individually
 
 3. Deploy certificates on each cluster:
 
@@ -265,6 +285,23 @@ kubectl config use-context hub
 kubectl apply -f ./documentdb-base.yaml
 ```
 
+After a few seconds, ensure that the operator is running on both of the clusters
+
+```sh
+kubectl config use-context $AZURE_MEMBER
+kubectl get deployment -n documentdb-operator
+kubectl config use-context $ON_PREM_MEMBER
+kubectl get deployment -n documentdb-operator
+```
+
+Output:
+
+```text
+NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
+documentdb-operator   1/1     1            1           113s
+```
+
+
 ## Setting Up Replication
 
 Physical replication provides high availability and disaster recovery capabilities across clusters.
@@ -273,32 +310,32 @@ Physical replication provides high availability and disaster recovery capabiliti
 
 ```bash
 kubectl config use-context $ON_PREM_MEMBER
-kubectl create configmap cluster-name -n kube-system --from-literal=name=replica-cluster
+kubectl create configmap cluster-name -n kube-system --from-literal=name=on-prem-cluster-name
 kubectl config use-context $AZURE_MEMBER
-kubectl create configmap cluster-name -n kube-system --from-literal=name=primary-cluster
+kubectl create configmap cluster-name -n kube-system --from-literal=name=azure-cluster-name
 ```
 
 OR
 
 ```bash
-cat <<EOF > primary-name.yaml
+cat <<EOF > azure-cluster-name.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cluster-name
   namespace: kube-system
 data:
-  name: "primary-cluster"
+  name: "azure-cluster-name"
 EOF
 
-cat <<EOF > replica-name.yaml
+cat <<EOF > on-prem-name.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cluster-name
   namespace: kube-system
 data:
-  name: "replica-cluster"
+  name: "on-prem-cluster-name"
 EOF
 
 kubectl config use-context $AZURE_MEMBER
@@ -331,11 +368,12 @@ spec:
   resource:
     pvcSize: 10Gi
   clusterReplication:
-    fleetEnabled: true
-    primary: primary-cluster
+    primary: azure-cluster-name
     clusterList:
-      - primary-cluster
-      - replica-cluster
+      - azure-cluster-name
+      - on-prem-cluster-name
+  publicLoadBalancer:
+    enabled: true
 
 ---
 
@@ -366,8 +404,7 @@ kubectl apply -f ./documentdb-resource.yaml
 ```bash
 # Get the service IP from primary (azure)
 kubectl config use-context $AZURE_MEMBER
-kubectl apply -f certs.yaml
-service_ip=$(kazure get service documentdb-service-documentdb-preview -n documentdb-preview-ns -o jsonpath="{.status.loadBalancer.ingress[0].ip}")
+service_ip=$(kubectl get service documentdb-service-documentdb-preview -n documentdb-preview-ns -o jsonpath="{.status.loadBalancer.ingress[0].ip}")
 
 # Connect using mongosh
 mongosh $service_ip:10260 -u default_user -p Admin100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates
@@ -392,8 +429,8 @@ To initiate a failover from the primary to a replica cluster, run this against t
 kubectl config use-context hub
 kubectl patch documentdb documentdb-preview -n documentdb-preview-ns \
   --type='json' -p='[
-  {"op": "replace", "path": "/spec/clusterReplication/primary", "value":"replica-cluster"},
-  {"op": "replace", "path": "/spec/clusterReplication/clusterList", "value":["replica-cluster"]}
+  {"op": "replace", "path": "/spec/clusterReplication/primary", "value":"on-prem-cluster-name"},
+  {"op": "replace", "path": "/spec/clusterReplication/clusterList", "value":["on-prem-cluster-name"]}
   ]'
 ```
 

@@ -12,7 +12,7 @@ metadata:
 spec:
   nodeCount: 1
   instancesPerNode: 1
-  documentDBImage: ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-local:16
+  documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   resource:
     pvcSize: 10Gi
   publicLoadBalancer:

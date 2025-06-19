@@ -63,7 +63,8 @@ type Timeouts struct {
 // DocumentDBStatus defines the observed state of DocumentDB.
 type DocumentDBStatus struct {
 	// Status reflects the status field from the underlying CNPG Cluster.
-	Status string `json:"status,omitempty"`
+	Status           string `json:"status,omitempty"`
+	ConnectionString string `json:"connectionString,omitempty"`
 }
 
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.status",description="CNPG Cluster Status"

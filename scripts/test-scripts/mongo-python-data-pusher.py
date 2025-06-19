@@ -22,22 +22,20 @@ client = MongoClient(
 )
 
 # Use the database
-db = client["sample_mflix"]
+club_db = client["soccer_league"]
 
-# Insert a document
-insert_result = db.movies.insert_one({
-    "title": "The Favourite MongoDB Movie",
-    "genres": ["Drama", "History"],
-    "runtime": 121,
-    "rated": "R",
-    "year": 2018,
-    "directors": ["Yorgos Lanthimos"],
-    "cast": ["Olivia Colman", "Emma Stone", "Rachel Weisz"],
-    "type": "movie"
+# Insert a soccer club document
+insert_result = club_db.clubs.insert_one({
+    "name": "Manchester United",
+    "country": "England",
+    "founded": 1878,
+    "stadium": "Old Trafford",
+    "league": "Premier League",
+    "titles": ["Premier League", "FA Cup", "Champions League"]
 })
 
-print(f"Inserted document ID: {insert_result.inserted_id}")
+print(f"Inserted soccer club document ID: {insert_result.inserted_id}")
 
-# Find all documents
-for doc in db.movies.find():
+# Find all soccer clubs
+for doc in club_db.clubs.find():
     pprint(doc)

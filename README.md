@@ -212,7 +212,7 @@ switched to db testdb
 
 #### Connect to DocumentDB using a Python app
 
-In addition to `mongosh`, you can also use the sample Python program (that uses the PyMongo client) in the GitHub repository to execute operations on the DocumentDB instance. It inserts a sample document to a `movies` collection inside the `sample_mflix` database.
+In addition to `mongosh`, you can also use the sample Python program (that uses the PyMongo client) in the GitHub repository to execute operations on the DocumentDB instance. It inserts a sample document to a `clubs` collection inside the `soccer_league` database.
 
 ```sh
 git clone https://github.com/microsoft/documentdb-kubernetes-operator
@@ -228,42 +228,38 @@ Output:
 ```text
 Inserted document ID: 682c54f9505b85fba77ed154
 {'_id': ObjectId('682c54f9505b85fba77ed154'),
- 'cast': ['Olivia Colman', 'Emma Stone', 'Rachel Weisz'],
- 'directors': ['Yorgos Lanthimos'],
- 'genres': ['Drama', 'History'],
- 'rated': 'R',
- 'runtime': 121,
- 'title': 'The Favourite MongoDB Movie',
- 'type': 'movie',
- 'year': 2018}
+ 'name': 'Manchester United',
+ 'country': 'England',
+ 'founded': 1878,
+ 'stadium': 'Old Trafford',
+ 'league': 'Premier League',
+ 'titles': ['Premier League', 'FA Cup', 'Champions League']}
 ```
 
 You can verify this using the `mongosh` shell:
 
 ```sh
-use sample_mflix
-db.movies.find()
+use soccer_league
+db.clubs.find()
 ```
 
 Output:
 
 ```text
-[direct: mongos] testdb> use sample_mflix
-switched to db sample_mflix
-[direct: mongos] sample_mflix> 
+[direct: mongos] testdb> use soccer_league
+switched to db soccer_league
+[direct: mongos] soccer_league> 
 
-[direct: mongos] sample_mflix> db.movies.find()
+[direct: mongos] soccer_league> db.clubs.find()
 [
   {
     _id: ObjectId('682c54f9505b85fba77ed154'),
-    title: 'The Favourite MongoDB Movie',
-    genres: [ 'Drama', 'History' ],
-    runtime: 121,
-    rated: 'R',
-    year: 2018,
-    directors: [ 'Yorgos Lanthimos' ],
-    cast: [ 'Olivia Colman', 'Emma Stone', 'Rachel Weisz' ],
-    type: 'movie'
+    name: 'Manchester United',
+    country: 'England',
+    founded: 1878,
+    stadium: 'Old Trafford',
+    league: 'Premier League',
+    titles: [ 'Premier League', 'FA Cup', 'Champions League' ]
   }
 ]
 ```

@@ -62,6 +62,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
+	var loadBalancerIp string
 	// Only create/manage the public LoadBalancer if enabled in the CRD spec
 	if documentdb.Spec.PublicLoadBalancer.Enabled {
 		// Define the Public LoadBalancer Service for this DocumentDB instance
@@ -75,7 +76,8 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		// Ensure LoadBalancer has an IP assigned
-		if err := util.EnsureLoadBalancerIP(ctx, foundService); err != nil {
+		loadBalancerIp, err = util.EnsureLoadBalancerIP(ctx, foundService)
+		if err != nil {
 			log.Info("DocumentDB LoadBalancer External IP not assigned, Requeuing.")
 			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 		}
@@ -122,12 +124,15 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: requeueTime}, nil
 	}
 
-	// Update DocumentDB status with CNPG Cluster status
+	// Update DocumentDB status with CNPG Cluster status and connection string
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: desiredCnpgCluster.Name, Namespace: req.Namespace}, currentCnpgCluster); err == nil {
 		if currentCnpgCluster.Status.Phase != "" {
 			documentdb.Status.Status = currentCnpgCluster.Status.Phase
+			if loadBalancerIp != "" {
+				documentdb.Status.ConnectionString = util.GenerateConnectionString(documentdb, loadBalancerIp)
+			}
 			if err := r.Status().Update(ctx, documentdb); err != nil {
-				log.Error(err, "Failed to update DocumentDB status with CNPG Cluster status")
+				log.Error(err, "Failed to update DocumentDB status and connection string")
 			}
 		}
 	}

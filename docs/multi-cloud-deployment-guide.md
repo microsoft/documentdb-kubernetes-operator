@@ -1,10 +1,12 @@
 # Multi-Cloud DocumentDB Deployment Guide
 
 This guide provides step-by-step instructions for setting up a multi-cloud
-deployment of DocumentDB using KubeFleet to manage clusters across
-clouds. This setup enables high availability and disaster recovery.
-We assume the use of an AKS cluster and an on-prem Kubernetes cluster
-that have network access to one another.
+deployment of DocumentDB (see [here](https://github.com/microsoft/documentdb))
+using KubeFleet (see [here](https://github.com/kubefleet-dev/kubefleet)) to 
+manage clusters across clouds. This setup enables high availability and disaster
+recovery. We assume the use of an AKS cluster and an on-prem Kubernetes
+cluster that have network access to one another. Other combinations are
+possible and will be documented as they are tested.
 
 ## Table of Contents
 
@@ -21,12 +23,16 @@ that have network access to one another.
 ## Prerequisites
 
 - Azure account
-- Azure CLI installed and configured with appropriate permissions
-- kubectl installed
-- helm installed
-- Git client
-- Two kubernetes clusters that are network connected to each other
-- ENV variables `$AZURE_MEMBER` and `$ON_PREM_MEMBER` with the kubectl context names for your clusters
+- [Azure CLI installed and configured with appropriate permissions](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli?view=azure-cli-latest)
+- [kubectl installed](https://kubernetes.io/docs/tasks/tools/)
+- [helm installed](https://helm.sh/docs/intro/install/)
+- [Git client](https://github.com/git-guides/install-git)
+- [MongoSH (for testing connection)](https://www.mongodb.com/try/download/shell)
+- Two kubernetes clusters that are network connected to each other. For example using
+  - [Azure VPN Gatway](https://learn.microsoft.com/en-us/azure/vpn-gateway/vpn-gateway-about-vpngateways)
+  - [Azure ExpressRoute](https://learn.microsoft.com/en-us/azure/expressroute/expressroute-introduction)
+- ENV variables `$AZURE_MEMBER` and `$ON_PREM_MEMBER` with the kubectl context names for your clusters 
+  - (e.g. "azure-documentdb-cluster", "k3s-cluster-context")
 
 ## Architecture Overview
 
@@ -96,6 +102,10 @@ helm install cert-manager jetstack/cert-manager --namespace cert-manager --creat
 # Install on replica
 kubectl config use-context $ON_PREM_MEMBER
 helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
+
+# Install just the CRDs on the hub for propagation
+kubectl config use-context hub
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.crds.yaml
 ```
 
 Verify that `cert-manager` is installed correctly on each cluster:
@@ -118,70 +128,23 @@ cert-manager        cert-manager-webhook-7cc5dccc4b-7jmrh           1/1     Runn
 
 ```bash
 kubectl config use-context hub
-helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator --version 0.0.111 --namespace documentdb-operator --create-namespace
+helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator --version 0.0.1 --namespace documentdb-operator --create-namespace
 ```
 
-3. Deploy certificates on each cluster:
+Verify the namespaces cnpg-system and documentdb-operator were created
 
 ```bash
-cat <<EOF > certs.yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: cnpg-system
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: helloworld-client
-  namespace: cnpg-system
-spec:
-  commonName: helloworld-client
-  duration: 2160h
-  isCA: false
-  issuerRef:
-    group: cert-manager.io
-    kind: Issuer
-    name: selfsigned-issuer
-  renewBefore: 360h
-  secretName: helloworld-client-tls
-  usages:
-  - client auth
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: helloworld-server
-  namespace: cnpg-system
-spec:
-  commonName: hello-world
-  dnsNames:
-  - hello-world
-  duration: 2160h
-  isCA: false
-  issuerRef:
-    group: cert-manager.io
-    kind: Issuer
-    name: selfsigned-issuer
-  renewBefore: 360h
-  secretName: helloworld-server-tls
-  usages:
-  - server auth
----
-apiVersion: cert-manager.io/v1
-kind: Issuer
-metadata:
-  name: selfsigned-issuer
-  namespace: cnpg-system
-spec:
-  selfSigned: {}
-EOF
+kubectl get namespaces
+```
 
+Output:
 
-kubectl config use-context $AZURE_MEMBER
-kubectl apply -f certs.yaml
-kubectl config use-context $ON_PREM_MEMBER
-kubectl apply -f certs.yaml
+```
+NAME                                                  STATUS   AGE
+cnpg-system                                           Active   50m
+...
+documentdb-operator                                   Active   50m
+...
 ```
 
 ## Deploying DocumentDB Operator to fleet
@@ -395,6 +358,22 @@ EOF
 
 kubectl config use-context hub
 kubectl apply -f ./documentdb-resource.yaml
+```
+
+After a few seconds, ensure that the operator is running on both of the clusters
+
+```sh
+kubectl config use-context $AZURE_MEMBER
+kubectl get pods -n documentdb-operator-ns
+kubectl config use-context $ON_PREM_MEMBER
+kubectl get pods -n documentdb-operator-ns
+```
+
+Output:
+
+```text
+NAME                   READY   STATUS    RESTARTS   AGE
+azure-cluster-name-1   2/2     Running   0          3m33s
 ```
 
 ## Testing and Verification

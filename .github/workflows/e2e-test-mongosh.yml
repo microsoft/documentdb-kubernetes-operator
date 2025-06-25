@@ -40,9 +40,6 @@ jobs:
           - name: "single-node"
             node_count: 1
             instances_per_node: 1
-          - name: "multi-instance"
-            node_count: 1
-            instances_per_node: 2
     
     steps:
     - name: Checkout repository

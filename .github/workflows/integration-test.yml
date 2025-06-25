@@ -181,8 +181,9 @@ jobs:
         print("Inserted documents:", result.insertedIds);
         
         // Validate insertion - check we got 3 documents
-        if (result.insertedIds.length !== 3) {
-          throw new Error("Expected 3 inserted documents, got " + result.insertedIds.length);
+        var insertedCount = Object.keys(result.insertedIds).length;
+        if (insertedCount !== 3) {
+          throw new Error("Expected 3 inserted documents, got " + insertedCount);
         }
         print("✓ Insertion validation passed");
         

@@ -55,16 +55,19 @@ func GetDocumentDBLoadBalancerDefinition(documentdb *dbpreview.DocumentDB, names
 	}
 }
 
-// EnsureLoadBalancerIP ensures that the LoadBalancer has an IP assigned
-func EnsureLoadBalancerIP(ctx context.Context, service *corev1.Service) error {
+// EnsureLoadBalancerIP ensures that the LoadBalancer has an IP assigned and returns it, or returns an error if not available
+func EnsureLoadBalancerIP(ctx context.Context, service *corev1.Service) (string, error) {
+	if service == nil {
+		return "", fmt.Errorf("service is nil")
+	}
 	retries := 5
 	for i := 0; i < retries; i++ {
 		if len(service.Status.LoadBalancer.Ingress) > 0 && service.Status.LoadBalancer.Ingress[0].IP != "" {
-			return nil
+			return service.Status.LoadBalancer.Ingress[0].IP, nil
 		}
 		time.Sleep(time.Second * 10)
 	}
-	return fmt.Errorf("LoadBalancer IP not assigned after two retries")
+	return "", fmt.Errorf("LoadBalancer IP not assigned after %d retries", retries)
 }
 
 // GetOrCreateService checks if the Service already exists, and creates it if not.
@@ -230,4 +233,20 @@ func DeleteRoleBinding(ctx context.Context, c client.Client, name, namespace str
 		}
 	}
 	return nil
+}
+
+// GenerateConnectionString returns a MongoDB connection string for the DocumentDB instance
+func GenerateConnectionString(documentdb *dbpreview.DocumentDB, loadBalancerIP string) string {
+	if loadBalancerIP == "" {
+		return ""
+	}
+	documentDbUsername := getDocumentDbUsername()
+	return fmt.Sprintf("mongodb://%s:<password>%s:%d/?replicaSet=rs0", documentDbUsername, loadBalancerIP, GetPortFor(GATEWAY_PORT))
+}
+
+func getDocumentDbUsername() string {
+
+	// TODO: Implement logic to retrieve the username from the DocumentDB instance or configuration
+	// For now, we return a default username.
+	return "default_user"
 }

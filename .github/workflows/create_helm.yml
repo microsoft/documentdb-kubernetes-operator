@@ -14,7 +14,7 @@ on:
 env:
   CHART_NAME: documentdb-chart
   CHART_VERSION: ${{ github.event.inputs.chart_version || '0.0.1' }}
-  GHCR_REPO: ghcr.io/${{ github.repository }}
+  GHCR_REPO: ghcr.io/${{ github.repository_owner }}
 
 jobs:
   publish:

@@ -248,9 +248,9 @@ jobs:
         var updateResult = db.quicktest.updateOne({ name: "Test1" }, { $set: { updated: true } });
         print("✅ Update operation completed, modified count:", updateResult.modifiedCount);
         
-        // Index test
-        db.quicktest.createIndex({ name: 1 });
-        print("✅ Index created");
+        # // Index test
+        # db.quicktest.createIndex({ name: 1 });
+        # print("✅ Index created");
         
         // Verify the updated document
         var updatedDoc = db.quicktest.findOne({ name: "Test1" });

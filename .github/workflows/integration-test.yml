@@ -308,19 +308,3 @@ jobs:
         
         echo "=== Events ==="
         kubectl get events --all-namespaces --sort-by='.lastTimestamp' || echo "Failed to get events"
-
-    - name: Cleanup resources
-      if: always()
-      run: |
-        echo "Cleaning up resources..."
-        
-        # Delete DocumentDB cluster
-        kubectl delete documentdb $DB_NAME -n $DB_NS --ignore-not-found=true --timeout=300s || true
-        
-        # Wait for cleanup
-        sleep 30
-        
-        # Delete namespaces
-        kubectl delete namespace $DB_NS --ignore-not-found=true --timeout=300s || true
-        
-        echo "Cleanup completed"

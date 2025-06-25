@@ -245,9 +245,3 @@ jobs:
         kubectl get pods -n $DB_NS -o wide
         kubectl get documentdb -n $DB_NS
         echo "✅ Quick test completed!"
-
-    - name: Cleanup
-      if: always()
-      run: |
-        kubectl delete documentdb $DB_NAME -n $DB_NS --ignore-not-found=true --timeout=180s || true
-        kubectl delete namespace $DB_NS --ignore-not-found=true --timeout=180s || true

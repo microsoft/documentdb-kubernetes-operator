@@ -35,7 +35,7 @@ env:
   IMAGE_NAME: documentdb-kubernetes-operator
   IMAGE_TAG: e2e-test-${{ github.run_id }}
   CHART_NAME: documentdb-chart
-  CHART_VERSION: e2e-test-${{ github.run_id }}
+  CHART_VERSION: 0.1.0-${{ github.run_id }}
 
 jobs:
   build-and-push:
@@ -101,11 +101,35 @@ jobs:
         # Update the image tag in values.yaml to use our newly built image
         sed -i "s|tag:.*|tag: \"${{ env.IMAGE_TAG }}\"|g" documentdb-chart/values.yaml
         sed -i "s|repository:.*|repository: \"ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}\"|g" documentdb-chart/values.yaml
+        
+        # Update Chart.yaml version to use proper semantic versioning
+        sed -i "s|^version:.*|version: ${{ env.CHART_VERSION }}|g" documentdb-chart/Chart.yaml
+        
+        echo "Updated Chart.yaml:"
+        cat documentdb-chart/Chart.yaml
+        
+        echo "Updated values.yaml:"
+        cat documentdb-chart/values.yaml
 
     - name: Package Helm chart
       run: |
+        # Clean up any existing Chart.lock files
+        rm -f ${{ env.CHART_NAME }}/Chart.lock
+        
+        echo "Chart.yaml content before dependency update:"
+        cat ${{ env.CHART_NAME }}/Chart.yaml
+        
+        echo "Running helm dependency update for ${{ env.CHART_NAME }}..."
         helm dependency update ${{ env.CHART_NAME }}
+        
+        echo "Validating chart..."
+        helm lint ${{ env.CHART_NAME }}
+        
+        echo "Packaging chart with version ${{ env.CHART_VERSION }}..."
         helm package ${{ env.CHART_NAME }} --version ${{ env.CHART_VERSION }}
+        
+        echo "Generated chart package:"
+        ls -la *.tgz
 
     - name: Log in to GHCR
       run: |

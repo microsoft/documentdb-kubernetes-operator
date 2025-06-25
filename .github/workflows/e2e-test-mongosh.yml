@@ -15,23 +15,7 @@ on:
         required: false
         default: '16'
       node_count:
-        des        // Test 4: Update Operations
-        print("\n--- Test 4: Update Operations ---");
-        
-        // First, verify the document exists before updating
-        var johnBeforeUpdate = db.users.findOne({ name: "John Doe" });
-        print("DEBUG: John before update:", JSON.stringify(johnBeforeUpdate));
-        validate(johnBeforeUpdate !== null, "John Doe document exists before update");
-        
-        // Update single document with validation
-        var updateResult = db.users.updateOne(
-          { name: "John Doe" },
-          { $set: { age: 31, lastUpdated: new Date() } }
-        );
-        
-        print("DEBUG: updateResult:", JSON.stringify(updateResult));
-        validate(updateResult.matchedCount === 1, "Update matched exactly 1 document");
-        validate(updateResult.modifiedCount === 1, "Update modified exactly 1 document");Number of DocumentDB nodes'
+        description: 'Number of DocumentDB nodes'
         required: false
         default: '1'
       test_level:

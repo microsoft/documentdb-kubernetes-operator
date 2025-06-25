@@ -177,7 +177,7 @@ jobs:
     - name: Push Helm chart to GHCR
       id: push-chart
       run: |
-        OUTPUT=$(helm push documentdb-operator-${{ env.CHART_VERSION }}.tgz oci://ghcr.io/${{ github.repository_owner }})
+        OUTPUT=$(helm push documentdb-operator-${{ env.CHART_VERSION }}.tgz oci://ghcr.io/${{ github.repository }})
         echo "chart-push-output=$OUTPUT" >> $GITHUB_OUTPUT
         echo "✓ Chart pushed successfully"
 
@@ -199,7 +199,7 @@ jobs:
         
         echo "### Built Artifacts:" >> $GITHUB_STEP_SUMMARY
         echo "- **Docker Image**: \`ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **Helm Chart**: \`oci://ghcr.io/${{ github.repository_owner }}/documentdb-operator:${{ env.CHART_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Helm Chart**: \`oci://ghcr.io/${{ github.repository }}/documentdb-operator:${{ env.CHART_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Manifest Digest**: \`${{ needs.create-manifest.outputs.manifest_digest }}\`" >> $GITHUB_STEP_SUMMARY
         
         echo "" >> $GITHUB_STEP_SUMMARY

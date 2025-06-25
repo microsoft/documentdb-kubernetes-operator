@@ -234,6 +234,8 @@ jobs:
         // Validation helper function
         function validate(condition, message) {
           if (!condition) {
+            print("DEBUG: Validation failed for: " + message);
+            print("DEBUG: Condition was:", condition);
             throw new Error("VALIDATION FAILED: " + message);
           }
           print("✓ " + message);
@@ -279,14 +281,34 @@ jobs:
         var productResult = db.products.insertMany(products);
         var orderResult = db.orders.insertMany(orders);
         
-        // Validate insertions
-        validate(userResult.insertedIds.length === 4, "Inserted exactly 4 users");
-        validate(productResult.insertedIds.length === 4, "Inserted exactly 4 products");
-        validate(orderResult.insertedIds.length === 3, "Inserted exactly 3 orders");
+        // Debug the insert results
+        print("DEBUG: userResult:", JSON.stringify(userResult));
+        print("DEBUG: productResult:", JSON.stringify(productResult));
+        print("DEBUG: orderResult:", JSON.stringify(orderResult));
         
-        print("Inserted", userResult.insertedIds.length, "users");
-        print("Inserted", productResult.insertedIds.length, "products");
-        print("Inserted", orderResult.insertedIds.length, "orders");
+        // Helper function to get insertedIds count (handles both array and object formats)
+        function getInsertedCount(result) {
+          if (result.insertedIds) {
+            if (Array.isArray(result.insertedIds)) {
+              return result.insertedIds.length;
+            } else if (typeof result.insertedIds === 'object') {
+              return Object.keys(result.insertedIds).length;
+            }
+          }
+          return 0;
+        }
+        
+        // Validate insertions
+        validate(userResult.acknowledged === true, "User insertion was acknowledged");
+        validate(getInsertedCount(userResult) === 4, "Inserted exactly 4 users");
+        validate(productResult.acknowledged === true, "Product insertion was acknowledged");
+        validate(getInsertedCount(productResult) === 4, "Inserted exactly 4 products");
+        validate(orderResult.acknowledged === true, "Order insertion was acknowledged");
+        validate(getInsertedCount(orderResult) === 3, "Inserted exactly 3 orders");
+        
+        print("Inserted", getInsertedCount(userResult), "users");
+        print("Inserted", getInsertedCount(productResult), "products");
+        print("Inserted", getInsertedCount(orderResult), "orders");
         
         // Test 2: Query Operations
         print("\n--- Test 2: Query Operations ---");
@@ -583,6 +605,8 @@ jobs:
         // Validation helper function
         function validate(condition, message) {
           if (!condition) {
+            print("DEBUG: Performance validation failed for: " + message);
+            print("DEBUG: Condition was:", condition);
             throw new Error("PERFORMANCE VALIDATION FAILED: " + message);
           }
           print("✓ " + message);
@@ -615,11 +639,27 @@ jobs:
         var result = db.perfcollection.insertMany(docs);
         var insertEnd = new Date();
         
+        // Debug the insert result
+        print("DEBUG: performance insertMany result:", JSON.stringify(result));
+        
+        // Helper function to get insertedIds count (handles both array and object formats)
+        function getInsertedCount(result) {
+          if (result.insertedIds) {
+            if (Array.isArray(result.insertedIds)) {
+              return result.insertedIds.length;
+            } else if (typeof result.insertedIds === 'object') {
+              return Object.keys(result.insertedIds).length;
+            }
+          }
+          return 0;
+        }
+        
         var insertTime = insertEnd - insertStart;
-        validate(result.insertedIds.length === 1000, "Inserted exactly 1000 documents");
+        validate(result.acknowledged === true, "Insertion was acknowledged");
+        validate(getInsertedCount(result) === 1000, "Inserted exactly 1000 documents");
         validate(insertTime < 10000, "Insertion completed within 10 seconds (took " + insertTime + "ms)");
         
-        print("Inserted", result.insertedIds.length, "documents in", insertTime, "ms");
+        print("Inserted", getInsertedCount(result), "documents in", insertTime, "ms");
         
         // Query performance test
         print("\n--- Query Performance Test ---");

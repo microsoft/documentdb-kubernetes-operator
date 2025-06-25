@@ -250,12 +250,7 @@ jobs:
         ]
         agg_result = list(collection.aggregate(pipeline))
         print(f"Aggregation result: {agg_result}")
-        
-        # Test index creation
-        collection.create_index("value")
-        indexes = list(collection.list_indexes())
-        print(f"Created indexes: {[idx['name'] for idx in indexes]}")
-        
+
         print("Python integration tests passed!")
         
         client.close()

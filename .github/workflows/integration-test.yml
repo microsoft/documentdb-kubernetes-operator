@@ -229,8 +229,13 @@ jobs:
           { $set: { title: "Senior Engineer" } }
         );
         
-        if (updateResult.modifiedCount !== 1) {
-          throw new Error("Expected 1 modified document, got " + updateResult.modifiedCount);
+        print("Update result:", JSON.stringify(updateResult));
+        print("Modified count:", updateResult.modifiedCount);
+        print("Matched count:", updateResult.matchedCount);
+        print("Acknowledged:", updateResult.acknowledged);
+        
+        if (updateResult.modifiedCount != 1) {
+          throw new Error("Expected 1 modified document, got " + updateResult.modifiedCount + " (type: " + typeof updateResult.modifiedCount + ")");
         }
         print("✓ Update operation validation passed");
         

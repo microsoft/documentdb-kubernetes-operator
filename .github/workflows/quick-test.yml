@@ -89,22 +89,77 @@ jobs:
             enabled: false
         EOF
         
-        # Wait for cluster
+        echo "DocumentDB resource created, waiting for cluster to be ready..."
+        
+        # Wait for the DocumentDB resource to be processed
+        sleep 30
+        
+        # Wait for cluster with better error handling
         timeout 600 bash -c '
         while true; do
+          echo "Checking for DocumentDB pods..."
+          kubectl get pods -n '$DB_NS' || true
+          
+          # Check if any pods exist first
+          pod_count=$(kubectl get pods -n '$DB_NS' -l cnpg.io/cluster='$DB_NAME' --no-headers 2>/dev/null | wc -l)
+          if [[ "$pod_count" -eq "0" ]]; then
+            echo "No DocumentDB pods found yet, waiting..."
+            sleep 15
+            continue
+          fi
+          
+          # Check if pods are ready
           ready=$(kubectl get pods -n '$DB_NS' -l cnpg.io/cluster='$DB_NAME' -o json | jq ".items[] | select(.status.phase == \"Running\" and ([.status.containerStatuses[] | .ready] | all))" | jq -s "length")
           if [[ "$ready" -eq "1" ]]; then
             echo "DocumentDB cluster is ready!"
             break
           fi
-          echo "Waiting... ($ready/1 pods ready)"
-          sleep 10
+          echo "Waiting for pods to be ready... ($ready/1 pods ready)"
+          sleep 15
         done'
+        
+        echo "Final pod status:"
+        kubectl get pods -n $DB_NS -o wide
+
+    - name: Debug cluster status
+      run: |
+        echo "=== Debug Information ==="
+        echo "DocumentDB resource status:"
+        kubectl get documentdb -n $DB_NS -o yaml
+        
+        echo -e "\nAll pods in namespace:"
+        kubectl get pods -n $DB_NS -o wide
+        
+        echo -e "\nPods with cnpg.io/cluster label:"
+        kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o wide
+        
+        echo -e "\nNamespace events:"
+        kubectl get events -n $DB_NS --sort-by='.lastTimestamp' | tail -20
 
     - name: Basic connection test
       if: github.event.inputs.test_type == 'basic' || github.event.inputs.test_type == 'connection-only'
       run: |
-        kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
+        # First, let's discover the actual pod name
+        echo "Discovering DocumentDB pod..."
+        kubectl get pods -n $DB_NS
+        
+        # Get the pod name dynamically
+        POD_NAME=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o jsonpath='{.items[0].metadata.name}')
+        
+        if [ -z "$POD_NAME" ]; then
+          echo "❌ No DocumentDB pod found!"
+          kubectl get pods -n $DB_NS
+          kubectl get documentdb -n $DB_NS
+          exit 1
+        fi
+        
+        echo "Found DocumentDB pod: $POD_NAME"
+        
+        # Verify pod is ready
+        kubectl wait --for=condition=Ready pod/$POD_NAME -n $DB_NS --timeout=300s
+        
+        # Start port-forward with the discovered pod name
+        kubectl port-forward pod/$POD_NAME $DB_PORT:$DB_PORT -n $DB_NS &
         PF_PID=$!
         sleep 10
         
@@ -124,7 +179,21 @@ jobs:
     - name: MongoDB shell operations test
       if: github.event.inputs.test_type == 'basic' || github.event.inputs.test_type == 'mongosh-only'
       run: |
-        kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
+        # Get the pod name dynamically
+        POD_NAME=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o jsonpath='{.items[0].metadata.name}')
+        
+        if [ -z "$POD_NAME" ]; then
+          echo "❌ No DocumentDB pod found!"
+          kubectl get pods -n $DB_NS
+          exit 1
+        fi
+        
+        echo "Using DocumentDB pod: $POD_NAME"
+        
+        # Verify pod is ready
+        kubectl wait --for=condition=Ready pod/$POD_NAME -n $DB_NS --timeout=300s
+        
+        kubectl port-forward pod/$POD_NAME $DB_PORT:$DB_PORT -n $DB_NS &
         PF_PID=$!
         sleep 10
         

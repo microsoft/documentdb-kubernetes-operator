@@ -141,7 +141,7 @@ jobs:
         print("Connected to DocumentDB!");
         
         // Switch to test database
-        use testdb;
+        db = db.getSiblingDB('testdb');
         
         // Create collection and insert test data
         db.createCollection("test_collection");

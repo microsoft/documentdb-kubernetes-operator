@@ -166,12 +166,30 @@ jobs:
         # Test connection
         timeout 30 bash -c 'until nc -z 127.0.0.1 '$DB_PORT'; do sleep 2; done'
         
-        # Simple connection test
+        # Create simple connection test script
+        cat > simple_connection_test.js << 'EOF'
+        print('Connection successful!');
+        
+        // Switch to test database
+        db = db.getSiblingDB('quicktest');
+        
+        // Insert a test document
+        var result = db.test.insertOne({test: 'hello', timestamp: new Date()});
+        print('Insert successful! Document ID:', result.insertedId);
+        
+        // Count documents
+        var count = db.test.countDocuments();
+        print('Document count:', count);
+        
+        print('✅ Basic connection test completed successfully!');
+        EOF
+        
+        # Run the connection test
         mongosh 127.0.0.1:$DB_PORT \
           -u $DB_USERNAME -p $DB_PASSWORD \
           --authenticationMechanism SCRAM-SHA-256 \
           --tls --tlsAllowInvalidCertificates \
-          --eval "print('Connection successful!'); use quicktest; db.test.insertOne({test: 'hello', timestamp: new Date()}); print('Insert successful!'); var count = db.test.countDocuments(); print('Document count:', count);"
+          --file simple_connection_test.js
         
         kill $PF_PID
         echo "✅ Basic connection test passed!"
@@ -201,7 +219,8 @@ jobs:
         cat > quick_mongosh_test.js << 'EOF'
         print("=== Quick mongosh Test ===");
         
-        use quicktest;
+        // Switch to test database using JavaScript
+        db = db.getSiblingDB('quicktest');
         
         // Create and populate collection
         db.createCollection("quicktest");
@@ -226,12 +245,16 @@ jobs:
         print("✅ Average value:", avgValue[0].avgValue);
         
         // Update test
-        db.quicktest.updateOne({ name: "Test1" }, { $set: { updated: true } });
-        print("✅ Update operation completed");
+        var updateResult = db.quicktest.updateOne({ name: "Test1" }, { $set: { updated: true } });
+        print("✅ Update operation completed, modified count:", updateResult.modifiedCount);
         
         // Index test
         db.quicktest.createIndex({ name: 1 });
         print("✅ Index created");
+        
+        // Verify the updated document
+        var updatedDoc = db.quicktest.findOne({ name: "Test1" });
+        print("✅ Updated document:", updatedDoc.name, "- updated:", updatedDoc.updated);
         
         print("=== All quick tests passed! ===");
         EOF

@@ -295,6 +295,16 @@ jobs:
         # Wait for port-forward to be ready
         sleep 10
         
+        # Test connection and ensure port-forward is ready
+        timeout 60 bash -c '
+        until nc -z 127.0.0.1 '$DB_PORT'; do
+          echo "Waiting for port-forward to be ready..."
+          sleep 2
+        done
+        '
+        
+        echo "Port-forward is ready, running Python tests..."
+        
         # Run the existing Python test script and validate it completes successfully
         cd scripts/test-scripts
         echo "Running existing Python test script..."

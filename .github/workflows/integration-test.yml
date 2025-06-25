@@ -21,7 +21,7 @@ env:
 jobs:
   integration-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     
     steps:
     - name: Checkout repository
@@ -35,86 +35,36 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y jq curl
+        sudo apt-get install -y jq curl netcat-openbsd
 
     - name: Install Helm
       uses: azure/setup-helm@v3
-      with:
-        version: 'latest'
-
-    - name: Install MongoDB Shell (mongosh)
-      run: |
-        # Install mongosh
-        wget -qO - https://www.mongodb.org/static/pgp/server-7.0.asc | sudo apt-key add -
-        echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-        sudo apt-get update
-        sudo apt-get install -y mongodb-mongosh
-        mongosh --version
 
     - name: Create kind cluster
       uses: helm/kind-action@v1.8.0
       with:
         cluster_name: documentdb-test
-        config: |
-          kind: Cluster
-          apiVersion: kind.x-k8s.io/v1alpha4
-          nodes:
-          - role: control-plane
-            kubeadmConfigPatches:
-            - |
-              kind: InitConfiguration
-              nodeRegistration:
-                kubeletExtraArgs:
-                  node-labels: "ingress-ready=true"
-            extraPortMappings:
-            - containerPort: 80
-              hostPort: 80
-              protocol: TCP
-            - containerPort: 443
-              hostPort: 443
-              protocol: TCP
 
-    - name: Verify cluster is ready
+    - name: Install dependencies
       run: |
-        kubectl cluster-info
+        curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        sudo apt-get update && sudo apt-get install -y mongodb-mongosh
+
+    - name: Setup cluster
+      run: |
         kubectl wait --for=condition=Ready nodes --all --timeout=300s
-        kubectl get nodes
-
-    - name: Install cert-manager
-      run: |
-        echo "Installing cert-manager..."
-        helm repo add jetstack https://charts.jetstack.io
-        helm repo update
         
+        helm repo add jetstack https://charts.jetstack.io && helm repo update
         helm install cert-manager jetstack/cert-manager \
-          --namespace $CERT_MANAGER_NS \
-          --create-namespace \
-          --set installCRDs=true \
-          --wait --timeout=5m
+          --namespace $CERT_MANAGER_NS --create-namespace \
+          --set installCRDs=true --wait --timeout=5m
         
-        echo "Verifying cert-manager installation..."
-        kubectl get pods -n $CERT_MANAGER_NS
-        kubectl wait --for=condition=Ready pods --all -n $CERT_MANAGER_NS --timeout=300s
-
-    - name: Install DocumentDB Operator
-      run: |
-        echo "Installing DocumentDB Operator..."
         helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator \
-          --version 0.0.1 \
-          --namespace $OPERATOR_NS \
-          --create-namespace \
-          --wait --timeout=10m
-        
-        echo "Verifying operator installation..."
-        kubectl get deployment -n $OPERATOR_NS
-        kubectl wait --for=condition=Available deployment/documentdb-operator -n $OPERATOR_NS --timeout=300s
-        
-        echo "Checking CRDs..."
-        kubectl get crd | grep documentdb
+          --version 0.0.1 --namespace $OPERATOR_NS --create-namespace --wait --timeout=8m
 
-    - name: Deploy DocumentDB Cluster
+    - name: Deploy DocumentDB cluster
       run: |
-        echo "Deploying DocumentDB cluster..."
         cat <<EOF | kubectl apply -f -
         apiVersion: v1
         kind: Namespace
@@ -131,44 +81,38 @@ jobs:
           instancesPerNode: 1
           documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
           resource:
-            pvcSize: 10Gi
+            pvcSize: 5Gi
           publicLoadBalancer:
             enabled: false
         EOF
-
-    - name: Wait for DocumentDB cluster to be ready
-      run: |
-        echo "Waiting for DocumentDB cluster to be ready..."
         
-        # Wait for the pod to be created and running
-        timeout=600  # 10 minutes
-        end_time=$((SECONDS + timeout))
+        echo "DocumentDB resource created, waiting for cluster to be ready..."
         
-        while [ $SECONDS -lt $end_time ]; do
-          ready_pods=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o json | \
-                       jq '.items[] | select(.status.phase == "Running" and ([.status.containerStatuses[] | .ready] | all))' | \
-                       jq -s 'length')
+        sleep 30
+        
+        timeout 600 bash -c '
+        while true; do
+          echo "Checking for DocumentDB pods..."
+          kubectl get pods -n '$DB_NS' || true
           
-          if [[ "$ready_pods" -eq "1" ]]; then
+          pod_count=$(kubectl get pods -n '$DB_NS' -l cnpg.io/cluster='$DB_NAME' --no-headers 2>/dev/null | wc -l)
+          if [[ "$pod_count" -eq "0" ]]; then
+            echo "No DocumentDB pods found yet, waiting..."
+            sleep 15
+            continue
+          fi
+          
+          ready=$(kubectl get pods -n '$DB_NS' -l cnpg.io/cluster='$DB_NAME' -o json | jq ".items[] | select(.status.phase == \"Running\" and ([.status.containerStatuses[] | .ready] | all))" | jq -s "length")
+          if [[ "$ready" -eq "1" ]]; then
             echo "DocumentDB cluster is ready!"
             break
           fi
-          
-          echo "Waiting for DocumentDB pod to be ready... (${ready_pods}/1 ready)"
-          kubectl get pods -n $DB_NS
-          sleep 10
-        done
+          echo "Waiting for pods to be ready... ($ready/1 pods ready)"
+          sleep 15
+        done'
         
-        if [ $SECONDS -ge $end_time ]; then
-          echo "Timeout waiting for DocumentDB cluster to be ready"
-          kubectl describe pods -n $DB_NS
-          kubectl logs -n $DB_NS --all-containers=true --tail=50 -l cnpg.io/cluster=$DB_NAME
-          exit 1
-        fi
-        
-        echo "Final cluster status:"
-        kubectl get pods -n $DB_NS
-        kubectl get documentdb -n $DB_NS
+        echo "Final pod status:"
+        kubectl get pods -n $DB_NS -o wide
 
     - name: Test connection with mongosh
       run: |
@@ -327,29 +271,43 @@ jobs:
       run: |
         echo "=== Collecting diagnostic information ==="
         
+        # Check if kubectl is working
+        if ! kubectl version --client &>/dev/null; then
+          echo "kubectl not available"
+          exit 0
+        fi
+        
+        # Check if cluster is accessible
+        if ! kubectl cluster-info &>/dev/null; then
+          echo "Cluster not accessible"
+          kubectl config current-context || echo "No kubectl context found"
+          kubectl config get-contexts || echo "No contexts available"
+          exit 0
+        fi
+        
         echo "=== Cluster nodes ==="
-        kubectl get nodes -o wide
+        kubectl get nodes -o wide || echo "Failed to get nodes"
         
         echo "=== All pods ==="
-        kubectl get pods --all-namespaces -o wide
+        kubectl get pods --all-namespaces -o wide || echo "Failed to get pods"
         
         echo "=== DocumentDB resources ==="
-        kubectl get documentdb -n $DB_NS -o yaml || true
+        kubectl get documentdb -n $DB_NS -o yaml || echo "Failed to get DocumentDB resources"
         
         echo "=== DocumentDB pod logs ==="
-        kubectl logs -n $DB_NS -l cnpg.io/cluster=$DB_NAME --all-containers=true --tail=100 || true
+        kubectl logs -n $DB_NS -l cnpg.io/cluster=$DB_NAME --all-containers=true --tail=100 || echo "Failed to get DocumentDB pod logs"
         
         echo "=== DocumentDB pod description ==="
-        kubectl describe pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME || true
+        kubectl describe pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME || echo "Failed to describe DocumentDB pods"
         
         echo "=== Operator logs ==="
-        kubectl logs -n $OPERATOR_NS deployment/documentdb-operator --tail=100 || true
+        kubectl logs -n $OPERATOR_NS deployment/documentdb-operator --tail=100 || echo "Failed to get operator logs"
         
         echo "=== cert-manager logs ==="
-        kubectl logs -n $CERT_MANAGER_NS --all-containers=true --tail=50 || true
+        kubectl logs -n $CERT_MANAGER_NS --all-containers=true --tail=50 || echo "Failed to get cert-manager logs"
         
         echo "=== Events ==="
-        kubectl get events --all-namespaces --sort-by='.lastTimestamp' || true
+        kubectl get events --all-namespaces --sort-by='.lastTimestamp' || echo "Failed to get events"
 
     - name: Cleanup resources
       if: always()

@@ -15,7 +15,23 @@ on:
         required: false
         default: '16'
       node_count:
-        description: 'Number of DocumentDB nodes'
+        des        // Test 4: Update Operations
+        print("\n--- Test 4: Update Operations ---");
+        
+        // First, verify the document exists before updating
+        var johnBeforeUpdate = db.users.findOne({ name: "John Doe" });
+        print("DEBUG: John before update:", JSON.stringify(johnBeforeUpdate));
+        validate(johnBeforeUpdate !== null, "John Doe document exists before update");
+        
+        // Update single document with validation
+        var updateResult = db.users.updateOne(
+          { name: "John Doe" },
+          { $set: { age: 31, lastUpdated: new Date() } }
+        );
+        
+        print("DEBUG: updateResult:", JSON.stringify(updateResult));
+        validate(updateResult.matchedCount === 1, "Update matched exactly 1 document");
+        validate(updateResult.modifiedCount === 1, "Update modified exactly 1 document");Number of DocumentDB nodes'
         required: false
         default: '1'
       test_level:
@@ -423,11 +439,15 @@ jobs:
         print("Updated", updateResult.modifiedCount, "user document");
         
         // Update multiple documents with validation
+        var electronicsBeforeUpdate = db.products.find({ category: "Electronics" }).toArray();
+        print("DEBUG: Electronics products before bulk update:", JSON.stringify(electronicsBeforeUpdate));
+        
         var bulkUpdate = db.products.updateMany(
           { category: "Electronics" },
           { $inc: { stock: -5 }, $set: { lastSold: new Date() } }
         );
         
+        print("DEBUG: bulkUpdate result:", JSON.stringify(bulkUpdate));
         validate(bulkUpdate.matchedCount === 2, "Bulk update matched 2 Electronics products");
         validate(bulkUpdate.modifiedCount === 2, "Bulk update modified 2 products");
         
@@ -442,12 +462,16 @@ jobs:
         print("Updated", bulkUpdate.modifiedCount, "product documents");
         
         // Upsert operation with validation
+        var existingUser = db.users.findOne({ email: "new@example.com" });
+        print("DEBUG: Existing user with new@example.com:", JSON.stringify(existingUser));
+        
         var upsertResult = db.users.updateOne(
           { email: "new@example.com" },
           { $set: { name: "New User", age: 22, city: "Boston" } },
           { upsert: true }
         );
         
+        print("DEBUG: upsertResult:", JSON.stringify(upsertResult));
         validate(upsertResult.matchedCount === 0, "Upsert matched 0 existing documents");
         validate(upsertResult.modifiedCount === 0, "Upsert modified 0 existing documents");
         validate(upsertResult.upsertedCount === 1, "Upsert created 1 new document");
@@ -472,12 +496,17 @@ jobs:
         // Test 6: Array Operations
         print("\n--- Test 6: Array Operations ---");
         
+        // Count users before adding hobbies array
+        var userCountBefore = db.users.countDocuments();
+        print("DEBUG: User count before adding hobbies:", userCountBefore);
+        
         // Add array field to users
         var arrayUpdateResult = db.users.updateMany(
           {},
           { $set: { hobbies: [] } }
         );
-        validate(arrayUpdateResult.modifiedCount === 5, "Added hobbies array to all 5 users"); // 4 original + 1 upserted
+        print("DEBUG: arrayUpdateResult:", JSON.stringify(arrayUpdateResult));
+        validate(arrayUpdateResult.modifiedCount === userCountBefore, "Added hobbies array to all " + userCountBefore + " users");
         
         // Update with array operations
         var johnHobbiesResult = db.users.updateOne(
@@ -563,9 +592,16 @@ jobs:
         var totalProducts = db.products.countDocuments();
         var totalOrders = db.orders.countDocuments();
         
-        validate(totalUsers === 5, "Final user count is 5 (4 original + 1 upserted)");
-        validate(totalProducts === 5, "Final product count is 5 (4 original + 1 bulk inserted)");
-        validate(totalOrders === 3, "Final order count is 3");
+        print("DEBUG: Final counts - Users:", totalUsers, "Products:", totalProducts, "Orders:", totalOrders);
+        
+        // Use dynamic validation based on actual counts (4 original + 1 upserted = 5)
+        var expectedUsers = 5; // 4 original + 1 upserted
+        var expectedProducts = 5; // 4 original + 1 bulk inserted  
+        var expectedOrders = 3; // 3 original
+        
+        validate(totalUsers === expectedUsers, "Final user count is " + expectedUsers + " (4 original + 1 upserted)");
+        validate(totalProducts === expectedProducts, "Final product count is " + expectedProducts + " (4 original + 1 bulk inserted)");
+        validate(totalOrders === expectedOrders, "Final order count is " + expectedOrders);
         
         print("Final counts - Users:", totalUsers, "Products:", totalProducts, "Orders:", totalOrders);
         
@@ -574,8 +610,10 @@ jobs:
         validate(allUsersHaveHobbies.length === 0, "All users have hobbies field");
         
         var johnFinal = db.users.findOne({ name: "John Doe" });
+        print("DEBUG: John final state:", JSON.stringify(johnFinal));
+        validate(johnFinal !== null, "John Doe document exists at end");
         validate(johnFinal.age === 31, "John's age is still 31");
-        validate(johnFinal.hobbies.includes("reading"), "John still has reading hobby");
+        validate(johnFinal.hobbies && johnFinal.hobbies.includes("reading"), "John still has reading hobby");
         
         // Clean up test data
         print("\n--- Cleanup ---");

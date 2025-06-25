@@ -66,12 +66,13 @@ jobs:
     - name: Login to GHCR
       run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
     
-    - name: Build and Push ${{ matrix.arch }} Image
-      id: build-${{ matrix.arch }}
+    - name: Build and Push AMD64 Image
+      if: matrix.arch == 'amd64'
+      id: build-amd64
       run: |
-        TAG=${{ env.IMAGE_TAG }}-${{ matrix.arch }}
+        TAG=${{ env.IMAGE_TAG }}-amd64
         docker build \
-          --build-arg ARCH=${{ matrix.base_arch }} \
+          --build-arg ARCH=AMD64 \
           -t ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG \
           -f Dockerfile .
         docker push ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG
@@ -80,22 +81,20 @@ jobs:
         DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG | cut -d'@' -f2)
         echo "digest=$DIGEST" >> $GITHUB_OUTPUT
 
-  build-local:
-    name: Build Docker Images (Local)
-    timeout-minutes: 20
-    if: ${{ !inputs.push_to_registry }}
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Build Local Image
+    - name: Build and Push ARM64 Image
+      if: matrix.arch == 'arm64'
+      id: build-arm64
       run: |
+        TAG=${{ env.IMAGE_TAG }}-arm64
         docker build \
-          --build-arg ARCH=AMD64 \
-          -t local/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+          --build-arg ARCH=ARM64 \
+          -t ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG \
           -f Dockerfile .
-        echo "✓ Local image built successfully"
+        docker push ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG
+        
+        # Get digest for attestation
+        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG | cut -d'@' -f2)
+        echo "digest=$DIGEST" >> $GITHUB_OUTPUT
 
   create-manifest:
     name: Create Docker Manifest
@@ -182,47 +181,11 @@ jobs:
         echo "chart-push-output=$OUTPUT" >> $GITHUB_OUTPUT
         echo "✓ Chart pushed successfully"
 
-  create-helm-chart-local:
-    name: Create Helm Chart (Local)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: [build-local]
-    if: ${{ !inputs.push_to_registry }}
-    outputs:
-      chart_version: ${{ env.CHART_VERSION }}
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Helm
-      uses: azure/setup-helm@v4
-
-    - name: Update Helm chart with local image
-      run: |
-        # Update the image tag in values.yaml to use local image
-        sed -i "s|tag:.*|tag: \"${{ env.IMAGE_TAG }}\"|g" documentdb-chart/values.yaml
-        sed -i "s|repository:.*|repository: \"local/${{ env.IMAGE_NAME }}\"|g" documentdb-chart/values.yaml
-        
-        # Update Chart.yaml version
-        sed -i "s|^version:.*|version: ${{ env.CHART_VERSION }}|g" documentdb-chart/Chart.yaml
-        
-        echo "Updated for local development:"
-        cat documentdb-chart/Chart.yaml
-        cat documentdb-chart/values.yaml
-
-    - name: Package Helm chart locally
-      run: |
-        rm -f ${{ env.CHART_NAME }}/Chart.lock
-        helm dependency update ${{ env.CHART_NAME }}
-        helm lint ${{ env.CHART_NAME }}
-        helm package ${{ env.CHART_NAME }} --version ${{ env.CHART_VERSION }}
-        echo "✓ Local chart packaged successfully"
-
   summary:
     name: Build Summary
     runs-on: ubuntu-latest
     if: always()
-    needs: [build-and-push, create-manifest, create-helm-chart, build-local, create-helm-chart-local]
+    needs: [build-and-push, create-manifest, create-helm-chart]
     steps:
     - name: Generate Build Summary
       run: |
@@ -234,19 +197,13 @@ jobs:
         echo "- **Push to Registry**: ${{ inputs.push_to_registry }}" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
-        if [[ "${{ inputs.push_to_registry }}" == "true" ]]; then
-          echo "### Built Artifacts:" >> $GITHUB_STEP_SUMMARY
-          echo "- **Docker Image**: \`ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Helm Chart**: \`oci://ghcr.io/${{ github.repository_owner }}/documentdb-operator:${{ env.CHART_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Manifest Digest**: \`${{ needs.create-manifest.outputs.manifest_digest }}\`" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "### Local Build:" >> $GITHUB_STEP_SUMMARY
-          echo "- **Docker Image**: \`local/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Helm Chart**: \`documentdb-operator-${{ env.CHART_VERSION }}.tgz\`" >> $GITHUB_STEP_SUMMARY
-        fi
+        echo "### Built Artifacts:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Docker Image**: \`ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Helm Chart**: \`oci://ghcr.io/${{ github.repository_owner }}/documentdb-operator:${{ env.CHART_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Manifest Digest**: \`${{ needs.create-manifest.outputs.manifest_digest }}\`" >> $GITHUB_STEP_SUMMARY
         
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Job Results:" >> $GITHUB_STEP_SUMMARY
-        echo "- **Build**: ${{ needs.build-and-push.result || needs.build-local.result }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Manifest**: ${{ needs.create-manifest.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY  
-        echo "- **Chart**: ${{ needs.create-helm-chart.result || needs.create-helm-chart-local.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build**: ${{ needs.build-and-push.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Manifest**: ${{ needs.create-manifest.result }}" >> $GITHUB_STEP_SUMMARY  
+        echo "- **Chart**: ${{ needs.create-helm-chart.result }}" >> $GITHUB_STEP_SUMMARY

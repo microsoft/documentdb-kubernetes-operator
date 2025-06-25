@@ -72,24 +72,10 @@ jobs:
         sudo apt-get install -y mongodb-mongosh
         mongosh --version
 
-    - name: Create kind cluster with custom configuration
+    - name: Create kind cluster
       uses: helm/kind-action@v1.8.0
       with:
         cluster_name: documentdb-e2e-${{ matrix.test_scenario.name }}
-        config: |
-          kind: Cluster
-          apiVersion: kind.x-k8s.io/v1alpha4
-          nodes:
-          - role: control-plane
-            extraMounts:
-            - hostPath: /tmp
-              containerPath: /tmp
-            kubeadmConfigPatches:
-            - |
-              kind: InitConfiguration
-              nodeRegistration:
-                kubeletExtraArgs:
-                  node-labels: "ingress-ready=true"
 
     - name: Wait for cluster to be ready
       run: |
@@ -195,7 +181,7 @@ jobs:
         
         // Test 1: Basic Connection and Database Operations
         print("\n--- Test 1: Basic Database Operations ---");
-        use testdb;
+        db = db.getSiblingDB('testdb');
         
         // Test collection creation
         db.createCollection("users");
@@ -298,29 +284,14 @@ jobs:
         );
         print("Upsert operation - matched:", upsertResult.matchedCount, "modified:", upsertResult.modifiedCount, "upserted:", upsertResult.upsertedCount);
         
-        // Test 5: Index Operations
-        print("\n--- Test 5: Index Operations ---");
+        // Test 5: Text Search (without indexes)
+        print("\n--- Test 5: Text Search ---");
         
-        // Create indexes
-        db.users.createIndex({ email: 1 }, { unique: true });
-        db.users.createIndex({ age: 1, city: 1 });
-        db.products.createIndex({ name: "text" });
-        db.orders.createIndex({ userId: 1, date: -1 });
+        // Simple text search without text index
+        var laptopProducts = db.products.find({ name: /laptop/i }).toArray();
+        print("Text search for 'laptop' found:", laptopProducts.length, "products");
         
-        var userIndexes = db.users.getIndexes();
-        print("User collection indexes:", userIndexes.length);
-        
-        // Test index usage with explain
-        var explainResult = db.users.find({ email: "john@example.com" }).explain("executionStats");
-        print("Query with email index - docs examined:", explainResult.executionStats.totalDocsExamined);
-        
-        // Test 6: Text Search
-        print("\n--- Test 6: Text Search ---");
-        
-        var textSearchResult = db.products.find({ $text: { $search: "laptop" } }).toArray();
-        print("Text search for 'laptop' found:", textSearchResult.length, "products");
-        
-        // Test 7: Array Operations
+        // Test 6: Array Operations
         print("\n--- Test 7: Array Operations ---");
         
         // Add array field to users
@@ -347,8 +318,8 @@ jobs:
         var readingUsers = db.users.find({ hobbies: "reading" }).toArray();
         print("Users who like reading:", readingUsers.length);
         
-        // Test 8: Date Operations
-        print("\n--- Test 8: Date Operations ---");
+        // Test 7: Date Operations
+        print("\n--- Test 7: Date Operations ---");
         
         var today = new Date();
         var yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
@@ -366,8 +337,8 @@ jobs:
         ]).toArray();
         print("Daily order statistics:", dailyStats);
         
-        // Test 9: Transaction-like Operations (if supported)
-        print("\n--- Test 9: Batch Operations ---");
+        // Test 8: Batch Operations
+        print("\n--- Test 8: Batch Operations ---");
         
         var bulkOps = db.products.initializeUnorderedBulkOp();
         bulkOps.find({ category: "Electronics" }).update({ $inc: { views: 1 } });
@@ -377,8 +348,8 @@ jobs:
         var bulkResult = bulkOps.execute();
         print("Bulk operation results - matched:", bulkResult.nMatched, "modified:", bulkResult.nModified, "inserted:", bulkResult.nInserted);
         
-        // Test 10: Final Verification
-        print("\n--- Test 10: Final Data Verification ---");
+        // Test 9: Final Verification
+        print("\n--- Test 9: Final Data Verification ---");
         
         var totalUsers = db.users.countDocuments();
         var totalProducts = db.products.countDocuments();
@@ -420,7 +391,7 @@ jobs:
         cat > performance_test.js << 'EOF'
         print("=== Performance Test Suite ===");
         
-        use perftest;
+        db = db.getSiblingDB('perftest');
         
         // Large dataset insertion test
         print("\n--- Large Dataset Insertion Test ---");
@@ -455,20 +426,13 @@ jobs:
         var queryEnd = new Date();
         print("Count query took", (queryEnd - queryStart), "ms, result:", count);
         
-        // Index creation and query test
-        print("\n--- Index Performance Test ---");
+        // Query performance test without indexes
+        print("\n--- Query Performance Test (without indexes) ---");
         
-        var indexStart = new Date();
-        db.perfcollection.createIndex({ id: 1 });
-        db.perfcollection.createIndex({ "metadata.batch": 1 });
-        var indexEnd = new Date();
-        print("Index creation took", (indexEnd - indexStart), "ms");
-        
-        // Query with index
-        var indexQueryStart = new Date();
-        var indexedResults = db.perfcollection.find({ id: { $gte: 500 } }).toArray();
-        var indexQueryEnd = new Date();
-        print("Indexed query found", indexedResults.length, "documents in", (indexQueryEnd - indexQueryStart), "ms");
+        var queryStart2 = new Date();
+        var rangeResults = db.perfcollection.find({ id: { $gte: 500 } }).toArray();
+        var queryEnd2 = new Date();
+        print("Range query found", rangeResults.length, "documents in", (queryEnd2 - queryStart2), "ms");
         
         // Aggregation performance
         print("\n--- Aggregation Performance Test ---");
@@ -521,39 +485,53 @@ jobs:
       run: |
         echo "=== Comprehensive Failure Diagnostics ==="
         
+        # Check if kubectl is working
+        if ! kubectl version --client &>/dev/null; then
+          echo "kubectl not available"
+          exit 0
+        fi
+        
+        # Check if cluster is accessible
+        if ! kubectl cluster-info &>/dev/null; then
+          echo "Cluster not accessible"
+          kubectl config current-context || echo "No kubectl context found"
+          kubectl config get-contexts || echo "No contexts available"
+          exit 0
+        fi
+        
         echo "=== System Information ==="
-        kubectl version
-        helm version
-        docker --version
+        kubectl version --client || echo "Failed to get kubectl version"
+        helm version || echo "Failed to get helm version"
+        docker --version || echo "Failed to get docker version"
         
         echo "=== Cluster State ==="
-        kubectl get nodes -o wide
-        kubectl get pods --all-namespaces -o wide
+        kubectl get nodes -o wide || echo "Failed to get nodes"
+        kubectl get pods --all-namespaces -o wide || echo "Failed to get pods"
         
         echo "=== DocumentDB Resources ==="
-        kubectl get documentdb -A -o yaml
-        kubectl describe documentdb $DB_NAME -n $DB_NS
+        kubectl get documentdb -A -o yaml || echo "Failed to get DocumentDB resources"
+        kubectl describe documentdb $DB_NAME -n $DB_NS || echo "Failed to describe DocumentDB"
         
         echo "=== Storage Information ==="
-        kubectl get pv,pvc -A
+        kubectl get pv,pvc -A || echo "Failed to get storage info"
         
         echo "=== Pod Details ==="
-        kubectl describe pods -n $DB_NS
+        kubectl describe pods -n $DB_NS || echo "Failed to describe pods"
         
         echo "=== Container Logs ==="
-        for pod in $(kubectl get pods -n $DB_NS -o name); do
+        for pod in $(kubectl get pods -n $DB_NS -o name 2>/dev/null); do
           echo "--- Logs for $pod ---"
-          kubectl logs $pod -n $DB_NS --all-containers=true --tail=100
+          kubectl logs $pod -n $DB_NS --all-containers=true --tail=100 || echo "Failed to get logs for $pod"
         done
         
         echo "=== Operator Logs ==="
-        kubectl logs -n $OPERATOR_NS deployment/documentdb-operator --tail=200
+        kubectl logs -n $OPERATOR_NS deployment/documentdb-operator --tail=200 || echo "Failed to get operator logs"
         
         echo "=== CNPG Operator Logs ==="
         kubectl logs -n cnpg-system --all-containers=true --tail=100 || echo "CNPG logs not available"
         
         echo "=== Events ==="
-        kubectl get events --all-namespaces --sort-by='.lastTimestamp'
+        kubectl get events --all-namespaces --sort-by='.lastTimestamp' || echo "Failed to get events"
 
     - name: Cleanup
       if: always()

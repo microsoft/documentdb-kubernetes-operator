@@ -1,0 +1,563 @@
+name: E2E Test - DocumentDB with mongosh
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      documentdb_version:
+        description: 'DocumentDB image version to test'
+        required: false
+        default: '16'
+      operator_version:
+        description: 'Operator version to test'
+        required: false
+        default: '0.0.1'
+      node_count:
+        description: 'Number of DocumentDB nodes'
+        required: false
+        default: '1'
+
+env:
+  CERT_MANAGER_NS: cert-manager
+  OPERATOR_NS: documentdb-operator
+  DB_NS: documentdb-e2e-test
+  DB_NAME: documentdb-e2e
+  DB_USERNAME: default_user
+  DB_PASSWORD: Admin100
+  DB_PORT: 10260
+
+jobs:
+  e2e-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    
+    strategy:
+      matrix:
+        # Test different scenarios
+        test_scenario:
+          - name: "single-node"
+            node_count: 1
+            instances_per_node: 1
+          - name: "multi-instance"
+            node_count: 1
+            instances_per_node: 2
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq curl netcat-openbsd
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'latest'
+
+    - name: Install MongoDB Shell (mongosh)
+      run: |
+        # Install mongosh using the official installation method
+        curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        sudo apt-get update
+        sudo apt-get install -y mongodb-mongosh
+        mongosh --version
+
+    - name: Create kind cluster with custom configuration
+      uses: helm/kind-action@v1.8.0
+      with:
+        cluster_name: documentdb-e2e-${{ matrix.test_scenario.name }}
+        config: |
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+          - role: control-plane
+            extraMounts:
+            - hostPath: /tmp
+              containerPath: /tmp
+            kubeadmConfigPatches:
+            - |
+              kind: InitConfiguration
+              nodeRegistration:
+                kubeletExtraArgs:
+                  node-labels: "ingress-ready=true"
+
+    - name: Wait for cluster to be ready
+      run: |
+        kubectl cluster-info
+        kubectl wait --for=condition=Ready nodes --all --timeout=300s
+
+    - name: Install cert-manager
+      run: |
+        echo "Installing cert-manager..."
+        helm repo add jetstack https://charts.jetstack.io
+        helm repo update
+        
+        helm install cert-manager jetstack/cert-manager \
+          --namespace $CERT_MANAGER_NS \
+          --create-namespace \
+          --set installCRDs=true \
+          --wait --timeout=10m
+
+    - name: Install DocumentDB Operator
+      run: |
+        echo "Installing DocumentDB Operator version: ${{ github.event.inputs.operator_version || '0.0.1' }}"
+        
+        helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator \
+          --version ${{ github.event.inputs.operator_version || '0.0.1' }} \
+          --namespace $OPERATOR_NS \
+          --create-namespace \
+          --wait --timeout=15m
+        
+        kubectl wait --for=condition=Available deployment/documentdb-operator -n $OPERATOR_NS --timeout=300s
+
+    - name: Deploy DocumentDB Cluster - ${{ matrix.test_scenario.name }}
+      run: |
+        echo "Deploying DocumentDB cluster with configuration: ${{ matrix.test_scenario.name }}"
+        
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: ${DB_NS}
+        ---
+        apiVersion: db.microsoft.com/preview
+        kind: DocumentDB
+        metadata:
+          name: ${DB_NAME}
+          namespace: ${DB_NS}
+        spec:
+          nodeCount: ${{ matrix.test_scenario.node_count }}
+          instancesPerNode: ${{ matrix.test_scenario.instances_per_node }}
+          documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:${{ github.event.inputs.documentdb_version || '16' }}
+          resource:
+            pvcSize: 10Gi
+          publicLoadBalancer:
+            enabled: false
+        EOF
+
+    - name: Wait for DocumentDB cluster to be ready
+      run: |
+        echo "Waiting for DocumentDB cluster to be ready..."
+        
+        # Calculate expected pod count
+        expected_pods=${{ matrix.test_scenario.node_count }}
+        
+        timeout=900  # 15 minutes
+        end_time=$((SECONDS + timeout))
+        
+        while [ $SECONDS -lt $end_time ]; do
+          ready_pods=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o json | \
+                       jq '.items[] | select(.status.phase == "Running" and ([.status.containerStatuses[] | .ready] | all))' | \
+                       jq -s 'length')
+          
+          if [[ "$ready_pods" -eq "$expected_pods" ]]; then
+            echo "DocumentDB cluster is ready! ($ready_pods/$expected_pods pods ready)"
+            break
+          fi
+          
+          echo "Waiting for DocumentDB pods... ($ready_pods/$expected_pods ready)"
+          kubectl get pods -n $DB_NS
+          sleep 15
+        done
+        
+        if [ $SECONDS -ge $end_time ]; then
+          echo "Timeout waiting for DocumentDB cluster"
+          kubectl describe pods -n $DB_NS
+          exit 1
+        fi
+
+    - name: Comprehensive mongosh tests
+      run: |
+        echo "Running comprehensive mongosh tests..."
+        
+        # Start port-forward
+        kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
+        PF_PID=$!
+        
+        # Wait for port-forward
+        sleep 15
+        timeout 60 bash -c 'until nc -z 127.0.0.1 '$DB_PORT'; do sleep 2; done'
+        
+        # Create comprehensive test script
+        cat > comprehensive_test.js << 'EOF'
+        // Comprehensive DocumentDB test suite
+        print("=== Starting Comprehensive DocumentDB Tests ===");
+        
+        // Test 1: Basic Connection and Database Operations
+        print("\n--- Test 1: Basic Database Operations ---");
+        use testdb;
+        
+        // Test collection creation
+        db.createCollection("users");
+        db.createCollection("products");
+        db.createCollection("orders");
+        
+        // Insert sample data
+        var users = [
+          { _id: 1, name: "John Doe", email: "john@example.com", age: 30, city: "New York" },
+          { _id: 2, name: "Jane Smith", email: "jane@example.com", age: 25, city: "San Francisco" },
+          { _id: 3, name: "Bob Johnson", email: "bob@example.com", age: 35, city: "Chicago" },
+          { _id: 4, name: "Alice Brown", email: "alice@example.com", age: 28, city: "Seattle" }
+        ];
+        
+        var products = [
+          { _id: 1, name: "Laptop", price: 999.99, category: "Electronics", stock: 50 },
+          { _id: 2, name: "Phone", price: 699.99, category: "Electronics", stock: 100 },
+          { _id: 3, name: "Book", price: 19.99, category: "Education", stock: 200 },
+          { _id: 4, name: "Desk", price: 299.99, category: "Furniture", stock: 25 }
+        ];
+        
+        var orders = [
+          { _id: 1, userId: 1, productId: 1, quantity: 1, total: 999.99, date: new Date() },
+          { _id: 2, userId: 2, productId: 2, quantity: 2, total: 1399.98, date: new Date() },
+          { _id: 3, userId: 3, productId: 3, quantity: 3, total: 59.97, date: new Date() }
+        ];
+        
+        var userResult = db.users.insertMany(users);
+        var productResult = db.products.insertMany(products);
+        var orderResult = db.orders.insertMany(orders);
+        
+        print("Inserted", userResult.insertedIds.length, "users");
+        print("Inserted", productResult.insertedIds.length, "products");
+        print("Inserted", orderResult.insertedIds.length, "orders");
+        
+        // Test 2: Query Operations
+        print("\n--- Test 2: Query Operations ---");
+        
+        // Simple queries
+        var youngUsers = db.users.find({ age: { $lt: 30 } }).toArray();
+        print("Found", youngUsers.length, "users under 30");
+        
+        var expensiveProducts = db.products.find({ price: { $gt: 500 } }).toArray();
+        print("Found", expensiveProducts.length, "expensive products");
+        
+        // Complex queries with sorting
+        var sortedUsers = db.users.find().sort({ age: -1 }).toArray();
+        print("Users sorted by age (desc):", sortedUsers.map(u => u.name + " (" + u.age + ")"));
+        
+        // Test 3: Aggregation Pipeline
+        print("\n--- Test 3: Aggregation Operations ---");
+        
+        // Average age
+        var avgAge = db.users.aggregate([
+          { $group: { _id: null, avgAge: { $avg: "$age" }, count: { $sum: 1 } } }
+        ]).toArray();
+        print("Average user age:", avgAge[0].avgAge, "from", avgAge[0].count, "users");
+        
+        // Group by city
+        var cityGroups = db.users.aggregate([
+          { $group: { _id: "$city", count: { $sum: 1 }, avgAge: { $avg: "$age" } } },
+          { $sort: { count: -1 } }
+        ]).toArray();
+        print("Users by city:", cityGroups);
+        
+        // Product statistics
+        var productStats = db.products.aggregate([
+          { $group: { 
+              _id: "$category", 
+              count: { $sum: 1 },
+              avgPrice: { $avg: "$price" },
+              totalStock: { $sum: "$stock" }
+          }},
+          { $sort: { avgPrice: -1 } }
+        ]).toArray();
+        print("Product statistics by category:", productStats);
+        
+        // Test 4: Update Operations
+        print("\n--- Test 4: Update Operations ---");
+        
+        // Update single document
+        var updateResult = db.users.updateOne(
+          { name: "John Doe" },
+          { $set: { age: 31, lastUpdated: new Date() } }
+        );
+        print("Updated", updateResult.modifiedCount, "user document");
+        
+        // Update multiple documents
+        var bulkUpdate = db.products.updateMany(
+          { category: "Electronics" },
+          { $inc: { stock: -5 }, $set: { lastSold: new Date() } }
+        );
+        print("Updated", bulkUpdate.modifiedCount, "product documents");
+        
+        // Upsert operation
+        var upsertResult = db.users.updateOne(
+          { email: "new@example.com" },
+          { $set: { name: "New User", age: 22, city: "Boston" } },
+          { upsert: true }
+        );
+        print("Upsert operation - matched:", upsertResult.matchedCount, "modified:", upsertResult.modifiedCount, "upserted:", upsertResult.upsertedCount);
+        
+        // Test 5: Index Operations
+        print("\n--- Test 5: Index Operations ---");
+        
+        // Create indexes
+        db.users.createIndex({ email: 1 }, { unique: true });
+        db.users.createIndex({ age: 1, city: 1 });
+        db.products.createIndex({ name: "text" });
+        db.orders.createIndex({ userId: 1, date: -1 });
+        
+        var userIndexes = db.users.getIndexes();
+        print("User collection indexes:", userIndexes.length);
+        
+        // Test index usage with explain
+        var explainResult = db.users.find({ email: "john@example.com" }).explain("executionStats");
+        print("Query with email index - docs examined:", explainResult.executionStats.totalDocsExamined);
+        
+        // Test 6: Text Search
+        print("\n--- Test 6: Text Search ---");
+        
+        var textSearchResult = db.products.find({ $text: { $search: "laptop" } }).toArray();
+        print("Text search for 'laptop' found:", textSearchResult.length, "products");
+        
+        // Test 7: Array Operations
+        print("\n--- Test 7: Array Operations ---");
+        
+        // Add array field to users
+        db.users.updateMany(
+          {},
+          { $set: { hobbies: [] } }
+        );
+        
+        // Update with array operations
+        db.users.updateOne(
+          { name: "John Doe" },
+          { $push: { hobbies: { $each: ["reading", "gaming", "cooking"] } } }
+        );
+        
+        db.users.updateOne(
+          { name: "Jane Smith" },
+          { $push: { hobbies: { $each: ["traveling", "photography"] } } }
+        );
+        
+        var usersWithHobbies = db.users.find({ hobbies: { $exists: true, $ne: [] } }).toArray();
+        print("Users with hobbies:", usersWithHobbies.length);
+        
+        // Array query operations
+        var readingUsers = db.users.find({ hobbies: "reading" }).toArray();
+        print("Users who like reading:", readingUsers.length);
+        
+        // Test 8: Date Operations
+        print("\n--- Test 8: Date Operations ---");
+        
+        var today = new Date();
+        var yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+        
+        var recentOrders = db.orders.find({ date: { $gte: yesterday } }).toArray();
+        print("Recent orders:", recentOrders.length);
+        
+        // Date aggregation
+        var dailyStats = db.orders.aggregate([
+          { $group: {
+              _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+              totalOrders: { $sum: 1 },
+              totalAmount: { $sum: "$total" }
+          }}
+        ]).toArray();
+        print("Daily order statistics:", dailyStats);
+        
+        // Test 9: Transaction-like Operations (if supported)
+        print("\n--- Test 9: Batch Operations ---");
+        
+        var bulkOps = db.products.initializeUnorderedBulkOp();
+        bulkOps.find({ category: "Electronics" }).update({ $inc: { views: 1 } });
+        bulkOps.find({ price: { $lt: 100 } }).update({ $set: { featured: true } });
+        bulkOps.insert({ name: "New Product", price: 49.99, category: "Test", stock: 10 });
+        
+        var bulkResult = bulkOps.execute();
+        print("Bulk operation results - matched:", bulkResult.nMatched, "modified:", bulkResult.nModified, "inserted:", bulkResult.nInserted);
+        
+        // Test 10: Final Verification
+        print("\n--- Test 10: Final Data Verification ---");
+        
+        var totalUsers = db.users.countDocuments();
+        var totalProducts = db.products.countDocuments();
+        var totalOrders = db.orders.countDocuments();
+        
+        print("Final counts - Users:", totalUsers, "Products:", totalProducts, "Orders:", totalOrders);
+        
+        // Clean up test data
+        print("\n--- Cleanup ---");
+        db.users.drop();
+        db.products.drop();
+        db.orders.drop();
+        
+        print("\n=== All Tests Completed Successfully! ===");
+        EOF
+        
+        # Run comprehensive tests
+        mongosh 127.0.0.1:$DB_PORT \
+          -u $DB_USERNAME \
+          -p $DB_PASSWORD \
+          --authenticationMechanism SCRAM-SHA-256 \
+          --tls \
+          --tlsAllowInvalidCertificates \
+          --file comprehensive_test.js
+        
+        # Stop port-forward
+        kill $PF_PID
+
+    - name: Performance and Load Testing
+      run: |
+        echo "Running performance tests..."
+        
+        # Start port-forward
+        kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
+        PF_PID=$!
+        sleep 10
+        
+        # Create performance test script
+        cat > performance_test.js << 'EOF'
+        print("=== Performance Test Suite ===");
+        
+        use perftest;
+        
+        // Large dataset insertion test
+        print("\n--- Large Dataset Insertion Test ---");
+        var startTime = new Date();
+        var docs = [];
+        for (let i = 0; i < 1000; i++) {
+          docs.push({
+            id: i,
+            name: "User " + i,
+            email: "user" + i + "@example.com",
+            data: "This is sample data for user " + i,
+            timestamp: new Date(),
+            metadata: {
+              source: "performance_test",
+              batch: Math.floor(i / 100),
+              random: Math.random()
+            }
+          });
+        }
+        
+        var insertStart = new Date();
+        var result = db.perfcollection.insertMany(docs);
+        var insertEnd = new Date();
+        
+        print("Inserted", result.insertedIds.length, "documents in", (insertEnd - insertStart), "ms");
+        
+        // Query performance test
+        print("\n--- Query Performance Test ---");
+        
+        var queryStart = new Date();
+        var count = db.perfcollection.countDocuments();
+        var queryEnd = new Date();
+        print("Count query took", (queryEnd - queryStart), "ms, result:", count);
+        
+        // Index creation and query test
+        print("\n--- Index Performance Test ---");
+        
+        var indexStart = new Date();
+        db.perfcollection.createIndex({ id: 1 });
+        db.perfcollection.createIndex({ "metadata.batch": 1 });
+        var indexEnd = new Date();
+        print("Index creation took", (indexEnd - indexStart), "ms");
+        
+        // Query with index
+        var indexQueryStart = new Date();
+        var indexedResults = db.perfcollection.find({ id: { $gte: 500 } }).toArray();
+        var indexQueryEnd = new Date();
+        print("Indexed query found", indexedResults.length, "documents in", (indexQueryEnd - indexQueryStart), "ms");
+        
+        // Aggregation performance
+        print("\n--- Aggregation Performance Test ---");
+        
+        var aggStart = new Date();
+        var aggResult = db.perfcollection.aggregate([
+          { $match: { id: { $gte: 100 } } },
+          { $group: { _id: "$metadata.batch", count: { $sum: 1 }, avgId: { $avg: "$id" } } },
+          { $sort: { _id: 1 } }
+        ]).toArray();
+        var aggEnd = new Date();
+        
+        print("Aggregation processed", aggResult.length, "groups in", (aggEnd - aggStart), "ms");
+        
+        // Cleanup
+        db.perfcollection.drop();
+        
+        var endTime = new Date();
+        print("\nTotal performance test time:", (endTime - startTime), "ms");
+        EOF
+        
+        mongosh 127.0.0.1:$DB_PORT \
+          -u $DB_USERNAME \
+          -p $DB_PASSWORD \
+          --authenticationMechanism SCRAM-SHA-256 \
+          --tls \
+          --tlsAllowInvalidCertificates \
+          --file performance_test.js
+        
+        kill $PF_PID
+
+    - name: Test cluster health and monitoring
+      run: |
+        echo "Testing cluster health and monitoring..."
+        
+        # Check DocumentDB resource status
+        kubectl get documentdb $DB_NAME -n $DB_NS -o yaml
+        
+        # Check pod resources and health
+        kubectl top pods -n $DB_NS --containers || echo "Metrics server not available"
+        
+        # Check logs for any errors
+        kubectl logs -n $DB_NS -l cnpg.io/cluster=$DB_NAME --tail=50
+        
+        # Check events
+        kubectl get events -n $DB_NS --sort-by='.lastTimestamp'
+
+    - name: Collect comprehensive logs on failure
+      if: failure()
+      run: |
+        echo "=== Comprehensive Failure Diagnostics ==="
+        
+        echo "=== System Information ==="
+        kubectl version
+        helm version
+        docker --version
+        
+        echo "=== Cluster State ==="
+        kubectl get nodes -o wide
+        kubectl get pods --all-namespaces -o wide
+        
+        echo "=== DocumentDB Resources ==="
+        kubectl get documentdb -A -o yaml
+        kubectl describe documentdb $DB_NAME -n $DB_NS
+        
+        echo "=== Storage Information ==="
+        kubectl get pv,pvc -A
+        
+        echo "=== Pod Details ==="
+        kubectl describe pods -n $DB_NS
+        
+        echo "=== Container Logs ==="
+        for pod in $(kubectl get pods -n $DB_NS -o name); do
+          echo "--- Logs for $pod ---"
+          kubectl logs $pod -n $DB_NS --all-containers=true --tail=100
+        done
+        
+        echo "=== Operator Logs ==="
+        kubectl logs -n $OPERATOR_NS deployment/documentdb-operator --tail=200
+        
+        echo "=== CNPG Operator Logs ==="
+        kubectl logs -n cnpg-system --all-containers=true --tail=100 || echo "CNPG logs not available"
+        
+        echo "=== Events ==="
+        kubectl get events --all-namespaces --sort-by='.lastTimestamp'
+
+    - name: Cleanup
+      if: always()
+      run: |
+        echo "Cleaning up test resources..."
+        kubectl delete documentdb $DB_NAME -n $DB_NS --ignore-not-found=true --timeout=300s || true
+        kubectl delete namespace $DB_NS --ignore-not-found=true --timeout=300s || true

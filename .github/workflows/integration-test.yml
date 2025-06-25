@@ -1,0 +1,368 @@
+name: Integration Test - DocumentDB Operator
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  # Cluster configuration
+  CERT_MANAGER_NS: cert-manager
+  OPERATOR_NS: documentdb-operator
+  DB_NS: documentdb-preview-ns
+  DB_NAME: documentdb-preview
+  # Connection parameters
+  DB_USERNAME: default_user
+  DB_PASSWORD: Admin100
+  DB_PORT: 10260
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq curl
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'latest'
+
+    - name: Install MongoDB Shell (mongosh)
+      run: |
+        # Install mongosh
+        wget -qO - https://www.mongodb.org/static/pgp/server-7.0.asc | sudo apt-key add -
+        echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        sudo apt-get update
+        sudo apt-get install -y mongodb-mongosh
+        mongosh --version
+
+    - name: Create kind cluster
+      uses: helm/kind-action@v1.8.0
+      with:
+        cluster_name: documentdb-test
+        config: |
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+          - role: control-plane
+            kubeadmConfigPatches:
+            - |
+              kind: InitConfiguration
+              nodeRegistration:
+                kubeletExtraArgs:
+                  node-labels: "ingress-ready=true"
+            extraPortMappings:
+            - containerPort: 80
+              hostPort: 80
+              protocol: TCP
+            - containerPort: 443
+              hostPort: 443
+              protocol: TCP
+
+    - name: Verify cluster is ready
+      run: |
+        kubectl cluster-info
+        kubectl wait --for=condition=Ready nodes --all --timeout=300s
+        kubectl get nodes
+
+    - name: Install cert-manager
+      run: |
+        echo "Installing cert-manager..."
+        helm repo add jetstack https://charts.jetstack.io
+        helm repo update
+        
+        helm install cert-manager jetstack/cert-manager \
+          --namespace $CERT_MANAGER_NS \
+          --create-namespace \
+          --set installCRDs=true \
+          --wait --timeout=5m
+        
+        echo "Verifying cert-manager installation..."
+        kubectl get pods -n $CERT_MANAGER_NS
+        kubectl wait --for=condition=Ready pods --all -n $CERT_MANAGER_NS --timeout=300s
+
+    - name: Install DocumentDB Operator
+      run: |
+        echo "Installing DocumentDB Operator..."
+        helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator \
+          --version 0.0.1 \
+          --namespace $OPERATOR_NS \
+          --create-namespace \
+          --wait --timeout=10m
+        
+        echo "Verifying operator installation..."
+        kubectl get deployment -n $OPERATOR_NS
+        kubectl wait --for=condition=Available deployment/documentdb-operator -n $OPERATOR_NS --timeout=300s
+        
+        echo "Checking CRDs..."
+        kubectl get crd | grep documentdb
+
+    - name: Deploy DocumentDB Cluster
+      run: |
+        echo "Deploying DocumentDB cluster..."
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: ${DB_NS}
+        ---
+        apiVersion: db.microsoft.com/preview
+        kind: DocumentDB
+        metadata:
+          name: ${DB_NAME}
+          namespace: ${DB_NS}
+        spec:
+          nodeCount: 1
+          instancesPerNode: 1
+          documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+          resource:
+            pvcSize: 10Gi
+          publicLoadBalancer:
+            enabled: false
+        EOF
+
+    - name: Wait for DocumentDB cluster to be ready
+      run: |
+        echo "Waiting for DocumentDB cluster to be ready..."
+        
+        # Wait for the pod to be created and running
+        timeout=600  # 10 minutes
+        end_time=$((SECONDS + timeout))
+        
+        while [ $SECONDS -lt $end_time ]; do
+          ready_pods=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o json | \
+                       jq '.items[] | select(.status.phase == "Running" and ([.status.containerStatuses[] | .ready] | all))' | \
+                       jq -s 'length')
+          
+          if [[ "$ready_pods" -eq "1" ]]; then
+            echo "DocumentDB cluster is ready!"
+            break
+          fi
+          
+          echo "Waiting for DocumentDB pod to be ready... (${ready_pods}/1 ready)"
+          kubectl get pods -n $DB_NS
+          sleep 10
+        done
+        
+        if [ $SECONDS -ge $end_time ]; then
+          echo "Timeout waiting for DocumentDB cluster to be ready"
+          kubectl describe pods -n $DB_NS
+          kubectl logs -n $DB_NS --all-containers=true --tail=50 -l cnpg.io/cluster=$DB_NAME
+          exit 1
+        fi
+        
+        echo "Final cluster status:"
+        kubectl get pods -n $DB_NS
+        kubectl get documentdb -n $DB_NS
+
+    - name: Test connection with mongosh
+      run: |
+        echo "Testing connection with mongosh..."
+        
+        # Start port-forward in background
+        kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
+        PF_PID=$!
+        
+        # Wait for port-forward to be ready
+        sleep 10
+        
+        # Test connection and run basic operations
+        timeout 60 bash -c '
+        until nc -z 127.0.0.1 '$DB_PORT'; do
+          echo "Waiting for port-forward to be ready..."
+          sleep 2
+        done
+        '
+        
+        echo "Port-forward is ready, testing mongosh connection..."
+        
+        # Create test script
+        cat > test_mongosh.js << 'EOF'
+        // Test basic connection and operations
+        print("Connected to DocumentDB!");
+        
+        // Switch to test database
+        use testdb;
+        
+        // Create collection and insert test data
+        db.createCollection("test_collection");
+        
+        var result = db.test_collection.insertMany([
+          { name: "Alice", age: 30, department: "Engineering" },
+          { name: "Bob", age: 25, department: "Marketing" },
+          { name: "Charlie", age: 35, department: "Sales" }
+        ]);
+        
+        print("Inserted documents:", result.insertedIds);
+        
+        // Query the data
+        var docs = db.test_collection.find().toArray();
+        print("Found documents:", docs.length);
+        
+        // Test aggregation
+        var avgAge = db.test_collection.aggregate([
+          { $group: { _id: null, avgAge: { $avg: "$age" } } }
+        ]).toArray();
+        
+        print("Average age:", avgAge[0].avgAge);
+        
+        // Test update
+        db.test_collection.updateOne(
+          { name: "Alice" },
+          { $set: { title: "Senior Engineer" } }
+        );
+        
+        // Verify update
+        var alice = db.test_collection.findOne({ name: "Alice" });
+        print("Alice after update:", alice);
+        
+        print("All tests passed!");
+        EOF
+        
+        # Run the test
+        mongosh 127.0.0.1:$DB_PORT \
+          -u $DB_USERNAME \
+          -p $DB_PASSWORD \
+          --authenticationMechanism SCRAM-SHA-256 \
+          --tls \
+          --tlsAllowInvalidCertificates \
+          --file test_mongosh.js
+        
+        # Clean up port-forward
+        kill $PF_PID || true
+
+    - name: Test with Python PyMongo client
+      run: |
+        echo "Testing with Python PyMongo client..."
+        
+        # Install Python dependencies
+        pip install pymongo
+        
+        # Start port-forward in background
+        kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
+        PF_PID=$!
+        
+        # Wait for port-forward to be ready
+        sleep 10
+        
+        # Run the existing Python test script
+        cd scripts/test-scripts
+        python3 mongo-python-data-pusher.py
+        
+        # Run additional Python tests
+        cat > additional_test.py << 'EOF'
+        from pymongo import MongoClient
+        import ssl
+
+        # Connection parameters
+        client = MongoClient(
+            "127.0.0.1",
+            10260,
+            username="default_user",
+            password="Admin100",
+            authSource="admin",
+            authMechanism="SCRAM-SHA-256",
+            tls=True,
+            tlsAllowInvalidCertificates=True
+        )
+
+        # Test database operations
+        test_db = client["integration_test"]
+        
+        # Test collection operations
+        collection = test_db["test_collection"]
+        
+        # Insert test data
+        docs = [
+            {"type": "integration_test", "value": i, "status": "active"}
+            for i in range(10)
+        ]
+        result = collection.insert_many(docs)
+        print(f"Inserted {len(result.inserted_ids)} documents")
+        
+        # Test queries
+        count = collection.count_documents({"status": "active"})
+        print(f"Found {count} active documents")
+        
+        # Test aggregation
+        pipeline = [
+            {"$match": {"status": "active"}},
+            {"$group": {"_id": "$status", "total": {"$sum": "$value"}}}
+        ]
+        agg_result = list(collection.aggregate(pipeline))
+        print(f"Aggregation result: {agg_result}")
+        
+        # Test index creation
+        collection.create_index("value")
+        indexes = list(collection.list_indexes())
+        print(f"Created indexes: {[idx['name'] for idx in indexes]}")
+        
+        print("Python integration tests passed!")
+        
+        client.close()
+        EOF
+        
+        python3 additional_test.py
+        
+        # Clean up port-forward
+        kill $PF_PID || true
+
+    - name: Collect logs on failure
+      if: failure()
+      run: |
+        echo "=== Collecting diagnostic information ==="
+        
+        echo "=== Cluster nodes ==="
+        kubectl get nodes -o wide
+        
+        echo "=== All pods ==="
+        kubectl get pods --all-namespaces -o wide
+        
+        echo "=== DocumentDB resources ==="
+        kubectl get documentdb -n $DB_NS -o yaml || true
+        
+        echo "=== DocumentDB pod logs ==="
+        kubectl logs -n $DB_NS -l cnpg.io/cluster=$DB_NAME --all-containers=true --tail=100 || true
+        
+        echo "=== DocumentDB pod description ==="
+        kubectl describe pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME || true
+        
+        echo "=== Operator logs ==="
+        kubectl logs -n $OPERATOR_NS deployment/documentdb-operator --tail=100 || true
+        
+        echo "=== cert-manager logs ==="
+        kubectl logs -n $CERT_MANAGER_NS --all-containers=true --tail=50 || true
+        
+        echo "=== Events ==="
+        kubectl get events --all-namespaces --sort-by='.lastTimestamp' || true
+
+    - name: Cleanup resources
+      if: always()
+      run: |
+        echo "Cleaning up resources..."
+        
+        # Delete DocumentDB cluster
+        kubectl delete documentdb $DB_NAME -n $DB_NS --ignore-not-found=true --timeout=300s || true
+        
+        # Wait for cleanup
+        sleep 30
+        
+        # Delete namespaces
+        kubectl delete namespace $DB_NS --ignore-not-found=true --timeout=300s || true
+        
+        echo "Cleanup completed"

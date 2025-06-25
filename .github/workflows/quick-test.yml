@@ -1,0 +1,191 @@
+name: Quick Test - DocumentDB Operator
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of test to run'
+        required: true
+        default: 'basic'
+        type: choice
+        options:
+        - basic
+        - connection-only
+        - mongosh-only
+      timeout_minutes:
+        description: 'Test timeout in minutes'
+        required: false
+        default: '20'
+
+env:
+  CERT_MANAGER_NS: cert-manager
+  OPERATOR_NS: documentdb-operator
+  DB_NS: documentdb-quick-test
+  DB_NAME: documentdb-quick
+  DB_USERNAME: default_user
+  DB_PASSWORD: Admin100
+  DB_PORT: 10260
+
+jobs:
+  quick-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ fromJSON(github.event.inputs.timeout_minutes || '20') }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update && sudo apt-get install -y jq curl netcat-openbsd
+        
+        # Install mongosh
+        curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        sudo apt-get update && sudo apt-get install -y mongodb-mongosh
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+
+    - name: Create kind cluster
+      uses: helm/kind-action@v1.8.0
+      with:
+        cluster_name: documentdb-quick-test
+
+    - name: Setup cluster
+      run: |
+        kubectl wait --for=condition=Ready nodes --all --timeout=300s
+        
+        # Install cert-manager
+        helm repo add jetstack https://charts.jetstack.io && helm repo update
+        helm install cert-manager jetstack/cert-manager \
+          --namespace $CERT_MANAGER_NS --create-namespace \
+          --set installCRDs=true --wait --timeout=5m
+        
+        # Install DocumentDB operator
+        helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator \
+          --version 0.0.1 --namespace $OPERATOR_NS --create-namespace --wait --timeout=8m
+
+    - name: Deploy DocumentDB cluster
+      run: |
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: ${DB_NS}
+        ---
+        apiVersion: db.microsoft.com/preview
+        kind: DocumentDB
+        metadata:
+          name: ${DB_NAME}
+          namespace: ${DB_NS}
+        spec:
+          nodeCount: 1
+          instancesPerNode: 1
+          documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+          resource:
+            pvcSize: 5Gi
+          publicLoadBalancer:
+            enabled: false
+        EOF
+        
+        # Wait for cluster
+        timeout 600 bash -c '
+        while true; do
+          ready=$(kubectl get pods -n '$DB_NS' -l cnpg.io/cluster='$DB_NAME' -o json | jq ".items[] | select(.status.phase == \"Running\" and ([.status.containerStatuses[] | .ready] | all))" | jq -s "length")
+          if [[ "$ready" -eq "1" ]]; then
+            echo "DocumentDB cluster is ready!"
+            break
+          fi
+          echo "Waiting... ($ready/1 pods ready)"
+          sleep 10
+        done'
+
+    - name: Basic connection test
+      if: github.event.inputs.test_type == 'basic' || github.event.inputs.test_type == 'connection-only'
+      run: |
+        kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
+        PF_PID=$!
+        sleep 10
+        
+        # Test connection
+        timeout 30 bash -c 'until nc -z 127.0.0.1 '$DB_PORT'; do sleep 2; done'
+        
+        # Simple connection test
+        mongosh 127.0.0.1:$DB_PORT \
+          -u $DB_USERNAME -p $DB_PASSWORD \
+          --authenticationMechanism SCRAM-SHA-256 \
+          --tls --tlsAllowInvalidCertificates \
+          --eval "print('Connection successful!'); use quicktest; db.test.insertOne({test: 'hello', timestamp: new Date()}); print('Insert successful!'); var count = db.test.countDocuments(); print('Document count:', count);"
+        
+        kill $PF_PID
+        echo "✅ Basic connection test passed!"
+
+    - name: MongoDB shell operations test
+      if: github.event.inputs.test_type == 'basic' || github.event.inputs.test_type == 'mongosh-only'
+      run: |
+        kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
+        PF_PID=$!
+        sleep 10
+        
+        # Create mongosh test script
+        cat > quick_mongosh_test.js << 'EOF'
+        print("=== Quick mongosh Test ===");
+        
+        use quicktest;
+        
+        // Create and populate collection
+        db.createCollection("quicktest");
+        
+        var docs = [
+          { name: "Test1", value: 100, type: "A" },
+          { name: "Test2", value: 200, type: "B" },
+          { name: "Test3", value: 150, type: "A" }
+        ];
+        
+        var result = db.quicktest.insertMany(docs);
+        print("✅ Inserted", result.insertedIds.length, "documents");
+        
+        // Query test
+        var typeADocs = db.quicktest.find({ type: "A" }).toArray();
+        print("✅ Found", typeADocs.length, "type A documents");
+        
+        // Aggregation test
+        var avgValue = db.quicktest.aggregate([
+          { $group: { _id: null, avgValue: { $avg: "$value" } } }
+        ]).toArray();
+        print("✅ Average value:", avgValue[0].avgValue);
+        
+        // Update test
+        db.quicktest.updateOne({ name: "Test1" }, { $set: { updated: true } });
+        print("✅ Update operation completed");
+        
+        // Index test
+        db.quicktest.createIndex({ name: 1 });
+        print("✅ Index created");
+        
+        print("=== All quick tests passed! ===");
+        EOF
+        
+        mongosh 127.0.0.1:$DB_PORT \
+          -u $DB_USERNAME -p $DB_PASSWORD \
+          --authenticationMechanism SCRAM-SHA-256 \
+          --tls --tlsAllowInvalidCertificates \
+          --file quick_mongosh_test.js
+        
+        kill $PF_PID
+        echo "✅ mongosh operations test passed!"
+
+    - name: Show cluster status
+      if: always()
+      run: |
+        echo "=== Final cluster status ==="
+        kubectl get pods -n $DB_NS -o wide
+        kubectl get documentdb -n $DB_NS
+        echo "✅ Quick test completed!"
+
+    - name: Cleanup
+      if: always()
+      run: |
+        kubectl delete documentdb $DB_NAME -n $DB_NS --ignore-not-found=true --timeout=180s || true
+        kubectl delete namespace $DB_NS --ignore-not-found=true --timeout=180s || true

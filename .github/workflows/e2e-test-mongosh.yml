@@ -10,14 +10,19 @@ on:
         description: 'DocumentDB image version to test'
         required: false
         default: '16'
-      operator_version:
-        description: 'Operator version to test'
-        required: false
-        default: '0.0.1'
       node_count:
         description: 'Number of DocumentDB nodes'
         required: false
         default: '1'
+      test_level:
+        description: 'Test level to run'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - quick
+          - integration
+          - full
 
 permissions:
   packages: write
@@ -34,118 +39,29 @@ env:
   DB_USERNAME: default_user
   DB_PASSWORD: Admin100
   DB_PORT: 10260
-  IMAGE_NAME: documentdb-kubernetes-operator
-  IMAGE_TAG: e2e-test-${{ github.run_id }}
-  CHART_NAME: documentdb-chart
-  CHART_VERSION: 0.1.0-${{ github.run_id }}
 
 jobs:
-  build-and-push:
-    name: Build and Push Docker Images
-    timeout-minutes: 30
-    strategy:
-      matrix:
-        arch: [amd64, arm64]
-        include:
-          - arch: amd64
-            base_arch: AMD64
-            runner: ubuntu-22.04
-          - arch: arm64
-            base_arch: ARM64
-            runner: ubuntu-22.04-arm
-    runs-on: ${{ matrix.runner }}
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Login to GHCR
-      run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-    
-    - name: Build and Push ${{ matrix.arch }} Image
-      run: |
-        TAG=${{ env.IMAGE_TAG }}-${{ matrix.arch }}
-        docker build \
-          --build-arg ARCH=${{ matrix.base_arch }} \
-          -t ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG \
-          -f Dockerfile .
-        docker push ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG
-
-  create-manifest:
-    name: Create Docker Manifest
-    runs-on: ubuntu-22.04
-    timeout-minutes: 10
-    needs: build-and-push
-    steps:
-    - name: Login to GHCR
-      run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-    
-    - name: Create and Push Manifest
-      run: |
-        docker manifest create ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
-          --amend ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-amd64 \
-          --amend ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-arm64
-        docker manifest push ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-
-  create-helm-chart:
-    name: Create and Push Helm Chart
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: create-manifest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Helm
-      uses: azure/setup-helm@v4
-
-    - name: Update Helm chart with new image
-      run: |
-        # Update the image tag in values.yaml to use our newly built image
-        sed -i "s|tag:.*|tag: \"${{ env.IMAGE_TAG }}\"|g" documentdb-chart/values.yaml
-        sed -i "s|repository:.*|repository: \"ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}\"|g" documentdb-chart/values.yaml
-        
-        # Update Chart.yaml version to use proper semantic versioning
-        sed -i "s|^version:.*|version: ${{ env.CHART_VERSION }}|g" documentdb-chart/Chart.yaml
-        
-        echo "Updated Chart.yaml:"
-        cat documentdb-chart/Chart.yaml
-        
-        echo "Updated values.yaml:"
-        cat documentdb-chart/values.yaml
-
-    - name: Package Helm chart
-      run: |
-        # Clean up any existing Chart.lock files
-        rm -f ${{ env.CHART_NAME }}/Chart.lock
-        
-        echo "Chart.yaml content before dependency update:"
-        cat ${{ env.CHART_NAME }}/Chart.yaml
-        
-        echo "Running helm dependency update for ${{ env.CHART_NAME }}..."
-        helm dependency update ${{ env.CHART_NAME }}
-        
-        echo "Validating chart..."
-        helm lint ${{ env.CHART_NAME }}
-        
-        echo "Packaging chart with version ${{ env.CHART_VERSION }}..."
-        helm package ${{ env.CHART_NAME }} --version ${{ env.CHART_VERSION }}
-        
-        echo "Generated chart package:"
-        ls -la *.tgz
-
-    - name: Log in to GHCR
-      run: |
-        echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
-
-    - name: Push Helm chart to GHCR
-      run: |
-        helm push documentdb-operator-${{ env.CHART_VERSION }}.tgz oci://ghcr.io/${{ github.repository_owner }}
+  # Use the reusable build workflow
+  build:
+    name: Build Images and Charts
+    uses: ./.github/workflows/build-and-package.yml
+    with:
+      image_tag_prefix: 'e2e-test'
+      chart_version_prefix: '0.1.0'
+      push_to_registry: true
+    secrets: inherit
 
   e2e-test:
     name: Run E2E Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 60  # Increased timeout for image build + test
-    needs: create-helm-chart
+    timeout-minutes: 60
+    needs: build
+    
+    env:
+      # Use outputs from the build workflow
+      IMAGE_NAME: documentdb-kubernetes-operator
+      IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+      CHART_VERSION: ${{ needs.build.outputs.chart_version }}
     
     strategy:
       matrix:

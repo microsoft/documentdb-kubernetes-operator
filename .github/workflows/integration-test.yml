@@ -7,6 +7,11 @@ on:
     branches: [ main, develop ]
   workflow_dispatch:
 
+permissions:
+  packages: write
+  contents: read
+  id-token: write
+
 env:
   # Cluster configuration
   CERT_MANAGER_NS: cert-manager
@@ -19,9 +24,26 @@ env:
   DB_PORT: 10260
 
 jobs:
+  # Use the reusable build workflow
+  build:
+    name: Build Images and Charts
+    uses: ./.github/workflows/build-and-package.yml
+    with:
+      image_tag_prefix: 'integration-test'
+      chart_version_prefix: '0.1.0'
+      push_to_registry: true
+    secrets: inherit
+
   integration-test:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    needs: build
+    
+    env:
+      # Use outputs from the build workflow
+      IMAGE_NAME: documentdb-kubernetes-operator
+      IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+      CHART_VERSION: ${{ needs.build.outputs.chart_version }}
     
     steps:
     - name: Checkout repository
@@ -60,8 +82,12 @@ jobs:
           --namespace $CERT_MANAGER_NS --create-namespace \
           --set installCRDs=true --wait --timeout=5m
         
-        helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator \
-          --version 0.0.1 --namespace $OPERATOR_NS --create-namespace --wait --timeout=8m
+        # Login to GHCR for Helm
+        echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+        
+        # Install the operator using the newly created chart
+        helm install documentdb-operator oci://ghcr.io/${{ github.repository_owner }}/documentdb-operator \
+          --version ${{ env.CHART_VERSION }} --namespace $OPERATOR_NS --create-namespace --wait --timeout=8m
 
     - name: Deploy DocumentDB cluster
       run: |

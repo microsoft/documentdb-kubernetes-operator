@@ -57,23 +57,29 @@ jobs:
 
   e2e-test:
     name: Run E2E Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     needs: build
+    
+    strategy:
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-latest
+          - architecture: arm64
+            runner: ubuntu-24.04-arm64
+        # Test different scenarios
+        test_scenario:
+          - name: "single-node"
+            node_count: 1
+            instances_per_node: 1
     
     env:
       # Use outputs from the build workflow
       IMAGE_NAME: documentdb-kubernetes-operator
       IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
       CHART_VERSION: ${{ needs.build.outputs.chart_version }}
-    
-    strategy:
-      matrix:
-        # Test different scenarios
-        test_scenario:
-          - name: "single-node"
-            node_count: 1
-            instances_per_node: 1
+      ARCHITECTURE: ${{ matrix.architecture }}
     
     steps:
     - name: Checkout repository
@@ -108,26 +114,41 @@ jobs:
 
     - name: Install MongoDB Shell (mongosh)
       run: |
+        echo "Installing mongosh for ${{ matrix.architecture }} architecture..."
+        
         # Install mongosh using the official installation method
         curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
-        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        
+        if [[ "${{ matrix.architecture }}" == "arm64" ]]; then
+          echo "deb [ arch=arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        else
+          echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        fi
+        
         sudo apt-get update
         sudo apt-get install -y mongodb-mongosh
         mongosh --version
+        echo "✓ mongosh installed successfully for ${{ matrix.architecture }}"
 
     - name: Create kind cluster
       uses: helm/kind-action@v1.8.0
       with:
-        cluster_name: documentdb-e2e-${{ matrix.test_scenario.name }}
+        cluster_name: documentdb-e2e-${{ matrix.architecture }}-${{ matrix.test_scenario.name }}
 
     - name: Wait for cluster to be ready
       run: |
+        echo "Waiting for ${{ matrix.architecture }} cluster to be ready..."
         kubectl cluster-info
         kubectl wait --for=condition=Ready nodes --all --timeout=300s
+        
+        # Verify node architecture
+        echo "Node architecture verification:"
+        kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'
+        echo ""
 
     - name: Install cert-manager
       run: |
-        echo "Installing cert-manager..."
+        echo "Installing cert-manager on ${{ matrix.architecture }}..."
         helm repo add jetstack https://charts.jetstack.io
         helm repo update
         
@@ -139,7 +160,7 @@ jobs:
 
     - name: Install DocumentDB Operator
       run: |
-        echo "Installing DocumentDB Operator using newly built chart version: ${{ env.CHART_VERSION }}"
+        echo "Installing DocumentDB Operator on ${{ matrix.architecture }} using newly built chart version: ${{ env.CHART_VERSION }}"
         
         # Log in to GHCR for Helm
         echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
@@ -154,13 +175,13 @@ jobs:
         kubectl wait --for=condition=Available deployment/documentdb-operator -n $OPERATOR_NS --timeout=300s
         
         # Verify that our newly built image is being used
-        echo "Verifying operator deployment uses our newly built image..."
+        echo "Verifying operator deployment uses our newly built image on ${{ matrix.architecture }}..."
         kubectl get deployment documentdb-operator -n $OPERATOR_NS -o jsonpath='{.spec.template.spec.containers[0].image}'
         echo ""
 
     - name: Deploy DocumentDB Cluster - ${{ matrix.test_scenario.name }}
       run: |
-        echo "Deploying DocumentDB cluster with configuration: ${{ matrix.test_scenario.name }}"
+        echo "Deploying DocumentDB cluster with configuration: ${{ matrix.test_scenario.name }} on ${{ matrix.architecture }}"
         
         cat <<EOF | kubectl apply -f -
         apiVersion: v1
@@ -185,7 +206,7 @@ jobs:
 
     - name: Wait for DocumentDB cluster to be ready
       run: |
-        echo "Waiting for DocumentDB cluster to be ready..."
+        echo "Waiting for DocumentDB cluster to be ready on ${{ matrix.architecture }}..."
         
         # Calculate expected pod count
         expected_pods=${{ matrix.test_scenario.node_count }}
@@ -199,24 +220,24 @@ jobs:
                        jq -s 'length')
           
           if [[ "$ready_pods" -eq "$expected_pods" ]]; then
-            echo "DocumentDB cluster is ready! ($ready_pods/$expected_pods pods ready)"
+            echo "DocumentDB cluster is ready on ${{ matrix.architecture }}! ($ready_pods/$expected_pods pods ready)"
             break
           fi
           
-          echo "Waiting for DocumentDB pods... ($ready_pods/$expected_pods ready)"
+          echo "Waiting for DocumentDB pods on ${{ matrix.architecture }}... ($ready_pods/$expected_pods ready)"
           kubectl get pods -n $DB_NS
           sleep 15
         done
         
         if [ $SECONDS -ge $end_time ]; then
-          echo "Timeout waiting for DocumentDB cluster"
+          echo "Timeout waiting for DocumentDB cluster on ${{ matrix.architecture }}"
           kubectl describe pods -n $DB_NS
           exit 1
         fi
 
     - name: Comprehensive mongosh tests
       run: |
-        echo "Running comprehensive mongosh tests..."
+        echo "Running comprehensive mongosh tests on ${{ matrix.architecture }}..."
         
         # Start port-forward
         kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
@@ -568,7 +589,7 @@ jobs:
         validate(!remainingCollections.includes("products"), "Products collection dropped");
         validate(!remainingCollections.includes("orders"), "Orders collection dropped");
         
-        print("\n=== All Tests Completed Successfully with Validation! ===");
+        print("\n=== All Tests Completed Successfully with Validation on ${{ matrix.architecture }}! ===");
         EOF
         
         # Run comprehensive tests with validation
@@ -580,9 +601,9 @@ jobs:
           --tls \
           --tlsAllowInvalidCertificates \
           --file comprehensive_test.js; then
-          echo "✓ Comprehensive mongosh tests completed successfully"
+          echo "✓ Comprehensive mongosh tests completed successfully on ${{ matrix.architecture }}"
         else
-          echo "❌ Comprehensive mongosh tests failed"
+          echo "❌ Comprehensive mongosh tests failed on ${{ matrix.architecture }}"
           exit 1
         fi
         
@@ -591,7 +612,7 @@ jobs:
 
     - name: Performance and Load Testing
       run: |
-        echo "Running performance tests..."
+        echo "Running performance tests on ${{ matrix.architecture }}..."
         
         # Start port-forward
         kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
@@ -805,7 +826,7 @@ jobs:
         var collections = db.getCollectionNames();
         validate(!collections.includes("perfcollection"), "Performance collection was dropped");
         
-        print("\n=== Performance Tests Completed Successfully with Validation! ===");
+        print("\n=== Performance Tests Completed Successfully with Validation on ${{ matrix.architecture }}! ===");
         EOF
         
         echo "Running performance validation tests..."
@@ -816,9 +837,9 @@ jobs:
           --tls \
           --tlsAllowInvalidCertificates \
           --file performance_test.js; then
-          echo "✓ Performance tests completed successfully"
+          echo "✓ Performance tests completed successfully on ${{ matrix.architecture }}"
         else
-          echo "❌ Performance tests failed"
+          echo "❌ Performance tests failed on ${{ matrix.architecture }}"
           exit 1
         fi
         
@@ -826,7 +847,7 @@ jobs:
 
     - name: Test cluster health and monitoring
       run: |
-        echo "Testing cluster health and monitoring..."
+        echo "Testing cluster health and monitoring on ${{ matrix.architecture }}..."
         
         # Check DocumentDB resource status
         kubectl get documentdb $DB_NAME -n $DB_NS -o yaml
@@ -843,7 +864,7 @@ jobs:
     - name: Collect comprehensive logs on failure
       if: failure()
       run: |
-        echo "=== Comprehensive Failure Diagnostics ==="
+        echo "=== Comprehensive Failure Diagnostics for ${{ matrix.architecture }} ==="
         
         # Check if kubectl is working
         if ! kubectl version --client &>/dev/null; then

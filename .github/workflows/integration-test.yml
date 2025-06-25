@@ -35,15 +35,24 @@ jobs:
     secrets: inherit
 
   integration-test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     needs: build
+    
+    strategy:
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-latest
+          - architecture: arm64
+            runner: ubuntu-24.04-arm64
     
     env:
       # Use outputs from the build workflow
       IMAGE_NAME: documentdb-kubernetes-operator
       IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
       CHART_VERSION: ${{ needs.build.outputs.chart_version }}
+      ARCHITECTURE: ${{ matrix.architecture }}
     
     steps:
     - name: Checkout repository
@@ -65,17 +74,39 @@ jobs:
     - name: Create kind cluster
       uses: helm/kind-action@v1.8.0
       with:
-        cluster_name: documentdb-test
+        cluster_name: documentdb-test-${{ matrix.architecture }}
 
     - name: Install dependencies
       run: |
-        curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
-        echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        echo "Installing dependencies for ${{ matrix.architecture }} architecture..."
+        
+        # Install MongoDB shell - use architecture-appropriate method
+        if [[ "${{ matrix.architecture }}" == "arm64" ]]; then
+          # For ARM64, we may need to use different installation method
+          curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+          echo "deb [ arch=arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        else
+          # For AMD64
+          curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+          echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        fi
+        
         sudo apt-get update && sudo apt-get install -y mongodb-mongosh
+        
+        # Verify installation
+        mongosh --version
+        echo "✓ mongosh installed successfully for ${{ matrix.architecture }}"
 
     - name: Setup cluster
       run: |
+        echo "Setting up cluster on ${{ matrix.architecture }} architecture..."
         kubectl wait --for=condition=Ready nodes --all --timeout=300s
+        
+        # Verify node architecture
+        kubectl get nodes -o wide
+        echo "Node architecture verification:"
+        kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'
+        echo ""
         
         helm repo add jetstack https://charts.jetstack.io && helm repo update
         helm install cert-manager jetstack/cert-manager \
@@ -88,9 +119,13 @@ jobs:
         # Install the operator using the newly created chart
         helm install documentdb-operator oci://ghcr.io/${{ github.repository_owner }}/documentdb-operator \
           --version ${{ env.CHART_VERSION }} --namespace $OPERATOR_NS --create-namespace --wait --timeout=8m
+        
+        echo "✓ Cluster setup completed on ${{ matrix.architecture }}"
 
     - name: Deploy DocumentDB cluster
       run: |
+        echo "Deploying DocumentDB cluster on ${{ matrix.architecture }} architecture..."
+        
         cat <<EOF | kubectl apply -f -
         apiVersion: v1
         kind: Namespace
@@ -112,7 +147,7 @@ jobs:
             enabled: false
         EOF
         
-        echo "DocumentDB resource created, waiting for cluster to be ready..."
+        echo "DocumentDB resource created on ${{ matrix.architecture }}, waiting for cluster to be ready..."
         
         sleep 30
         
@@ -137,12 +172,12 @@ jobs:
           sleep 15
         done'
         
-        echo "Final pod status:"
+        echo "Final pod status on ${{ matrix.architecture }}:"
         kubectl get pods -n $DB_NS -o wide
 
     - name: Test connection with mongosh
       run: |
-        echo "Testing connection with mongosh..."
+        echo "Testing connection with mongosh on ${{ matrix.architecture }} architecture..."
         
         # Start port-forward in background
         kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
@@ -277,9 +312,9 @@ jobs:
           --tls \
           --tlsAllowInvalidCertificates \
           --file test_mongosh.js; then
-          echo "✓ Mongosh validation tests completed successfully"
+          echo "✓ Mongosh validation tests completed successfully on ${{ matrix.architecture }}"
         else
-          echo "❌ Mongosh validation tests failed"
+          echo "❌ Mongosh validation tests failed on ${{ matrix.architecture }}"
           exit 1
         fi
         
@@ -288,7 +323,7 @@ jobs:
 
     - name: Test with Python PyMongo client
       run: |
-        echo "Testing with Python PyMongo client..."
+        echo "Testing with Python PyMongo client on ${{ matrix.architecture }} architecture..."
         
         # Install Python dependencies
         pip install pymongo
@@ -312,11 +347,11 @@ jobs:
         
         # Run the existing Python test script and validate it completes successfully
         cd scripts/test-scripts
-        echo "Running existing Python test script..."
+        echo "Running existing Python test script on ${{ matrix.architecture }}..."
         if python3 mongo-python-data-pusher.py; then
-          echo "✓ Existing Python test script completed successfully"
+          echo "✓ Existing Python test script completed successfully on ${{ matrix.architecture }}"
         else
-          echo "❌ Existing Python test script failed"
+          echo "❌ Existing Python test script failed on ${{ matrix.architecture }}"
           exit 1
         fi
         cd - > /dev/null
@@ -455,15 +490,16 @@ jobs:
         validate_test(updated_result["max_value"] == 4, f"Updated group max_value is correct: {updated_result['max_value']}")
 
         print("All Python integration tests passed with validation!")
+        print(f"Test completed successfully on architecture: {sys.platform}")
         
         client.close()
         EOF
         
-        echo "Running Python validation tests..."
+        echo "Running Python validation tests on ${{ matrix.architecture }}..."
         if python3 additional_test.py; then
-          echo "✓ Python validation tests completed successfully"
+          echo "✓ Python validation tests completed successfully on ${{ matrix.architecture }}"
         else
-          echo "❌ Python validation tests failed"
+          echo "❌ Python validation tests failed on ${{ matrix.architecture }}"
           exit 1
         fi
         
@@ -473,7 +509,7 @@ jobs:
     - name: Collect logs on failure
       if: failure()
       run: |
-        echo "=== Collecting diagnostic information ==="
+        echo "=== Collecting diagnostic information for ${{ matrix.architecture }} ==="
         
         # Check if kubectl is working
         if ! kubectl version --client &>/dev/null; then

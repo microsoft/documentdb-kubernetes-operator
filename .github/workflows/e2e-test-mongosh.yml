@@ -235,19 +235,23 @@ jobs:
           exit 1
         fi
 
-    - name: Comprehensive mongosh tests
+    - name: Setup port forwarding for mongosh tests
       run: |
-        echo "Running comprehensive mongosh tests on ${{ matrix.architecture }}..."
+        echo "Setting up port forwarding for mongosh tests on ${{ matrix.architecture }}..."
         
         # Start port-forward
         kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
         PF_PID=$!
+        echo $PF_PID > /tmp/pf_pid
         
         # Wait for port-forward
         sleep 15
         timeout 60 bash -c 'until nc -z 127.0.0.1 '$DB_PORT'; do sleep 2; done'
-        
-        # Create comprehensive test script with validation
+        echo "✓ Port forwarding established on ${{ matrix.architecture }}"
+
+    - name: Create mongosh test script
+      run: |
+        echo "Creating comprehensive mongosh test script..."
         cat > comprehensive_test.js << 'EOF'
         // Comprehensive DocumentDB test suite with validation
         print("=== Starting Comprehensive DocumentDB Tests with Validation ===");
@@ -725,9 +729,12 @@ jobs:
         
         print("\n=== All Tests Completed Successfully with Validation on ${{ matrix.architecture }}! ===");
         EOF
+
+    - name: Execute mongosh comprehensive tests
+      run: |
+        echo "Running comprehensive mongosh validation tests on ${{ matrix.architecture }}..."
         
         # Run comprehensive tests with validation
-        echo "Running comprehensive mongosh validation tests..."
         if mongosh 127.0.0.1:$DB_PORT \
           -u $DB_USERNAME \
           -p $DB_PASSWORD \
@@ -740,18 +747,32 @@ jobs:
           echo "❌ Comprehensive mongosh tests failed on ${{ matrix.architecture }}"
           exit 1
         fi
-        
-        # Stop port-forward
-        kill $PF_PID
 
-    - name: Performance and Load Testing
+    - name: Cleanup port forwarding
+      if: always()
       run: |
-        echo "Running performance tests on ${{ matrix.architecture }}..."
+        # Stop port-forward if it exists
+        if [ -f /tmp/pf_pid ]; then
+          PF_PID=$(cat /tmp/pf_pid)
+          kill $PF_PID 2>/dev/null || true
+          rm -f /tmp/pf_pid
+        fi
+
+    - name: Setup performance testing
+      run: |
+        echo "Setting up performance tests on ${{ matrix.architecture }}..."
         
         # Start port-forward
         kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
         PF_PID=$!
+        echo $PF_PID > /tmp/perf_pf_pid
         sleep 10
+        
+        echo "✓ Performance test port forwarding established"
+
+    - name: Create performance test script  
+      run: |
+        echo "Creating performance test script..."
         
         # Create performance test script with validation
         cat > performance_test.js << 'EOF'
@@ -977,8 +998,11 @@ jobs:
         
         print("\n=== Performance Tests Completed Successfully with Validation on ${{ matrix.architecture }}! ===");
         EOF
+
+    - name: Execute performance tests
+      run: |
+        echo "Running performance validation tests on ${{ matrix.architecture }}..."
         
-        echo "Running performance validation tests..."
         if mongosh 127.0.0.1:$DB_PORT \
           -u $DB_USERNAME \
           -p $DB_PASSWORD \
@@ -991,8 +1015,16 @@ jobs:
           echo "❌ Performance tests failed on ${{ matrix.architecture }}"
           exit 1
         fi
-        
-        kill $PF_PID
+
+    - name: Cleanup performance testing
+      if: always()
+      run: |
+        # Stop performance test port-forward
+        if [ -f /tmp/perf_pf_pid ]; then
+          PF_PID=$(cat /tmp/perf_pf_pid)
+          kill $PF_PID 2>/dev/null || true
+          rm -f /tmp/perf_pf_pid
+        fi
 
     - name: Test cluster health and monitoring
       run: |

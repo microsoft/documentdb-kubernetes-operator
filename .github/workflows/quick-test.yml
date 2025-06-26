@@ -86,7 +86,7 @@ jobs:
         echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
         
         # Install the operator using the newly created chart
-        helm install documentdb-operator oci://ghcr.io/${{ github.repository }}/documentdb-operator \
+        helm install documentdb-operator oci://ghcr.io/${{ github.repository_owner }}/documentdb-operator \
           --version ${{ env.CHART_VERSION }} --namespace $OPERATOR_NS --create-namespace --wait --timeout=8m
 
     - name: Deploy DocumentDB cluster

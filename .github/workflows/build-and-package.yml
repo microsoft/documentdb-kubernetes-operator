@@ -37,7 +37,7 @@ permissions:
 env:
   IMAGE_NAME: documentdb-kubernetes-operator
   IMAGE_TAG: ${{ inputs.image_tag_prefix }}-${{ github.run_id }}
-  CHART_NAME: documentdb-operator
+  CHART_NAME: documentdb-chart
   CHART_VERSION: ${{ inputs.chart_version_prefix }}-${{ github.run_id }}
 
 jobs:
@@ -186,7 +186,7 @@ jobs:
       run: |
         # Push to the repository root, not with an additional path segment
         # The package name should match the chart name from Chart.yaml
-        CHART_PACKAGE="${{ env.CHART_NAME }}-${{ env.CHART_VERSION }}.tgz"
+        CHART_PACKAGE="documentdb-operator-${{ env.CHART_VERSION }}.tgz"
         echo "Pushing chart package: $CHART_PACKAGE"
         OUTPUT=$(helm push $CHART_PACKAGE oci://ghcr.io/${{ github.repository_owner }})
         echo "chart-push-output=$OUTPUT" >> $GITHUB_OUTPUT

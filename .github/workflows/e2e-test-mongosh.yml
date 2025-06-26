@@ -290,8 +290,17 @@ jobs:
       run: |
         echo "Setting up port forwarding for performance tests on ${{ matrix.architecture }}..."
         
+        # Get the actual pod name
+        POD_NAME=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o jsonpath='{.items[0].metadata.name}')
+        if [ -z "$POD_NAME" ]; then
+          echo "❌ No DocumentDB pod found"
+          kubectl get pods -n $DB_NS
+          exit 1
+        fi
+        echo "Using pod: $POD_NAME"
+        
         # Start port-forward
-        kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
+        kubectl port-forward pod/$POD_NAME $DB_PORT:$DB_PORT -n $DB_NS &
         PF_PID=$!
         echo $PF_PID > /tmp/perf_pf_pid
         sleep 10

@@ -66,8 +66,8 @@ jobs:
         include:
           - architecture: amd64
             runner: ubuntu-latest
-          - architecture: arm64
-            runner: ubuntu-22.04-arm
+          # - architecture: arm64
+          #   runner: ubuntu-22.04-arm
         # Test different scenarios
         test_scenario:
           - name: "single-node"

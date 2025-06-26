@@ -37,7 +37,7 @@ permissions:
 env:
   IMAGE_NAME: documentdb-kubernetes-operator
   IMAGE_TAG: ${{ inputs.image_tag_prefix }}-${{ github.run_id }}
-  CHART_NAME: documentdb-chart
+  CHART_NAME: documentdb-operator
   CHART_VERSION: ${{ inputs.chart_version_prefix }}-${{ github.run_id }}
 
 jobs:

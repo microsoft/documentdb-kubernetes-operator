@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: sidecar-injector
+  name: sidecar-injector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sidecar-injector
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: sidecar-injector
+    spec:
+      containers:
+      - image: cnpg-i-sidecar-injector:latest
+        name: cnpg-i-sidecar-injector
+        ports:
+        - containerPort: 9090
+          protocol: TCP
+        args:
+        - plugin
+        - --server-cert=/server/tls.crt
+        - --server-key=/server/tls.key
+        - --client-cert=/client/tls.crt
+        - --server-address=:9090
+        volumeMounts:
+        - mountPath: /server
+          name: server
+        - mountPath: /client
+          name: client
+        resources: {}
+      volumes:
+      - name: server
+        secret:
+          secretName: sidecarinjector-server-tls
+      - name: client
+        secret:
+          secretName: sidecarinjector-client-tls

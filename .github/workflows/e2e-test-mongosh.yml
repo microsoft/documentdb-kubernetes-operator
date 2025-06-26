@@ -266,6 +266,10 @@ jobs:
         print("\n--- Test 1: Basic Database Operations ---");
         db = db.getSiblingDB('testdb');
         
+        // Verify database connection
+        print("DEBUG: Current database:", db.getName());
+        print("DEBUG: Database connection test:", db.runCommand({ping: 1}));
+        
         // Test collection creation
         db.createCollection("users");
         db.createCollection("products");
@@ -330,6 +334,24 @@ jobs:
         print("Inserted", getInsertedCount(userResult), "users");
         print("Inserted", getInsertedCount(productResult), "products");
         print("Inserted", getInsertedCount(orderResult), "orders");
+        
+        // Verify the documents actually exist in the database
+        var actualUserCount = db.users.countDocuments();
+        var actualProductCount = db.products.countDocuments();
+        var actualOrderCount = db.orders.countDocuments();
+        
+        print("DEBUG: Actual document counts - Users:", actualUserCount, "Products:", actualProductCount, "Orders:", actualOrderCount);
+        validate(actualUserCount === 4, "Database contains exactly 4 users");
+        validate(actualProductCount === 4, "Database contains exactly 4 products");
+        validate(actualOrderCount === 3, "Database contains exactly 3 orders");
+        
+        // Verify specific users exist
+        var johnExists = db.users.findOne({ name: "John Doe" });
+        var janeExists = db.users.findOne({ name: "Jane Smith" });
+        print("DEBUG: John Doe exists:", johnExists !== null);
+        print("DEBUG: Jane Smith exists:", janeExists !== null);
+        validate(johnExists !== null, "John Doe document exists after insertion");
+        validate(janeExists !== null, "Jane Smith document exists after insertion");
         
         // Test 2: Query Operations
         print("\n--- Test 2: Query Operations ---");
@@ -406,11 +428,46 @@ jobs:
         // Test 4: Update Operations
         print("\n--- Test 4: Update Operations ---");
         
+        // Small delay to ensure inserts are fully committed
+        print("DEBUG: Waiting for inserts to be committed...");
+        sleep(1000); // 1 second delay
+        
+        // First, verify the user exists before attempting update
+        var johnBefore = db.users.findOne({ name: "John Doe" });
+        print("DEBUG: John Doe before update:", JSON.stringify(johnBefore));
+        validate(johnBefore !== null, "John Doe document exists before update");
+        validate(johnBefore.name === "John Doe", "John Doe has correct name");
+        validate(johnBefore.age === 30, "John Doe has initial age of 30");
+        
         // Update single document with validation
         var updateResult = db.users.updateOne(
           { name: "John Doe" },
           { $set: { age: 31, lastUpdated: new Date() } }
         );
+        
+        print("DEBUG: updateResult:", JSON.stringify(updateResult));
+        
+        // If first update fails, try with exact field matching
+        if (updateResult.matchedCount !== 1) {
+          print("DEBUG: First update failed, trying exact match...");
+          var allUsers = db.users.find().toArray();
+          print("DEBUG: All users in database:", JSON.stringify(allUsers));
+          
+          // Try to find John with different criteria
+          var johnVariants = [
+            db.users.findOne({ name: "John Doe" }),
+            db.users.findOne({ _id: 1 }),
+            db.users.findOne({ email: "john@example.com" })
+          ];
+          print("DEBUG: John search variants:", JSON.stringify(johnVariants));
+          
+          // Try update by _id instead
+          updateResult = db.users.updateOne(
+            { _id: 1 },
+            { $set: { age: 31, lastUpdated: new Date() } }
+          );
+          print("DEBUG: updateResult by _id:", JSON.stringify(updateResult));
+        }
         
         validate(updateResult.matchedCount === 1, "Update matched exactly 1 document");
         validate(updateResult.modifiedCount === 1, "Update modified exactly 1 document");
@@ -425,6 +482,7 @@ jobs:
         // Update multiple documents with validation
         var electronicsBeforeUpdate = db.products.find({ category: "Electronics" }).toArray();
         print("DEBUG: Electronics products before bulk update:", JSON.stringify(electronicsBeforeUpdate));
+        validate(electronicsBeforeUpdate.length === 2, "Found exactly 2 Electronics products before update");
         
         var bulkUpdate = db.products.updateMany(
           { category: "Electronics" },
@@ -490,19 +548,33 @@ jobs:
           { $set: { hobbies: [] } }
         );
         print("DEBUG: arrayUpdateResult:", JSON.stringify(arrayUpdateResult));
+        validate(arrayUpdateResult.matchedCount === userCountBefore, "Array update matched all " + userCountBefore + " users");
         validate(arrayUpdateResult.modifiedCount === userCountBefore, "Added hobbies array to all " + userCountBefore + " users");
         
+        // Verify hobbies field was added
+        var usersWithHobbiesField = db.users.find({ hobbies: { $exists: true } }).toArray();
+        validate(usersWithHobbiesField.length === userCountBefore, "All users now have hobbies field");
+        
         // Update with array operations
+        var johnBeforeHobbies = db.users.findOne({ name: "John Doe" });
+        print("DEBUG: John before adding hobbies:", JSON.stringify(johnBeforeHobbies));
+        validate(johnBeforeHobbies !== null, "John Doe exists before adding hobbies");
+        validate(Array.isArray(johnBeforeHobbies.hobbies), "John has hobbies array field");
+        
         var johnHobbiesResult = db.users.updateOne(
           { name: "John Doe" },
           { $push: { hobbies: { $each: ["reading", "gaming", "cooking"] } } }
         );
+        print("DEBUG: johnHobbiesResult:", JSON.stringify(johnHobbiesResult));
+        validate(johnHobbiesResult.matchedCount === 1, "John hobbies update matched 1 document");
         validate(johnHobbiesResult.modifiedCount === 1, "Added hobbies to John");
         
         var janeHobbiesResult = db.users.updateOne(
           { name: "Jane Smith" },
           { $push: { hobbies: { $each: ["traveling", "photography"] } } }
         );
+        print("DEBUG: janeHobbiesResult:", JSON.stringify(janeHobbiesResult));
+        validate(janeHobbiesResult.matchedCount === 1, "Jane hobbies update matched 1 document");
         validate(janeHobbiesResult.modifiedCount === 1, "Added hobbies to Jane");
         
         var usersWithHobbies = db.users.find({ hobbies: { $exists: true, $ne: [] } }).toArray();

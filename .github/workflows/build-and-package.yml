@@ -73,12 +73,12 @@ jobs:
         TAG=${{ env.IMAGE_TAG }}-amd64
         docker build \
           --build-arg ARCH=AMD64 \
-          -t ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG \
+          -t ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:$TAG \
           -f Dockerfile .
-        docker push ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG
-        
+        docker push ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:$TAG
+
         # Get digest for attestation
-        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG | cut -d'@' -f2)
+        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:$TAG | cut -d'@' -f2)
         echo "digest=$DIGEST" >> $GITHUB_OUTPUT
 
     - name: Build and Push ARM64 Image
@@ -88,12 +88,12 @@ jobs:
         TAG=${{ env.IMAGE_TAG }}-arm64
         docker build \
           --build-arg ARCH=ARM64 \
-          -t ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG \
+          -t ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:$TAG \
           -f Dockerfile .
-        docker push ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG
+        docker push ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:$TAG
         
         # Get digest for attestation
-        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG | cut -d'@' -f2)
+        DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:$TAG | cut -d'@' -f2)
         echo "digest=$DIGEST" >> $GITHUB_OUTPUT
 
   create-manifest:
@@ -112,15 +112,22 @@ jobs:
     - name: Create and Push Manifest
       id: manifest
       run: |
-        docker manifest create ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
-          --amend ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-amd64 \
-          --amend ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-arm64
-        docker manifest push ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+        echo "Creating multi-architecture manifest for amd64 and arm64..."
+        docker manifest create ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} \
+          --amend ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-amd64 \
+          --amend ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-arm64
+
+        echo "Pushing multi-architecture manifest..."
+        docker manifest push ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
         
         # Get manifest digest
-        DIGEST=$(docker buildx imagetools inspect ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} | awk '/^Digest:/ { print $2 }')
+        DIGEST=$(docker buildx imagetools inspect ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} | awk '/^Digest:/ { print $2 }')
         echo "digest=$DIGEST" >> $GITHUB_OUTPUT
-        echo "✓ Multi-arch manifest created and pushed"
+        
+        # Verify multi-arch manifest
+        echo "Verifying multi-architecture manifest:"
+        docker buildx imagetools inspect ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+        echo "✓ Multi-arch manifest created and pushed successfully"
 
   create-helm-chart:
     name: Create and Push Helm Chart
@@ -140,9 +147,9 @@ jobs:
 
     - name: Update Helm chart with new image
       run: |
-        # Update the image tag in values.yaml to use our newly built image
+        # Update the image tag in values.yaml to use our newly built multi-arch image
         sed -i "s|tag:.*|tag: \"${{ env.IMAGE_TAG }}\"|g" documentdb-chart/values.yaml
-        sed -i "s|repository:.*|repository: \"ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}\"|g" documentdb-chart/values.yaml
+        sed -i "s|repository:.*|repository: \"ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}\"|g" documentdb-chart/values.yaml
         
         # Update Chart.yaml version to use proper semantic versioning
         sed -i "s|^version:.*|version: ${{ env.CHART_VERSION }}|g" documentdb-chart/Chart.yaml
@@ -150,7 +157,7 @@ jobs:
         echo "Updated Chart.yaml:"
         cat documentdb-chart/Chart.yaml
         
-        echo "Updated values.yaml:"
+        echo "Updated values.yaml (with multi-arch image reference):"
         cat documentdb-chart/values.yaml
 
     - name: Package Helm chart
@@ -178,9 +185,12 @@ jobs:
       id: push-chart
       run: |
         # Push to the repository root, not with an additional path segment
-        OUTPUT=$(helm push documentdb-operator-${{ env.CHART_VERSION }}.tgz oci://ghcr.io/${{ github.repository_owner }})
+        # The package name should match the chart name from Chart.yaml
+        CHART_PACKAGE="${{ env.CHART_NAME }}-${{ env.CHART_VERSION }}.tgz"
+        echo "Pushing chart package: $CHART_PACKAGE"
+        OUTPUT=$(helm push $CHART_PACKAGE oci://ghcr.io/${{ github.repository_owner }})
         echo "chart-push-output=$OUTPUT" >> $GITHUB_OUTPUT
-        echo "✓ Chart pushed successfully"
+        echo "✓ Chart pushed successfully with multi-architecture image support"
 
   summary:
     name: Build Summary
@@ -199,8 +209,10 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         
         echo "### Built Artifacts:" >> $GITHUB_STEP_SUMMARY
-        echo "- **Docker Image**: \`ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **Helm Chart**: \`oci://ghcr.io/${{ github.repository_owner }}/documentdb-operator:${{ env.CHART_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Multi-Arch Docker Image**: \`ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}\` (amd64 + arm64)" >> $GITHUB_STEP_SUMMARY
+        echo "- **AMD64 Image**: \`ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-amd64\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **ARM64 Image**: \`ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-arm64\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Helm Chart**: \`oci://ghcr.io/${{ github.repository_owner }}/${{ env.CHART_NAME }}:${{ env.CHART_VERSION }}\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Manifest Digest**: \`${{ needs.create-manifest.outputs.manifest_digest }}\`" >> $GITHUB_STEP_SUMMARY
         
         echo "" >> $GITHUB_STEP_SUMMARY

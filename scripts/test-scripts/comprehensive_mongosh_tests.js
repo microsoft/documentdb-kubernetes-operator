@@ -425,13 +425,19 @@ bulkOps.insert({ name: "New Product", price: 49.99, category: "Test", stock: 10 
 var bulkResult = bulkOps.execute();
 
 print("DEBUG: Bulk result:", JSON.stringify(bulkResult));
-print("DEBUG: nMatched:", bulkResult.nMatched, "nModified:", bulkResult.nModified, "nInserted:", bulkResult.nInserted);
+
+// Handle different property names between MongoDB and DocumentDB
+var nMatched = bulkResult.nMatched || bulkResult.matchedCount || 0;
+var nModified = bulkResult.nModified || bulkResult.modifiedCount || 0;
+var nInserted = bulkResult.nInserted || bulkResult.insertedCount || 0;
+
+print("DEBUG: nMatched:", nMatched, "nModified:", nModified, "nInserted:", nInserted);
 
 // Use more flexible validation based on actual data
 var expectedMatches = electronicsProducts.length + cheapProducts.length;
-validate(bulkResult.nMatched >= expectedMatches - 1, "Bulk operations matched at least " + (expectedMatches - 1) + " documents"); // Allow for slight variance
-validate(bulkResult.nModified >= expectedMatches - 1, "Bulk operations modified at least " + (expectedMatches - 1) + " documents");
-validate(bulkResult.nInserted === 1, "Bulk operations inserted 1 document");
+validate(nMatched >= expectedMatches - 1, "Bulk operations matched at least " + (expectedMatches - 1) + " documents"); // Allow for slight variance
+validate(nModified >= expectedMatches - 1, "Bulk operations modified at least " + (expectedMatches - 1) + " documents");
+validate(nInserted === 1, "Bulk operations inserted 1 document");
 
 // Verify bulk operations
 var electronicsWithViews = db.products.find({ category: "Electronics", views: { $exists: true } }).toArray();
@@ -444,7 +450,7 @@ var newProduct = db.products.findOne({ name: "New Product" });
 validate(newProduct !== null, "New product was inserted");
 validate(newProduct.price === 49.99, "New product has correct price");
 
-print("Bulk operation results - matched:", bulkResult.nMatched, "modified:", bulkResult.nModified, "inserted:", bulkResult.nInserted);
+print("Bulk operation results - matched:", nMatched, "modified:", nModified, "inserted:", nInserted);
 
 // Test 9: Final Verification
 print("\n--- Test 9: Final Data Verification ---");

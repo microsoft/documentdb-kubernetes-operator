@@ -447,8 +447,21 @@ jobs:
         
         print("DEBUG: updateResult:", JSON.stringify(updateResult));
         
+        // Helper function to handle Long objects returned by some MongoDB drivers
+        function getLongValue(val) {
+          if (typeof val === 'object' && val !== null && 'low' in val) {
+            return val.low; // Extract the actual number from Long object
+          }
+          return val;
+        }
+        
+        var matchedCount = getLongValue(updateResult.matchedCount);
+        var modifiedCount = getLongValue(updateResult.modifiedCount);
+        
+        print("DEBUG: Extracted counts - matched:", matchedCount, "modified:", modifiedCount);
+        
         // If first update fails, try with exact field matching
-        if (updateResult.matchedCount !== 1) {
+        if (matchedCount !== 1) {
           print("DEBUG: First update failed, trying exact match...");
           var allUsers = db.users.find().toArray();
           print("DEBUG: All users in database:", JSON.stringify(allUsers));
@@ -467,17 +480,20 @@ jobs:
             { $set: { age: 31, lastUpdated: new Date() } }
           );
           print("DEBUG: updateResult by _id:", JSON.stringify(updateResult));
+          
+          matchedCount = getLongValue(updateResult.matchedCount);
+          modifiedCount = getLongValue(updateResult.modifiedCount);
         }
         
-        validate(updateResult.matchedCount === 1, "Update matched exactly 1 document");
-        validate(updateResult.modifiedCount === 1, "Update modified exactly 1 document");
+        validate(matchedCount === 1, "Update matched exactly 1 document");
+        validate(modifiedCount === 1, "Update modified exactly 1 document");
         
         // Verify the update
         var updatedJohn = db.users.findOne({ name: "John Doe" });
         validate(updatedJohn.age === 31, "John's age updated to 31");
         validate(updatedJohn.lastUpdated !== undefined, "John has lastUpdated field");
         
-        print("Updated", updateResult.modifiedCount, "user document");
+        print("Updated", modifiedCount, "user document");
         
         // Update multiple documents with validation
         var electronicsBeforeUpdate = db.products.find({ category: "Electronics" }).toArray();
@@ -490,8 +506,13 @@ jobs:
         );
         
         print("DEBUG: bulkUpdate result:", JSON.stringify(bulkUpdate));
-        validate(bulkUpdate.matchedCount === 2, "Bulk update matched 2 Electronics products");
-        validate(bulkUpdate.modifiedCount === 2, "Bulk update modified 2 products");
+        
+        var bulkMatchedCount = getLongValue(bulkUpdate.matchedCount);
+        var bulkModifiedCount = getLongValue(bulkUpdate.modifiedCount);
+        
+        print("DEBUG: Extracted bulk counts - matched:", bulkMatchedCount, "modified:", bulkModifiedCount);
+        validate(bulkMatchedCount === 2, "Bulk update matched 2 Electronics products");
+        validate(bulkModifiedCount === 2, "Bulk update modified 2 products");
         
         // Verify bulk update
         var updatedElectronics = db.products.find({ category: "Electronics" }).toArray();
@@ -501,7 +522,7 @@ jobs:
         validate(laptop.stock === 45, "Laptop stock reduced to 45");
         validate(phone.stock === 95, "Phone stock reduced to 95");
         
-        print("Updated", bulkUpdate.modifiedCount, "product documents");
+        print("Updated", bulkModifiedCount, "product documents");
         
         // Upsert operation with validation
         var existingUser = db.users.findOne({ email: "new@example.com" });
@@ -514,16 +535,22 @@ jobs:
         );
         
         print("DEBUG: upsertResult:", JSON.stringify(upsertResult));
-        validate(upsertResult.matchedCount === 0, "Upsert matched 0 existing documents");
-        validate(upsertResult.modifiedCount === 0, "Upsert modified 0 existing documents");
-        validate(upsertResult.upsertedCount === 1, "Upsert created 1 new document");
+        
+        var upsertMatchedCount = getLongValue(upsertResult.matchedCount);
+        var upsertModifiedCount = getLongValue(upsertResult.modifiedCount);
+        var upsertedCount = getLongValue(upsertResult.upsertedCount);
+        
+        print("DEBUG: Extracted upsert counts - matched:", upsertMatchedCount, "modified:", upsertModifiedCount, "upserted:", upsertedCount);
+        validate(upsertMatchedCount === 0, "Upsert matched 0 existing documents");
+        validate(upsertModifiedCount === 0, "Upsert modified 0 existing documents");
+        validate(upsertedCount === 1, "Upsert created 1 new document");
         
         // Verify upsert
         var newUser = db.users.findOne({ email: "new@example.com" });
         validate(newUser && newUser.name === "New User", "New user created with correct name");
         validate(newUser && newUser.age === 22, "New user has correct age");
         
-        print("Upsert operation - matched:", upsertResult.matchedCount, "modified:", upsertResult.modifiedCount, "upserted:", upsertResult.upsertedCount);
+        print("Upsert operation - matched:", upsertMatchedCount, "modified:", upsertModifiedCount, "upserted:", upsertedCount);
         
         // Test 5: Text Search
         print("\n--- Test 5: Text Search ---");
@@ -548,8 +575,13 @@ jobs:
           { $set: { hobbies: [] } }
         );
         print("DEBUG: arrayUpdateResult:", JSON.stringify(arrayUpdateResult));
-        validate(arrayUpdateResult.matchedCount === userCountBefore, "Array update matched all " + userCountBefore + " users");
-        validate(arrayUpdateResult.modifiedCount === userCountBefore, "Added hobbies array to all " + userCountBefore + " users");
+        
+        var arrayMatchedCount = getLongValue(arrayUpdateResult.matchedCount);
+        var arrayModifiedCount = getLongValue(arrayUpdateResult.modifiedCount);
+        
+        print("DEBUG: Extracted array counts - matched:", arrayMatchedCount, "modified:", arrayModifiedCount);
+        validate(arrayMatchedCount === userCountBefore, "Array update matched all " + userCountBefore + " users");
+        validate(arrayModifiedCount === userCountBefore, "Added hobbies array to all " + userCountBefore + " users");
         
         // Verify hobbies field was added
         var usersWithHobbiesField = db.users.find({ hobbies: { $exists: true } }).toArray();
@@ -566,16 +598,24 @@ jobs:
           { $push: { hobbies: { $each: ["reading", "gaming", "cooking"] } } }
         );
         print("DEBUG: johnHobbiesResult:", JSON.stringify(johnHobbiesResult));
-        validate(johnHobbiesResult.matchedCount === 1, "John hobbies update matched 1 document");
-        validate(johnHobbiesResult.modifiedCount === 1, "Added hobbies to John");
+        
+        var johnHobbiesMatched = getLongValue(johnHobbiesResult.matchedCount);
+        var johnHobbiesModified = getLongValue(johnHobbiesResult.modifiedCount);
+        
+        validate(johnHobbiesMatched === 1, "John hobbies update matched 1 document");
+        validate(johnHobbiesModified === 1, "Added hobbies to John");
         
         var janeHobbiesResult = db.users.updateOne(
           { name: "Jane Smith" },
           { $push: { hobbies: { $each: ["traveling", "photography"] } } }
         );
         print("DEBUG: janeHobbiesResult:", JSON.stringify(janeHobbiesResult));
-        validate(janeHobbiesResult.matchedCount === 1, "Jane hobbies update matched 1 document");
-        validate(janeHobbiesResult.modifiedCount === 1, "Added hobbies to Jane");
+        
+        var janeHobbiesMatched = getLongValue(janeHobbiesResult.matchedCount);
+        var janeHobbiesModified = getLongValue(janeHobbiesResult.modifiedCount);
+        
+        validate(janeHobbiesMatched === 1, "Jane hobbies update matched 1 document");
+        validate(janeHobbiesModified === 1, "Added hobbies to Jane");
         
         var usersWithHobbies = db.users.find({ hobbies: { $exists: true, $ne: [] } }).toArray();
         validate(usersWithHobbies.length === 2, "Found exactly 2 users with hobbies");
@@ -727,6 +767,14 @@ jobs:
           print("✓ " + message);
         }
         
+        // Helper function to handle Long objects returned by some MongoDB drivers
+        function getLongValue(val) {
+          if (typeof val === 'object' && val !== null && 'low' in val) {
+            return val.low; // Extract the actual number from Long object
+          }
+          return val;
+        }
+        
         db = db.getSiblingDB('perftest');
         
         // Large dataset insertion test
@@ -866,8 +914,12 @@ jobs:
         var updateEnd = new Date();
         
         var updateTime = updateEnd - updateStart;
-        validate(updateResult.matchedCount === 300, "Update matched exactly 300 documents (3 batches × 100)");
-        validate(updateResult.modifiedCount === 300, "Update modified exactly 300 documents");
+        
+        var perfUpdateMatchedCount = getLongValue(updateResult.matchedCount);
+        var perfUpdateModifiedCount = getLongValue(updateResult.modifiedCount);
+        
+        validate(perfUpdateMatchedCount === 300, "Update matched exactly 300 documents (3 batches × 100)");
+        validate(perfUpdateModifiedCount === 300, "Update modified exactly 300 documents");
         validate(updateTime < 3000, "Update completed within 3 seconds (took " + updateTime + "ms)");
         
         // Verify updates
@@ -875,7 +927,7 @@ jobs:
         validate(updatedDocs.length === 300, "Found exactly 300 updated documents");
         validate(updatedDocs.every(doc => doc.updateTime !== undefined), "All updated docs have updateTime");
         
-        print("Update modified", updateResult.modifiedCount, "documents in", updateTime, "ms");
+        print("Update modified", perfUpdateModifiedCount, "documents in", updateTime, "ms");
         
         // Test delete performance
         print("\n--- Delete Performance Test ---");
@@ -885,7 +937,10 @@ jobs:
         var deleteEnd = new Date();
         
         var deleteTime = deleteEnd - deleteStart;
-        validate(deleteResult.deletedCount === 50, "Deleted exactly 50 documents (IDs 950-999)");
+        
+        var perfDeletedCount = getLongValue(deleteResult.deletedCount);
+        
+        validate(perfDeletedCount === 50, "Deleted exactly 50 documents (IDs 950-999)");
         validate(deleteTime < 2000, "Delete completed within 2 seconds (took " + deleteTime + "ms)");
         
         // Verify deletions
@@ -895,7 +950,7 @@ jobs:
         var deletedDocs = db.perfcollection.find({ id: { $gte: 950 } }).toArray();
         validate(deletedDocs.length === 0, "No documents with ID >= 950 remain");
         
-        print("Delete removed", deleteResult.deletedCount, "documents in", deleteTime, "ms");
+        print("Delete removed", perfDeletedCount, "documents in", deleteTime, "ms");
         
         // Overall performance summary
         print("\n--- Performance Summary ---");

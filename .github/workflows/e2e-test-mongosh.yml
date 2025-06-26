@@ -88,13 +88,13 @@ jobs:
     - name: Verify built image exists
       run: |
         echo "Verifying that our newly built image exists..."
-        echo "Expected image: ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+        echo "Expected image: ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
         
         # Login to GHCR to check image
         echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
         
         # Try to pull the image to verify it exists
-        docker pull ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+        docker pull ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
         echo "✓ Image verified successfully"
 
     - name: Set up Python

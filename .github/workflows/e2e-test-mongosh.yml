@@ -125,7 +125,7 @@ jobs:
         cluster-name: ${{ env.DB_NAME }}
         node-count: ${{ matrix.test_scenario.node_count }}
         instances-per-node: ${{ matrix.test_scenario.instances_per_node }}
-        documentdb-image: 'ghcr.io/microsoft/documentdb/documentdb-local:${{ github.event.inputs.documentdb_version || "16" }}'
+        documentdb-image: 'ghcr.io/microsoft/documentdb/documentdb-local:${{ github.event.inputs.documentdb_version || 16 }}'
         pvc-size: '10Gi'
         public-load-balancer: 'false'
         timeout: '900'

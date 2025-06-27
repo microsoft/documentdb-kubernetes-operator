@@ -1,0 +1,114 @@
+name: 'Deploy DocumentDB'
+description: 'Creates namespace, deploys DocumentDB cluster, and waits for readiness'
+inputs:
+  namespace:
+    description: 'Namespace for DocumentDB deployment'
+    required: true
+  cluster-name:
+    description: 'Name of the DocumentDB cluster'
+    required: true
+  node-count:
+    description: 'Number of DocumentDB nodes'
+    required: false
+    default: '1'
+  instances-per-node:
+    description: 'Number of instances per node'
+    required: false
+    default: '1'
+  documentdb-image:
+    description: 'DocumentDB image to use'
+    required: false
+    default: 'ghcr.io/microsoft/documentdb/documentdb-local:16'
+  pvc-size:
+    description: 'PVC size for storage'
+    required: false
+    default: '10Gi'
+  public-load-balancer:
+    description: 'Whether to enable public load balancer'
+    required: false
+    default: 'false'
+  timeout:
+    description: 'Timeout for waiting for cluster readiness (in seconds)'
+    required: false
+    default: '900'
+  architecture:
+    description: 'Target architecture for logging'
+    required: false
+    default: 'amd64'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Create namespace and deploy DocumentDB cluster
+      shell: bash
+      run: |
+        echo "Deploying DocumentDB cluster '${{ inputs.cluster-name }}' in namespace '${{ inputs.namespace }}' on ${{ inputs.architecture }}"
+        
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: ${{ inputs.namespace }}
+        ---
+        apiVersion: db.microsoft.com/preview
+        kind: DocumentDB
+        metadata:
+          name: ${{ inputs.cluster-name }}
+          namespace: ${{ inputs.namespace }}
+        spec:
+          nodeCount: ${{ inputs.node-count }}
+          instancesPerNode: ${{ inputs.instances-per-node }}
+          documentDBImage: ${{ inputs.documentdb-image }}
+          resource:
+            pvcSize: ${{ inputs.pvc-size }}
+          publicLoadBalancer:
+            enabled: ${{ inputs.public-load-balancer }}
+        EOF
+        
+        echo "DocumentDB resource created on ${{ inputs.architecture }}, waiting for cluster to be ready..."
+
+    - name: Wait for DocumentDB cluster to be ready
+      shell: bash
+      run: |
+        echo "Waiting for DocumentDB cluster to be ready on ${{ inputs.architecture }}..."
+        
+        # Calculate expected pod count
+        expected_pods=${{ inputs.node-count }}
+        
+        timeout=${{ inputs.timeout }}
+        end_time=$((SECONDS + timeout))
+        
+        while [ $SECONDS -lt $end_time ]; do
+          # Check if any pods exist first
+          pod_count=$(kubectl get pods -n ${{ inputs.namespace }} -l cnpg.io/cluster=${{ inputs.cluster-name }} --no-headers 2>/dev/null | wc -l)
+          if [[ "$pod_count" -eq "0" ]]; then
+            echo "No DocumentDB pods found yet, waiting..."
+            sleep 15
+            continue
+          fi
+          
+          # Check for ready pods
+          ready_pods=$(kubectl get pods -n ${{ inputs.namespace }} -l cnpg.io/cluster=${{ inputs.cluster-name }} -o json 2>/dev/null | \
+                       jq '.items[] | select(.status.phase == "Running" and ([.status.containerStatuses[]? | .ready] | all))' 2>/dev/null | \
+                       jq -s 'length' 2>/dev/null || echo "0")
+          
+          if [[ "$ready_pods" -eq "$expected_pods" ]]; then
+            echo "DocumentDB cluster is ready on ${{ inputs.architecture }}! ($ready_pods/$expected_pods pods ready)"
+            break
+          fi
+          
+          echo "Waiting for DocumentDB pods on ${{ inputs.architecture }}... ($ready_pods/$expected_pods ready)"
+          kubectl get pods -n ${{ inputs.namespace }} || true
+          sleep 15
+        done
+        
+        if [ $SECONDS -ge $end_time ]; then
+          echo "Timeout waiting for DocumentDB cluster on ${{ inputs.architecture }}"
+          echo "Final pod status:"
+          kubectl get pods -n ${{ inputs.namespace }} -o wide || true
+          kubectl describe pods -n ${{ inputs.namespace }} || true
+          exit 1
+        fi
+        
+        echo "Final pod status on ${{ inputs.architecture }}:"
+        kubectl get pods -n ${{ inputs.namespace }} -o wide

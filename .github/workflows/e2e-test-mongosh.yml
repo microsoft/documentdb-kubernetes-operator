@@ -119,60 +119,17 @@ jobs:
         architecture: ${{ matrix.architecture }}
 
     - name: Deploy DocumentDB Cluster - ${{ matrix.test_scenario.name }}
-      run: |
-        echo "Deploying DocumentDB cluster with configuration: ${{ matrix.test_scenario.name }} on ${{ matrix.architecture }}"
-        
-        cat <<EOF | kubectl apply -f -
-        apiVersion: v1
-        kind: Namespace
-        metadata:
-          name: ${DB_NS}
-        ---
-        apiVersion: db.microsoft.com/preview
-        kind: DocumentDB
-        metadata:
-          name: ${DB_NAME}
-          namespace: ${DB_NS}
-        spec:
-          nodeCount: ${{ matrix.test_scenario.node_count }}
-          instancesPerNode: ${{ matrix.test_scenario.instances_per_node }}
-          documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:${{ github.event.inputs.documentdb_version || '16' }}
-          resource:
-            pvcSize: 10Gi
-          publicLoadBalancer:
-            enabled: false
-        EOF
-
-    - name: Wait for DocumentDB cluster to be ready
-      run: |
-        echo "Waiting for DocumentDB cluster to be ready on ${{ matrix.architecture }}..."
-        
-        # Calculate expected pod count
-        expected_pods=${{ matrix.test_scenario.node_count }}
-        
-        timeout=900  # 15 minutes
-        end_time=$((SECONDS + timeout))
-        
-        while [ $SECONDS -lt $end_time ]; do
-          ready_pods=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o json | \
-                       jq '.items[] | select(.status.phase == "Running" and ([.status.containerStatuses[] | .ready] | all))' | \
-                       jq -s 'length')
-          
-          if [[ "$ready_pods" -eq "$expected_pods" ]]; then
-            echo "DocumentDB cluster is ready on ${{ matrix.architecture }}! ($ready_pods/$expected_pods pods ready)"
-            break
-          fi
-          
-          echo "Waiting for DocumentDB pods on ${{ matrix.architecture }}... ($ready_pods/$expected_pods ready)"
-          kubectl get pods -n $DB_NS
-          sleep 15
-        done
-        
-        if [ $SECONDS -ge $end_time ]; then
-          echo "Timeout waiting for DocumentDB cluster on ${{ matrix.architecture }}"
-          kubectl describe pods -n $DB_NS
-          exit 1
-        fi
+      uses: ./.github/actions/deploy-documentdb
+      with:
+        namespace: ${{ env.DB_NS }}
+        cluster-name: ${{ env.DB_NAME }}
+        node-count: ${{ matrix.test_scenario.node_count }}
+        instances-per-node: ${{ matrix.test_scenario.instances_per_node }}
+        documentdb-image: 'ghcr.io/microsoft/documentdb/documentdb-local:${{ github.event.inputs.documentdb_version || "16" }}'
+        pvc-size: '10Gi'
+        public-load-balancer: 'false'
+        timeout: '900'
+        architecture: ${{ matrix.architecture }}
 
     - name: Setup port forwarding for comprehensive tests
       run: |

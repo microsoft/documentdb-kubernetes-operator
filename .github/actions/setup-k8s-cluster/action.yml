@@ -1,0 +1,94 @@
+name: 'Setup K8s Cluster'
+description: 'Sets up kind cluster, cert-manager, and DocumentDB operator for testing'
+inputs:
+  cluster-name:
+    description: 'Name of the kind cluster to create'
+    required: true
+  cert-manager-namespace:
+    description: 'Namespace for cert-manager'
+    required: false
+    default: 'cert-manager'
+  operator-namespace:
+    description: 'Namespace for DocumentDB operator'
+    required: false
+    default: 'documentdb-operator'
+  chart-version:
+    description: 'Version of the DocumentDB operator chart to install'
+    required: true
+  github-token:
+    description: 'GitHub token for GHCR authentication'
+    required: true
+  github-actor:
+    description: 'GitHub actor for GHCR authentication'
+    required: true
+  github-repository-owner:
+    description: 'GitHub repository owner for image registry'
+    required: true
+  cert-manager-timeout:
+    description: 'Timeout for cert-manager installation'
+    required: false
+    default: '10m'
+  operator-timeout:
+    description: 'Timeout for operator installation'
+    required: false
+    default: '15m'
+  architecture:
+    description: 'Target architecture for logging'
+    required: false
+    default: 'amd64'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Create kind cluster
+      uses: helm/kind-action@v1.8.0
+      with:
+        cluster_name: ${{ inputs.cluster-name }}
+
+    - name: Wait for cluster to be ready
+      shell: bash
+      run: |
+        echo "Waiting for ${{ inputs.architecture }} cluster to be ready..."
+        kubectl cluster-info
+        kubectl wait --for=condition=Ready nodes --all --timeout=300s
+        
+        # Verify node architecture
+        echo "Node architecture verification:"
+        kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'
+        echo ""
+
+    - name: Install cert-manager
+      shell: bash
+      run: |
+        echo "Installing cert-manager on ${{ inputs.architecture }}..."
+        helm repo add jetstack https://charts.jetstack.io
+        helm repo update
+        
+        helm install cert-manager jetstack/cert-manager \
+          --namespace ${{ inputs.cert-manager-namespace }} \
+          --create-namespace \
+          --set installCRDs=true \
+          --wait --timeout=${{ inputs.cert-manager-timeout }}
+
+    - name: Install DocumentDB Operator
+      shell: bash
+      run: |
+        echo "Installing DocumentDB Operator on ${{ inputs.architecture }} using chart version: ${{ inputs.chart-version }}"
+        
+        # Log in to GHCR for Helm
+        echo "${{ inputs.github-token }}" | helm registry login ghcr.io --username ${{ inputs.github-actor }} --password-stdin
+        
+        # Install the operator using the newly created chart
+        helm install documentdb-operator oci://ghcr.io/${{ inputs.github-repository-owner }}/documentdb-operator \
+          --version ${{ inputs.chart-version }} \
+          --namespace ${{ inputs.operator-namespace }} \
+          --create-namespace \
+          --wait --timeout=${{ inputs.operator-timeout }}
+        
+        kubectl wait --for=condition=Available deployment/documentdb-operator -n ${{ inputs.operator-namespace }} --timeout=300s
+        
+        # Verify that the operator deployment is using the expected image
+        echo "Verifying operator deployment on ${{ inputs.architecture }}..."
+        kubectl get deployment documentdb-operator -n ${{ inputs.operator-namespace }} -o jsonpath='{.spec.template.spec.containers[0].image}'
+        echo ""
+        echo "✓ Cluster setup completed on ${{ inputs.architecture }}"

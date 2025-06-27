@@ -62,26 +62,18 @@ jobs:
       with:
         include-python: 'false'
 
-    - name: Create kind cluster
-      uses: helm/kind-action@v1.8.0
+    - name: Setup K8s cluster
+      uses: ./.github/actions/setup-k8s-cluster
       with:
-        cluster_name: documentdb-quick-test
-
-    - name: Setup cluster
-      run: |
-        kubectl wait --for=condition=Ready nodes --all --timeout=300s
-        
-        helm repo add jetstack https://charts.jetstack.io && helm repo update
-        helm install cert-manager jetstack/cert-manager \
-          --namespace $CERT_MANAGER_NS --create-namespace \
-          --set installCRDs=true --wait --timeout=5m
-        
-        # Login to GHCR for Helm
-        echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
-        
-        # Install the operator using the newly created chart
-        helm install documentdb-operator oci://ghcr.io/${{ github.repository_owner }}/documentdb-operator \
-          --version ${{ env.CHART_VERSION }} --namespace $OPERATOR_NS --create-namespace --wait --timeout=8m
+        cluster-name: documentdb-quick-test
+        cert-manager-namespace: ${{ env.CERT_MANAGER_NS }}
+        operator-namespace: ${{ env.OPERATOR_NS }}
+        chart-version: ${{ env.CHART_VERSION }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        github-actor: ${{ github.actor }}
+        github-repository-owner: ${{ github.repository_owner }}
+        cert-manager-timeout: '5m'
+        operator-timeout: '8m'
 
     - name: Deploy DocumentDB cluster
       run: |

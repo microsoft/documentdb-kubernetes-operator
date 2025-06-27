@@ -97,38 +97,12 @@ jobs:
         docker pull ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
         echo "✓ Image verified successfully"
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    - name: Setup dependencies
+      uses: ./.github/actions/setup-dependencies
       with:
+        architecture: ${{ matrix.architecture }}
         python-version: '3.11'
-
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y jq curl netcat-openbsd
-
-    - name: Install Helm
-      uses: azure/setup-helm@v3
-      with:
-        version: 'latest'
-
-    - name: Install MongoDB Shell (mongosh)
-      run: |
-        echo "Installing mongosh for ${{ matrix.architecture }} architecture..."
-        
-        # Install mongosh using the official installation method
-        curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
-        
-        if [[ "${{ matrix.architecture }}" == "arm64" ]]; then
-          echo "deb [ arch=arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-        else
-          echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-        fi
-        
-        sudo apt-get update
-        sudo apt-get install -y mongodb-mongosh
-        mongosh --version
-        echo "✓ mongosh installed successfully for ${{ matrix.architecture }}"
+        helm-version: 'latest'
 
     - name: Create kind cluster
       uses: helm/kind-action@v1.8.0

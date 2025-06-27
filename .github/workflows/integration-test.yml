@@ -58,44 +58,16 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
+    - name: Setup dependencies
+      uses: ./.github/actions/setup-dependencies
       with:
+        architecture: ${{ matrix.architecture }}
         python-version: '3.11'
-
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y jq curl netcat-openbsd
-
-    - name: Install Helm
-      uses: azure/setup-helm@v3
 
     - name: Create kind cluster
       uses: helm/kind-action@v1.8.0
       with:
         cluster_name: documentdb-test-${{ matrix.architecture }}
-
-    - name: Install dependencies
-      run: |
-        echo "Installing dependencies for ${{ matrix.architecture }} architecture..."
-        
-        # Install MongoDB shell - use architecture-appropriate method
-        if [[ "${{ matrix.architecture }}" == "arm64" ]]; then
-          # For ARM64, we may need to use different installation method
-          curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
-          echo "deb [ arch=arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-        else
-          # For AMD64
-          curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
-          echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-        fi
-        
-        sudo apt-get update && sudo apt-get install -y mongodb-mongosh
-        
-        # Verify installation
-        mongosh --version
-        echo "✓ mongosh installed successfully for ${{ matrix.architecture }}"
 
     - name: Setup cluster
       run: |

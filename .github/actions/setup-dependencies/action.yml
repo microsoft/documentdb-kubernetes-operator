@@ -1,0 +1,58 @@
+name: 'Setup Dependencies'
+description: 'Sets up system dependencies, MongoDB shell, Helm, and Python for DocumentDB testing'
+inputs:
+  architecture:
+    description: 'Target architecture (amd64 or arm64)'
+    required: false
+    default: 'amd64'
+  python-version:
+    description: 'Python version to install'
+    required: false
+    default: '3.11'
+  helm-version:
+    description: 'Helm version to install'
+    required: false
+    default: 'latest'
+  include-python:
+    description: 'Whether to install Python'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      if: inputs.include-python == 'true'
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq curl netcat-openbsd
+
+    - name: Install MongoDB Shell (mongosh)
+      shell: bash
+      run: |
+        echo "Installing mongosh for ${{ inputs.architecture }} architecture..."
+        
+        # Install mongosh using the official installation method
+        curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+        
+        if [[ "${{ inputs.architecture }}" == "arm64" ]]; then
+          echo "deb [ arch=arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        else
+          echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        fi
+        
+        sudo apt-get update
+        sudo apt-get install -y mongodb-mongosh
+        mongosh --version
+        echo "✓ mongosh installed successfully for ${{ inputs.architecture }}"
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: ${{ inputs.helm-version }}

@@ -102,30 +102,21 @@ jobs:
         echo -e "\nNamespace events:"
         kubectl get events -n $DB_NS --sort-by='.lastTimestamp' | tail -20
 
+    - name: Setup connection for basic test
+      if: github.event.inputs.test_type == 'basic' || github.event.inputs.test_type == 'connection-only'
+      uses: ./.github/actions/connection-test-setup
+      id: basic-connection
+      with:
+        namespace: ${{ env.DB_NS }}
+        cluster-name: ${{ env.DB_NAME }}
+        port: ${{ env.DB_PORT }}
+        pid-file: '/tmp/basic_pf_pid'
+
     - name: Basic connection test
       if: github.event.inputs.test_type == 'basic' || github.event.inputs.test_type == 'connection-only'
       run: |
-        echo "Discovering DocumentDB pod..."
-        kubectl get pods -n $DB_NS
-        
-        POD_NAME=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o jsonpath='{.items[0].metadata.name}')
-        
-        if [ -z "$POD_NAME" ]; then
-          echo "❌ No DocumentDB pod found!"
-          kubectl get pods -n $DB_NS
-          kubectl get documentdb -n $DB_NS
-          exit 1
-        fi
-        
-        echo "Found DocumentDB pod: $POD_NAME"
-        
-        kubectl wait --for=condition=Ready pod/$POD_NAME -n $DB_NS --timeout=300s
-        
-        kubectl port-forward pod/$POD_NAME $DB_PORT:$DB_PORT -n $DB_NS &
-        PF_PID=$!
-        sleep 10
-        
-        timeout 30 bash -c 'until nc -z 127.0.0.1 '$DB_PORT'; do sleep 2; done'
+        echo "Running basic connection test..."
+        echo "Using pod: ${{ steps.basic-connection.outputs.pod-name }}"
         
         cat > simple_connection_test.js << 'EOF'
         print('Connection successful!');
@@ -147,27 +138,29 @@ jobs:
           --tls --tlsAllowInvalidCertificates \
           --file simple_connection_test.js
         
-        kill $PF_PID
         echo "✅ Basic connection test passed!"
+
+    - name: Cleanup basic connection
+      if: always() && (github.event.inputs.test_type == 'basic' || github.event.inputs.test_type == 'connection-only')
+      uses: ./.github/actions/cleanup-port-forward
+      with:
+        pid-file: '/tmp/basic_pf_pid'
+
+    - name: Setup connection for mongosh test
+      if: github.event.inputs.test_type == 'basic' || github.event.inputs.test_type == 'mongosh-only'
+      uses: ./.github/actions/connection-test-setup
+      id: mongosh-connection
+      with:
+        namespace: ${{ env.DB_NS }}
+        cluster-name: ${{ env.DB_NAME }}
+        port: ${{ env.DB_PORT }}
+        pid-file: '/tmp/mongosh_pf_pid'
 
     - name: MongoDB shell operations test
       if: github.event.inputs.test_type == 'basic' || github.event.inputs.test_type == 'mongosh-only'
       run: |
-        POD_NAME=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o jsonpath='{.items[0].metadata.name}')
-        
-        if [ -z "$POD_NAME" ]; then
-          echo "❌ No DocumentDB pod found!"
-          kubectl get pods -n $DB_NS
-          exit 1
-        fi
-        
-        echo "Using DocumentDB pod: $POD_NAME"
-        
-        kubectl wait --for=condition=Ready pod/$POD_NAME -n $DB_NS --timeout=300s
-        
-        kubectl port-forward pod/$POD_NAME $DB_PORT:$DB_PORT -n $DB_NS &
-        PF_PID=$!
-        sleep 10
+        echo "Running MongoDB shell operations test..."
+        echo "Using pod: ${{ steps.mongosh-connection.outputs.pod-name }}"
         
         cat > quick_mongosh_test.js << 'EOF'
         print("=== Quick mongosh Test ===");
@@ -208,8 +201,13 @@ jobs:
           --tls --tlsAllowInvalidCertificates \
           --file quick_mongosh_test.js
         
-        kill $PF_PID
         echo "✅ mongosh operations test passed!"
+
+    - name: Cleanup mongosh connection
+      if: always() && (github.event.inputs.test_type == 'basic' || github.event.inputs.test_type == 'mongosh-only')
+      uses: ./.github/actions/cleanup-port-forward
+      with:
+        pid-file: '/tmp/mongosh_pf_pid'
 
     - name: Show cluster status
       if: always()

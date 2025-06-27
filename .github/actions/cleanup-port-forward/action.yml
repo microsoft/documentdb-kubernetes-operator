@@ -1,0 +1,29 @@
+name: 'Cleanup Port Forward'
+description: 'Cleans up port forwarding processes'
+inputs:
+  pid-file:
+    description: 'File containing the port-forward process ID'
+    required: false
+    default: '/tmp/pf_pid'
+  architecture:
+    description: 'Target architecture for logging'
+    required: false
+    default: 'amd64'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Cleanup port forwarding
+      shell: bash
+      run: |
+        echo "Cleaning up port forwarding on ${{ inputs.architecture }}..."
+        
+        if [ -f "${{ inputs.pid-file }}" ]; then
+          PF_PID=$(cat ${{ inputs.pid-file }})
+          echo "Stopping port-forward process with PID: $PF_PID"
+          kill $PF_PID 2>/dev/null || true
+          rm -f ${{ inputs.pid-file }}
+          echo "✓ Port-forward cleanup completed on ${{ inputs.architecture }}"
+        else
+          echo "No port-forward PID file found, nothing to clean up"
+        fi

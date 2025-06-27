@@ -1,0 +1,117 @@
+name: 'Connection Test Setup'
+description: 'Sets up port forwarding, validates connection, and discovers DocumentDB pods for testing'
+inputs:
+  namespace:
+    description: 'Namespace where DocumentDB is deployed'
+    required: true
+  cluster-name:
+    description: 'Name of the DocumentDB cluster'
+    required: true
+  port:
+    description: 'Local port for port forwarding'
+    required: false
+    default: '10260'
+  target-port:
+    description: 'Target port on the pod'
+    required: false
+    default: '10260'
+  connection-timeout:
+    description: 'Timeout for connection validation (in seconds)'
+    required: false
+    default: '60'
+  wait-time:
+    description: 'Initial wait time before connection check (in seconds)'
+    required: false
+    default: '15'
+  architecture:
+    description: 'Target architecture for logging'
+    required: false
+    default: 'amd64'
+  pid-file:
+    description: 'File to store port-forward process ID'
+    required: false
+    default: '/tmp/pf_pid'
+
+outputs:
+  pod-name:
+    description: 'Name of the DocumentDB pod used for port forwarding'
+    value: ${{ steps.setup-port-forward.outputs.pod-name }}
+  port-forward-pid:
+    description: 'Process ID of the port-forward process'
+    value: ${{ steps.setup-port-forward.outputs.port-forward-pid }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Discover DocumentDB pod
+      id: discover-pod
+      shell: bash
+      run: |
+        echo "Discovering DocumentDB pod in namespace '${{ inputs.namespace }}' on ${{ inputs.architecture }}..."
+        kubectl get pods -n ${{ inputs.namespace }}
+        
+        POD_NAME=$(kubectl get pods -n ${{ inputs.namespace }} -l cnpg.io/cluster=${{ inputs.cluster-name }} -o jsonpath='{.items[0].metadata.name}')
+        
+        if [ -z "$POD_NAME" ]; then
+          echo "❌ No DocumentDB pod found!"
+          echo "Available pods in namespace:"
+          kubectl get pods -n ${{ inputs.namespace }}
+          echo "Available DocumentDB resources:"
+          kubectl get documentdb -n ${{ inputs.namespace }} || echo "No DocumentDB resources found"
+          exit 1
+        fi
+        
+        echo "Found DocumentDB pod: $POD_NAME"
+        echo "pod-name=$POD_NAME" >> $GITHUB_OUTPUT
+        
+        # Wait for pod to be ready
+        echo "Waiting for pod $POD_NAME to be ready..."
+        kubectl wait --for=condition=Ready pod/$POD_NAME -n ${{ inputs.namespace }} --timeout=300s
+
+    - name: Setup port forwarding
+      id: setup-port-forward
+      shell: bash
+      run: |
+        POD_NAME="${{ steps.discover-pod.outputs.pod-name }}"
+        echo "Setting up port forwarding from pod $POD_NAME on ${{ inputs.architecture }}..."
+        
+        # Start port-forward in background
+        kubectl port-forward pod/$POD_NAME ${{ inputs.port }}:${{ inputs.target-port }} -n ${{ inputs.namespace }} &
+        PF_PID=$!
+        
+        # Store PID for cleanup
+        echo $PF_PID > ${{ inputs.pid-file }}
+        echo "port-forward-pid=$PF_PID" >> $GITHUB_OUTPUT
+        echo "pod-name=$POD_NAME" >> $GITHUB_OUTPUT
+        
+        echo "Port-forward started with PID: $PF_PID"
+        echo "Waiting ${{ inputs.wait-time }} seconds for port-forward to establish..."
+        sleep ${{ inputs.wait-time }}
+
+    - name: Validate connection
+      shell: bash
+      run: |
+        echo "Validating connection to 127.0.0.1:${{ inputs.port }} on ${{ inputs.architecture }}..."
+        
+        # Test connection with timeout
+        timeout ${{ inputs.connection-timeout }} bash -c '
+        until nc -z 127.0.0.1 ${{ inputs.port }}; do
+          echo "Waiting for port-forward to be ready..."
+          sleep 2
+        done
+        '
+        
+        if [ $? -eq 0 ]; then
+          echo "✓ Port forwarding established successfully on ${{ inputs.architecture }}"
+        else
+          echo "❌ Failed to establish connection on ${{ inputs.architecture }}"
+          echo "Port-forward process status:"
+          PF_PID=$(cat ${{ inputs.pid-file }} 2>/dev/null || echo "unknown")
+          if [ "$PF_PID" != "unknown" ]; then
+            ps aux | grep $PF_PID | grep -v grep || echo "Port-forward process not found"
+          fi
+          
+          echo "Pod status:"
+          kubectl get pods -n ${{ inputs.namespace }} -l cnpg.io/cluster=${{ inputs.cluster-name }}
+          exit 1
+        fi

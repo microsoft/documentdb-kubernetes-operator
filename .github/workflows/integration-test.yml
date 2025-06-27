@@ -91,26 +91,20 @@ jobs:
         timeout: '600'
         architecture: ${{ matrix.architecture }}
 
+    - name: Setup connection for mongosh test
+      uses: ./.github/actions/connection-test-setup
+      id: mongosh-connection
+      with:
+        namespace: ${{ env.DB_NS }}
+        cluster-name: ${{ env.DB_NAME }}
+        port: ${{ env.DB_PORT }}
+        architecture: ${{ matrix.architecture }}
+        pid-file: '/tmp/mongosh_pf_pid'
+
     - name: Test connection with mongosh
       run: |
         echo "Testing connection with mongosh on ${{ matrix.architecture }} architecture..."
-        
-        # Start port-forward in background
-        kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
-        PF_PID=$!
-        
-        # Wait for port-forward to be ready
-        sleep 10
-        
-        # Test connection and run basic operations
-        timeout 60 bash -c '
-        until nc -z 127.0.0.1 '$DB_PORT'; do
-          echo "Waiting for port-forward to be ready..."
-          sleep 2
-        done
-        '
-        
-        echo "Port-forward is ready, testing mongosh connection..."
+        echo "Using pod: ${{ steps.mongosh-connection.outputs.pod-name }}"
         
         # Create test script with validation
         cat > test_mongosh.js << 'EOF'
@@ -234,32 +228,30 @@ jobs:
           exit 1
         fi
         
-        # Clean up port-forward
-        kill $PF_PID || true
+    - name: Cleanup mongosh connection
+      if: always()
+      uses: ./.github/actions/cleanup-port-forward
+      with:
+        pid-file: '/tmp/mongosh_pf_pid'
+        architecture: ${{ matrix.architecture }}
+
+    - name: Setup connection for Python test
+      uses: ./.github/actions/connection-test-setup
+      id: python-connection
+      with:
+        namespace: ${{ env.DB_NS }}
+        cluster-name: ${{ env.DB_NAME }}
+        port: ${{ env.DB_PORT }}
+        architecture: ${{ matrix.architecture }}
+        pid-file: '/tmp/python_pf_pid'
 
     - name: Test with Python PyMongo client
       run: |
         echo "Testing with Python PyMongo client on ${{ matrix.architecture }} architecture..."
+        echo "Using pod: ${{ steps.python-connection.outputs.pod-name }}"
         
         # Install Python dependencies
         pip install pymongo
-        
-        # Start port-forward in background
-        kubectl port-forward pod/${DB_NAME}-1 $DB_PORT:$DB_PORT -n $DB_NS &
-        PF_PID=$!
-        
-        # Wait for port-forward to be ready
-        sleep 10
-        
-        # Test connection and ensure port-forward is ready
-        timeout 60 bash -c '
-        until nc -z 127.0.0.1 '$DB_PORT'; do
-          echo "Waiting for port-forward to be ready..."
-          sleep 2
-        done
-        '
-        
-        echo "Port-forward is ready, running Python tests..."
         
         # Run the existing Python test script and validate it completes successfully
         cd scripts/test-scripts
@@ -419,8 +411,12 @@ jobs:
           exit 1
         fi
         
-        # Clean up port-forward
-        kill $PF_PID || true
+    - name: Cleanup Python connection
+      if: always()
+      uses: ./.github/actions/cleanup-port-forward
+      with:
+        pid-file: '/tmp/python_pf_pid'
+        architecture: ${{ matrix.architecture }}
 
     - name: Collect logs on failure
       if: failure()

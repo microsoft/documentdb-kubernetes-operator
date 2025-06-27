@@ -44,8 +44,8 @@ jobs:
         include:
           - architecture: amd64
             runner: ubuntu-latest
-          - architecture: arm64
-            runner: ubuntu-22.04-arm
+          # - architecture: arm64
+          #   runner: ubuntu-22.04-arm
     
     env:
       # Use outputs from the build workflow

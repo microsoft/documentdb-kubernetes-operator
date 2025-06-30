@@ -326,53 +326,11 @@ jobs:
 
     - name: Collect comprehensive logs on failure
       if: failure()
-      run: |
-        echo "=== Comprehensive Failure Diagnostics for ${{ matrix.architecture }} ==="
-        
-        # Check if kubectl is working
-        if ! kubectl version --client &>/dev/null; then
-          echo "kubectl not available"
-          exit 0
-        fi
-        
-        # Check if cluster is accessible
-        if ! kubectl cluster-info &>/dev/null; then
-          echo "Cluster not accessible"
-          kubectl config current-context || echo "No kubectl context found"
-          kubectl config get-contexts || echo "No contexts available"
-          exit 0
-        fi
-        
-        echo "=== System Information ==="
-        kubectl version --client || echo "Failed to get kubectl version"
-        helm version || echo "Failed to get helm version"
-        docker --version || echo "Failed to get docker version"
-        
-        echo "=== Cluster State ==="
-        kubectl get nodes -o wide || echo "Failed to get nodes"
-        kubectl get pods --all-namespaces -o wide || echo "Failed to get pods"
-        
-        echo "=== DocumentDB Resources ==="
-        kubectl get documentdb -A -o yaml || echo "Failed to get DocumentDB resources"
-        kubectl describe documentdb $DB_NAME -n $DB_NS || echo "Failed to describe DocumentDB"
-        
-        echo "=== Storage Information ==="
-        kubectl get pv,pvc -A || echo "Failed to get storage info"
-        
-        echo "=== Pod Details ==="
-        kubectl describe pods -n $DB_NS || echo "Failed to describe pods"
-        
-        echo "=== Container Logs ==="
-        for pod in $(kubectl get pods -n $DB_NS -o name 2>/dev/null); do
-          echo "--- Logs for $pod ---"
-          kubectl logs $pod -n $DB_NS --all-containers=true --tail=100 || echo "Failed to get logs for $pod"
-        done
-        
-        echo "=== Operator Logs ==="
-        kubectl logs -n $OPERATOR_NS deployment/documentdb-operator --tail=200 || echo "Failed to get operator logs"
-        
-        echo "=== CNPG Operator Logs ==="
-        kubectl logs -n cnpg-system --all-containers=true --tail=100 || echo "CNPG logs not available"
-        
-        echo "=== Events ==="
-        kubectl get events --all-namespaces --sort-by='.lastTimestamp' || echo "Failed to get events"
+      uses: ./.github/actions/failure-diagnostics
+      with:
+        namespace: ${{ env.DB_NS }}
+        cluster-name: ${{ env.DB_NAME }}
+        operator-namespace: ${{ env.OPERATOR_NS }}
+        architecture: ${{ matrix.architecture }}
+        include-logs: 'true'
+        log-lines: '200'

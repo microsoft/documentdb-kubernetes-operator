@@ -1,0 +1,250 @@
+name: 'Failure Diagnostics'
+description: 'Comprehensive failure diagnostics for DocumentDB testing workflows'
+inputs:
+  namespace:
+    description: 'Namespace where DocumentDB is deployed'
+    required: false
+    default: ''
+  cluster-name:
+    description: 'Name of the DocumentDB cluster'
+    required: false
+    default: ''
+  operator-namespace:
+    description: 'Namespace where DocumentDB operator is deployed'
+    required: false
+    default: 'documentdb-operator'
+  architecture:
+    description: 'Target architecture for logging context'
+    required: false
+    default: 'amd64'
+  include-logs:
+    description: 'Whether to include detailed pod logs'
+    required: false
+    default: 'true'
+  log-lines:
+    description: 'Number of log lines to collect from each pod'
+    required: false
+    default: '100'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Collect comprehensive failure diagnostics
+      shell: bash
+      run: |
+        echo "=== Comprehensive Failure Diagnostics for ${{ inputs.architecture }} ==="
+        echo "Timestamp: $(date)"
+        echo "Collecting diagnostics for namespace: ${{ inputs.namespace }}"
+        echo "Cluster name: ${{ inputs.cluster-name }}"
+        echo ""
+
+        # Check if kubectl is working
+        if ! kubectl version --client &>/dev/null; then
+          echo "❌ kubectl not available"
+          exit 0
+        fi
+
+        # Check if cluster is accessible
+        if ! kubectl cluster-info &>/dev/null; then
+          echo "❌ Cluster not accessible"
+          kubectl config current-context || echo "No kubectl context found"
+          kubectl config get-contexts || echo "No contexts available"
+          exit 0
+        fi
+
+        echo "=== System Information ==="
+        echo "kubectl version:"
+        kubectl version --client || echo "Failed to get kubectl version"
+        echo ""
+        echo "helm version:"
+        helm version || echo "Failed to get helm version"
+        echo ""
+        echo "docker version:"
+        docker --version || echo "Failed to get docker version"
+        echo ""
+
+        echo "=== Cluster State ==="
+        echo "Cluster info:"
+        kubectl cluster-info || echo "Failed to get cluster info"
+        echo ""
+        echo "Nodes:"
+        kubectl get nodes -o wide || echo "Failed to get nodes"
+        echo ""
+        echo "All pods across namespaces:"
+        kubectl get pods --all-namespaces -o wide || echo "Failed to get pods"
+        echo ""
+
+        # Namespace-specific diagnostics
+        if [ -n "${{ inputs.namespace }}" ]; then
+          echo "=== Namespace '${{ inputs.namespace }}' Diagnostics ==="
+          
+          echo "Namespace status:"
+          kubectl get namespace ${{ inputs.namespace }} || echo "Namespace not found"
+          echo ""
+          
+          echo "All resources in namespace:"
+          kubectl get all -n ${{ inputs.namespace }} || echo "Failed to get resources"
+          echo ""
+          
+          if [ -n "${{ inputs.cluster-name }}" ]; then
+            echo "=== DocumentDB Resource Diagnostics ==="
+            echo "DocumentDB resource:"
+            kubectl get documentdb ${{ inputs.cluster-name }} -n ${{ inputs.namespace }} -o yaml || echo "DocumentDB resource not found"
+            echo ""
+            
+            echo "DocumentDB resource description:"
+            kubectl describe documentdb ${{ inputs.cluster-name }} -n ${{ inputs.namespace }} || echo "Failed to describe DocumentDB"
+            echo ""
+            
+            echo "CNPG Cluster resources:"
+            kubectl get clusters.postgresql.cnpg.io -n ${{ inputs.namespace }} || echo "No CNPG clusters found"
+            echo ""
+            
+            echo "DocumentDB-related pods:"
+            kubectl get pods -n ${{ inputs.namespace }} -l cnpg.io/cluster=${{ inputs.cluster-name }} -o wide || echo "No cluster pods found"
+            echo ""
+            
+            echo "Pod descriptions for cluster ${{ inputs.cluster-name }}:"
+            for pod in $(kubectl get pods -n ${{ inputs.namespace }} -l cnpg.io/cluster=${{ inputs.cluster-name }} -o name 2>/dev/null); do
+              echo "--- Description for $pod ---"
+              kubectl describe $pod -n ${{ inputs.namespace }} || echo "Failed to describe $pod"
+              echo ""
+            done
+          else
+            echo "Pod descriptions for namespace ${{ inputs.namespace }}:"
+            kubectl describe pods -n ${{ inputs.namespace }} || echo "Failed to describe pods"
+            echo ""
+          fi
+          
+          echo "Services in namespace:"
+          kubectl get services -n ${{ inputs.namespace }} -o wide || echo "Failed to get services"
+          echo ""
+          
+          echo "ConfigMaps in namespace:"
+          kubectl get configmaps -n ${{ inputs.namespace }} || echo "Failed to get configmaps"
+          echo ""
+          
+          echo "Secrets in namespace:"
+          kubectl get secrets -n ${{ inputs.namespace }} || echo "Failed to get secrets"
+          echo ""
+          
+          echo "Events in namespace (recent):"
+          kubectl get events -n ${{ inputs.namespace }} --sort-by='.lastTimestamp' || echo "Failed to get events"
+          echo ""
+          
+          if [ "${{ inputs.include-logs }}" = "true" ]; then
+            echo "=== Container Logs ==="
+            if [ -n "${{ inputs.cluster-name }}" ]; then
+              for pod in $(kubectl get pods -n ${{ inputs.namespace }} -l cnpg.io/cluster=${{ inputs.cluster-name }} -o name 2>/dev/null); do
+                pod_name=$(echo $pod | cut -d'/' -f2)
+                echo "--- Logs for $pod_name ---"
+                kubectl logs $pod -n ${{ inputs.namespace }} --all-containers=true --tail=${{ inputs.log-lines }} || echo "Failed to get logs for $pod_name"
+                echo ""
+                
+                # Get previous logs if pod has restarted
+                echo "--- Previous logs for $pod_name (if available) ---"
+                kubectl logs $pod -n ${{ inputs.namespace }} --all-containers=true --previous --tail=${{ inputs.log-lines }} 2>/dev/null || echo "No previous logs available"
+                echo ""
+              done
+            else
+              for pod in $(kubectl get pods -n ${{ inputs.namespace }} -o name 2>/dev/null); do
+                pod_name=$(echo $pod | cut -d'/' -f2)
+                echo "--- Logs for $pod_name ---"
+                kubectl logs $pod -n ${{ inputs.namespace }} --all-containers=true --tail=${{ inputs.log-lines }} || echo "Failed to get logs for $pod_name"
+                echo ""
+              done
+            fi
+          fi
+        fi
+
+        echo "=== Operator Diagnostics ==="
+        echo "DocumentDB Operator deployment:"
+        kubectl get deployment -n ${{ inputs.operator-namespace }} || echo "No deployments found in operator namespace"
+        echo ""
+        
+        echo "DocumentDB Operator pods:"
+        kubectl get pods -n ${{ inputs.operator-namespace }} || echo "No pods found in operator namespace"
+        echo ""
+        
+        if [ "${{ inputs.include-logs }}" = "true" ]; then
+          echo "DocumentDB Operator logs:"
+          kubectl logs -n ${{ inputs.operator-namespace }} deployment/documentdb-operator --tail=${{ inputs.log-lines }} || echo "Failed to get operator logs"
+          echo ""
+        fi
+        
+        echo "CNPG Operator status:"
+        kubectl get pods -n cnpg-system || echo "CNPG system not available"
+        echo ""
+        
+        if [ "${{ inputs.include-logs }}" = "true" ]; then
+          echo "CNPG Operator logs:"
+          kubectl logs -n cnpg-system --all-containers=true --tail=${{ inputs.log-lines }} || echo "CNPG logs not available"
+          echo ""
+        fi
+
+        echo "=== Storage Diagnostics ==="
+        echo "Persistent Volumes:"
+        kubectl get pv || echo "Failed to get PVs"
+        echo ""
+        
+        echo "Persistent Volume Claims:"
+        kubectl get pvc --all-namespaces || echo "Failed to get PVCs"
+        echo ""
+        
+        if [ -n "${{ inputs.namespace }}" ]; then
+          echo "PVCs in target namespace:"
+          kubectl get pvc -n ${{ inputs.namespace }} -o wide || echo "No PVCs in namespace"
+          echo ""
+          
+          echo "PVC descriptions in target namespace:"
+          kubectl describe pvc -n ${{ inputs.namespace }} || echo "Failed to describe PVCs"
+          echo ""
+        fi
+
+        echo "=== Network Diagnostics ==="
+        echo "Services across all namespaces:"
+        kubectl get services --all-namespaces || echo "Failed to get services"
+        echo ""
+        
+        echo "Endpoints:"
+        kubectl get endpoints --all-namespaces || echo "Failed to get endpoints"
+        echo ""
+        
+        echo "Network policies:"
+        kubectl get networkpolicies --all-namespaces || echo "No network policies found"
+        echo ""
+
+        echo "=== Resource Usage ==="
+        echo "Node resource usage:"
+        kubectl top nodes || echo "Metrics server not available"
+        echo ""
+        
+        echo "Pod resource usage:"
+        kubectl top pods --all-namespaces --containers || echo "Metrics server not available"
+        echo ""
+
+        echo "=== Custom Resources ==="
+        echo "DocumentDB resources across all namespaces:"
+        kubectl get documentdb --all-namespaces || echo "No DocumentDB resources found"
+        echo ""
+        
+        echo "CNPG Clusters:"
+        kubectl get clusters.postgresql.cnpg.io --all-namespaces || echo "No CNPG clusters found"
+        echo ""
+        
+        echo "CNPG Backups:"
+        kubectl get backups.postgresql.cnpg.io --all-namespaces || echo "No CNPG backups found"
+        echo ""
+
+        echo "=== System Events ==="
+        echo "Recent system events:"
+        kubectl get events --all-namespaces --sort-by='.lastTimestamp' --field-selector type!=Normal | tail -20 || echo "Failed to get system events"
+        echo ""
+        
+        echo "All recent events:"
+        kubectl get events --all-namespaces --sort-by='.lastTimestamp' | tail -30 || echo "Failed to get events"
+        echo ""
+
+        echo "=== Diagnostic Collection Complete ==="
+        echo "Timestamp: $(date)"
+        echo "Architecture: ${{ inputs.architecture }}"

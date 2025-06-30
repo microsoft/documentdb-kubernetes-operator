@@ -420,43 +420,11 @@ jobs:
 
     - name: Collect logs on failure
       if: failure()
-      run: |
-        echo "=== Collecting diagnostic information for ${{ matrix.architecture }} ==="
-        
-        # Check if kubectl is working
-        if ! kubectl version --client &>/dev/null; then
-          echo "kubectl not available"
-          exit 0
-        fi
-        
-        # Check if cluster is accessible
-        if ! kubectl cluster-info &>/dev/null; then
-          echo "Cluster not accessible"
-          kubectl config current-context || echo "No kubectl context found"
-          kubectl config get-contexts || echo "No contexts available"
-          exit 0
-        fi
-        
-        echo "=== Cluster nodes ==="
-        kubectl get nodes -o wide || echo "Failed to get nodes"
-        
-        echo "=== All pods ==="
-        kubectl get pods --all-namespaces -o wide || echo "Failed to get pods"
-        
-        echo "=== DocumentDB resources ==="
-        kubectl get documentdb -n $DB_NS -o yaml || echo "Failed to get DocumentDB resources"
-        
-        echo "=== DocumentDB pod logs ==="
-        kubectl logs -n $DB_NS -l cnpg.io/cluster=$DB_NAME --all-containers=true --tail=100 || echo "Failed to get DocumentDB pod logs"
-        
-        echo "=== DocumentDB pod description ==="
-        kubectl describe pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME || echo "Failed to describe DocumentDB pods"
-        
-        echo "=== Operator logs ==="
-        kubectl logs -n $OPERATOR_NS deployment/documentdb-operator --tail=100 || echo "Failed to get operator logs"
-        
-        echo "=== cert-manager logs ==="
-        kubectl logs -n $CERT_MANAGER_NS --all-containers=true --tail=50 || echo "Failed to get cert-manager logs"
-        
-        echo "=== Events ==="
-        kubectl get events --all-namespaces --sort-by='.lastTimestamp' || echo "Failed to get events"
+      uses: ./.github/actions/failure-diagnostics
+      with:
+        namespace: ${{ env.DB_NS }}
+        cluster-name: ${{ env.DB_NAME }}
+        operator-namespace: ${{ env.OPERATOR_NS }}
+        architecture: ${{ matrix.architecture }}
+        include-logs: 'true'
+        log-lines: '100'

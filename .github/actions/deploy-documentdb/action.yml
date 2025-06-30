@@ -79,26 +79,52 @@ runs:
         end_time=$((SECONDS + timeout))
         
         while [ $SECONDS -lt $end_time ]; do
+          echo "=== Status Check at $(date) ==="
+          
+          # Check DocumentDB resource status
+          echo "DocumentDB resource status:"
+          kubectl get documentdb ${{ inputs.cluster-name }} -n ${{ inputs.namespace }} -o jsonpath='{.status}' 2>/dev/null | jq . || echo "No status available yet"
+          
           # Check if any pods exist first
           pod_count=$(kubectl get pods -n ${{ inputs.namespace }} -l cnpg.io/cluster=${{ inputs.cluster-name }} --no-headers 2>/dev/null | wc -l)
           if [[ "$pod_count" -eq "0" ]]; then
             echo "No DocumentDB pods found yet, waiting..."
+            kubectl get events -n ${{ inputs.namespace }} --sort-by='.lastTimestamp' | tail -5
             sleep 15
             continue
           fi
           
-          # Check for ready pods
-          ready_pods=$(kubectl get pods -n ${{ inputs.namespace }} -l cnpg.io/cluster=${{ inputs.cluster-name }} -o json 2>/dev/null | \
-                       jq '.items[] | select(.status.phase == "Running" and ([.status.containerStatuses[]? | .ready] | all))' 2>/dev/null | \
-                       jq -s 'length' 2>/dev/null || echo "0")
+          echo "Found $pod_count pods for cluster ${{ inputs.cluster-name }}"
+          kubectl get pods -n ${{ inputs.namespace }} -l cnpg.io/cluster=${{ inputs.cluster-name }} -o wide
           
-          if [[ "$ready_pods" -eq "$expected_pods" ]]; then
-            echo "DocumentDB cluster is ready on ${{ inputs.architecture }}! ($ready_pods/$expected_pods pods ready)"
-            break
+          # Check for ready main pods (exclude initdb pods)
+          ready_main_pods=$(kubectl get pods -n ${{ inputs.namespace }} -l cnpg.io/cluster=${{ inputs.cluster-name }} -o json 2>/dev/null | \
+                            jq '.items[] | select(.metadata.name | test("initdb") | not) | select(.status.phase == "Running" and ([.status.containerStatuses[]? | .ready] | all))' 2>/dev/null | \
+                            jq -s 'length' 2>/dev/null || echo "0")
+          
+          echo "Ready main pods: $ready_main_pods / $expected_pods"
+          
+          if [[ "$ready_main_pods" -eq "$expected_pods" ]]; then
+            echo "DocumentDB cluster is ready on ${{ inputs.architecture }}! ($ready_main_pods/$expected_pods main pods ready)"
+            
+            # Additional verification - check if the main pod has the postgres container running
+            MAIN_POD=$(kubectl get pods -n ${{ inputs.namespace }} -l cnpg.io/cluster=${{ inputs.cluster-name }} -o json | jq -r '.items[] | select(.metadata.name | test("initdb") | not) | .metadata.name' | head -1)
+            if [ -n "$MAIN_POD" ]; then
+              echo "Verifying main pod $MAIN_POD containers:"
+              kubectl get pod $MAIN_POD -n ${{ inputs.namespace }} -o jsonpath='{.status.containerStatuses[*].name}' | tr ' ' '\n'
+              
+              # Check if postgres container is ready
+              POSTGRES_READY=$(kubectl get pod $MAIN_POD -n ${{ inputs.namespace }} -o jsonpath='{.status.containerStatuses[?(@.name=="postgres")].ready}' 2>/dev/null)
+              if [ "$POSTGRES_READY" = "true" ]; then
+                echo "✓ Postgres container is ready in pod $MAIN_POD"
+                break
+              else
+                echo "Postgres container not ready yet, continuing to wait..."
+              fi
+            fi
           fi
           
-          echo "Waiting for DocumentDB pods on ${{ inputs.architecture }}... ($ready_pods/$expected_pods ready)"
-          kubectl get pods -n ${{ inputs.namespace }} || true
+          echo "Waiting for DocumentDB pods on ${{ inputs.architecture }}... ($ready_main_pods/$expected_pods ready)"
           sleep 15
         done
         
@@ -107,8 +133,15 @@ runs:
           echo "Final pod status:"
           kubectl get pods -n ${{ inputs.namespace }} -o wide || true
           kubectl describe pods -n ${{ inputs.namespace }} || true
+          
+          echo "Recent events:"
+          kubectl get events -n ${{ inputs.namespace }} --sort-by='.lastTimestamp' | tail -10
+          
+          echo "DocumentDB resource status:"
+          kubectl get documentdb ${{ inputs.cluster-name }} -n ${{ inputs.namespace }} -o yaml || true
           exit 1
         fi
         
-        echo "Final pod status on ${{ inputs.architecture }}:"
+        echo "✓ DocumentDB cluster is ready on ${{ inputs.architecture }}"
+        echo "Final pod status:"
         kubectl get pods -n ${{ inputs.namespace }} -o wide

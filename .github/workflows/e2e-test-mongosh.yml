@@ -131,7 +131,62 @@ jobs:
         timeout: '900'
         architecture: ${{ matrix.architecture }}
 
-    - name: Setup connection for comprehensive tests
+    - name: Debug cluster state before connection setup
+      run: |
+        echo "=== Debugging cluster state on ${{ matrix.architecture }} ==="
+        echo "Checking DocumentDB resource status:"
+        kubectl get documentdb $DB_NAME -n $DB_NS -o yaml || echo "DocumentDB resource not found"
+        
+        echo "Checking all pods in namespace:"
+        kubectl get pods -n $DB_NS -o wide
+        
+        echo "Checking DocumentDB-specific pods:"
+        kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o wide || echo "No CNPG cluster pods found"
+        
+        echo "Checking for ready pods:"
+        kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME --field-selector=status.phase=Running || echo "No running pods found"
+        
+        echo "Checking services:"
+        kubectl get services -n $DB_NS
+        
+        echo "Checking recent events:"
+        kubectl get events -n $DB_NS --sort-by='.lastTimestamp' --field-selector type!=Normal | tail -10
+
+    - name: Wait for DocumentDB to be fully ready
+      run: |
+        echo "Waiting for DocumentDB cluster to be fully operational on ${{ matrix.architecture }}..."
+        
+        # Wait for the main DocumentDB pod (not initdb pods)
+        timeout 300 bash -c '
+        while true; do
+          # Look for the main cluster pod (should be named like documentdb-e2e-1, not documentdb-e2e-1-initdb-*)
+          MAIN_POD=$(kubectl get pods -n ${{ env.DB_NS }} -l cnpg.io/cluster=${{ env.DB_NAME }},cnpg.io/instanceRole=primary --no-headers 2>/dev/null | head -1 | awk "{print \$1}")
+          
+          if [ -n "$MAIN_POD" ] && [[ ! "$MAIN_POD" =~ initdb ]]; then
+            POD_STATUS=$(kubectl get pod $MAIN_POD -n ${{ env.DB_NS }} -o jsonpath="{.status.phase}" 2>/dev/null)
+            POD_READY=$(kubectl get pod $MAIN_POD -n ${{ env.DB_NS }} -o jsonpath="{.status.conditions[?(@.type==\"Ready\")].status}" 2>/dev/null)
+            
+            echo "Found main pod: $MAIN_POD, Status: $POD_STATUS, Ready: $POD_READY"
+            
+            if [ "$POD_STATUS" = "Running" ] && [ "$POD_READY" = "True" ]; then
+              echo "✓ Main DocumentDB pod is ready: $MAIN_POD"
+              break
+            fi
+          fi
+          
+          echo "Waiting for main DocumentDB pod to be ready..."
+          kubectl get pods -n ${{ env.DB_NS }} -l cnpg.io/cluster=${{ env.DB_NAME }}
+          sleep 10
+        done
+        ' || {
+          echo "❌ Timeout waiting for DocumentDB pod to be ready"
+          echo "Final pod status:"
+          kubectl get pods -n ${{ env.DB_NS }} -o wide
+          kubectl describe pods -n ${{ env.DB_NS }}
+          exit 1
+        }
+
+    - name: Setup connection for comprehensive tests  
       uses: ./.github/actions/connection-test-setup
       id: comprehensive-connection
       with:
@@ -140,6 +195,42 @@ jobs:
         port: ${{ env.DB_PORT }}
         architecture: ${{ matrix.architecture }}
         pid-file: '/tmp/comprehensive_pf_pid'
+        connection-timeout: '120'
+        wait-time: '30'
+
+    - name: Test connection before running mongosh tests
+      run: |
+        echo "Testing connection before running comprehensive mongosh tests on ${{ matrix.architecture }}..."
+        echo "Using pod: ${{ steps.comprehensive-connection.outputs.pod-name }}"
+        
+        # Test basic network connectivity
+        echo "Testing port connectivity..."
+        if timeout 30 bash -c 'until nc -z 127.0.0.1 ${{ env.DB_PORT }}; do sleep 2; done'; then
+          echo "✓ Port ${{ env.DB_PORT }} is accessible"
+        else
+          echo "❌ Cannot connect to port ${{ env.DB_PORT }}"
+          echo "Port-forward process status:"
+          ps aux | grep kubectl | grep port-forward || echo "No port-forward processes found"
+          exit 1
+        fi
+        
+        # Test basic mongosh connection
+        echo "Testing basic mongosh connectivity..."
+        if timeout 60 mongosh 127.0.0.1:$DB_PORT \
+          -u $DB_USERNAME \
+          -p $DB_PASSWORD \
+          --authenticationMechanism SCRAM-SHA-256 \
+          --tls \
+          --tlsAllowInvalidCertificates \
+          --eval "print('Connection test successful')"; then
+          echo "✓ Basic mongosh connection successful"
+        else
+          echo "❌ Basic mongosh connection failed"
+          echo "Checking DocumentDB pod logs:"
+          POD_NAME="${{ steps.comprehensive-connection.outputs.pod-name }}"
+          kubectl logs $POD_NAME -n ${{ env.DB_NS }} --tail=50 || echo "Failed to get logs"
+          exit 1
+        fi
 
     - name: Execute comprehensive mongosh tests
       run: |
@@ -157,6 +248,9 @@ jobs:
           echo "✓ Comprehensive mongosh tests completed successfully on ${{ matrix.architecture }}"
         else
           echo "❌ Comprehensive mongosh tests failed on ${{ matrix.architecture }}"
+          echo "Checking DocumentDB pod logs for errors:"
+          POD_NAME="${{ steps.comprehensive-connection.outputs.pod-name }}"
+          kubectl logs $POD_NAME -n ${{ env.DB_NS }} --tail=100 || echo "Failed to get logs"
           exit 1
         fi
 
@@ -176,11 +270,19 @@ jobs:
         port: ${{ env.DB_PORT }}
         architecture: ${{ matrix.architecture }}
         pid-file: '/tmp/performance_pf_pid'
+        connection-timeout: '120'
+        wait-time: '30'
 
     - name: Execute performance tests
       run: |
         echo "Running performance validation tests on ${{ matrix.architecture }}..."
         echo "Using pod: ${{ steps.performance-connection.outputs.pod-name }}"
+        
+        # Verify connection before running tests
+        if ! timeout 30 bash -c 'until nc -z 127.0.0.1 ${{ env.DB_PORT }}; do sleep 2; done'; then
+          echo "❌ Port ${{ env.DB_PORT }} not accessible for performance tests"
+          exit 1
+        fi
         
         # Run performance tests using external script
         if mongosh 127.0.0.1:$DB_PORT \
@@ -193,6 +295,9 @@ jobs:
           echo "✓ Performance tests completed successfully on ${{ matrix.architecture }}"
         else
           echo "❌ Performance tests failed on ${{ matrix.architecture }}"
+          echo "Checking DocumentDB pod logs for errors:"
+          POD_NAME="${{ steps.performance-connection.outputs.pod-name }}"
+          kubectl logs $POD_NAME -n ${{ env.DB_NS }} --tail=100 || echo "Failed to get logs"
           exit 1
         fi
 

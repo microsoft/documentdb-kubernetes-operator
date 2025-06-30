@@ -76,6 +76,11 @@ func getBootstrapConfiguration(documentdb dbpreview.DocumentDB) *cnpgv1.Bootstra
 				"CREATE EXTENSION documentdb CASCADE",
 				"CREATE ROLE documentdb WITH LOGIN PASSWORD 'Admin100'",
 				"ALTER ROLE documentdb WITH SUPERUSER CREATEDB CREATEROLE REPLICATION BYPASSRLS",
+				"CREATE ROLE default_user WITH LOGIN PASSWORD 'Admin100'",
+				"ALTER ROLE default_user WITH SUPERUSER CREATEDB CREATEROLE REPLICATION BYPASSRLS",
+				"CREATE DATABASE documentdb OWNER documentdb",
+				"\\c documentdb",
+				"CREATE EXTENSION documentdb CASCADE",
 			},
 		},
 	}

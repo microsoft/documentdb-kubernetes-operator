@@ -239,83 +239,131 @@ jobs:
       run: |
         echo "Setting up port forwarding for comprehensive mongosh tests on ${{ matrix.architecture }}..."
         
-        # Function to setup port forwarding with retries
+        # Function to setup port forwarding with enhanced retries
         setup_port_forward() {
-          local max_attempts=3
+          local max_attempts=5
           local attempt=1
+          local base_sleep=5
           
           while [ $attempt -le $max_attempts ]; do
             echo "Port forwarding attempt $attempt/$max_attempts..."
+            
+            # Exponential backoff for retry delays
+            local retry_delay=$((base_sleep * attempt))
+            if [ $attempt -gt 1 ]; then
+              echo "Waiting ${retry_delay}s before retry attempt..."
+              sleep $retry_delay
+            fi
             
             # Get the actual pod name and ensure it's ready
             POD_NAME=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o jsonpath='{.items[0].metadata.name}')
             if [ -z "$POD_NAME" ]; then
               echo "❌ No DocumentDB pod found"
               kubectl get pods -n $DB_NS
-              return 1
+              ((attempt++))
+              continue
             fi
             echo "Using pod: $POD_NAME"
             
-            # Check pod status and wait if needed
-            pod_phase=$(kubectl get pod $POD_NAME -n $DB_NS -o jsonpath='{.status.phase}')
-            echo "Pod phase: $pod_phase"
+            # Comprehensive pod readiness check with retries
+            pod_ready=false
+            for ready_check in {1..3}; do
+              pod_phase=$(kubectl get pod $POD_NAME -n $DB_NS -o jsonpath='{.status.phase}' 2>/dev/null || echo "Unknown")
+              echo "Pod phase: $pod_phase (readiness check $ready_check/3)"
+              
+              if [[ "$pod_phase" == "Running" ]]; then
+                # Wait for pod to be ready
+                if kubectl wait --for=condition=Ready pod/$POD_NAME -n $DB_NS --timeout=60s 2>/dev/null; then
+                  echo "✓ Pod is ready"
+                  pod_ready=true
+                  break
+                else
+                  echo "❌ Pod readiness check failed, retrying..."
+                  sleep 10
+                fi
+              else
+                echo "Pod is not running, waiting..."
+                if kubectl wait --for=condition=Ready pod/$POD_NAME -n $DB_NS --timeout=90s 2>/dev/null; then
+                  echo "✓ Pod became ready"
+                  pod_ready=true
+                  break
+                else
+                  echo "❌ Pod failed to become ready, retrying..."
+                  sleep 15
+                fi
+              fi
+            done
             
-            if [[ "$pod_phase" != "Running" ]]; then
-              echo "Pod is not running, waiting..."
-              kubectl wait --for=condition=Ready pod/$POD_NAME -n $DB_NS --timeout=120s || {
-                echo "❌ Pod $POD_NAME is not ready after waiting"
-                kubectl describe pod/$POD_NAME -n $DB_NS
-                ((attempt++))
-                continue
-              }
-            fi
-            
-            # Additional check for pod readiness
-            kubectl wait --for=condition=Ready pod/$POD_NAME -n $DB_NS --timeout=30s || {
-              echo "❌ Pod readiness check failed"
-              kubectl describe pod/$POD_NAME -n $DB_NS
+            if [ "$pod_ready" = false ]; then
+              echo "❌ Pod $POD_NAME is not ready after multiple checks (attempt $attempt)"
+              kubectl describe pod/$POD_NAME -n $DB_NS | head -30
               ((attempt++))
               continue
-            }
-            
-            # Clean up any existing port forwarding
-            if [ -f /tmp/pf_pid ]; then
-              old_pid=$(cat /tmp/pf_pid)
-              kill $old_pid 2>/dev/null || true
-              rm -f /tmp/pf_pid /tmp/pf_output.log
             fi
             
-            # Start port-forward with better error handling
+            # Clean up any existing port forwarding with more thorough cleanup
+            cleanup_port_forward() {
+              # Kill any existing port forwarding processes
+              pkill -f "kubectl port-forward.*$DB_PORT" 2>/dev/null || true
+              
+              # Clean up PID files and logs
+              for file in /tmp/pf_pid /tmp/pf_output.log; do
+                if [ -f "$file" ]; then
+                  [ -f /tmp/pf_pid ] && kill $(cat /tmp/pf_pid) 2>/dev/null || true
+                  rm -f "$file"
+                fi
+              done
+              
+              # Wait for port to be released
+              sleep 3
+              
+              # Check if port is still in use and force kill if needed
+              local port_users=$(lsof -ti:$DB_PORT 2>/dev/null || true)
+              if [ -n "$port_users" ]; then
+                echo "Force killing processes using port $DB_PORT: $port_users"
+                echo "$port_users" | xargs -r kill -9 2>/dev/null || true
+                sleep 2
+              fi
+            }
+            
+            cleanup_port_forward
+            
+            # Start port-forward with enhanced error handling
+            echo "Starting port forwarding from pod $POD_NAME..."
             kubectl port-forward pod/$POD_NAME $DB_PORT:$DB_PORT -n $DB_NS > /tmp/pf_output.log 2>&1 &
             PF_PID=$!
             echo $PF_PID > /tmp/pf_pid
             
-            # Wait for port-forward to establish
+            # Wait longer for port-forward to establish
             echo "Waiting for port forwarding to establish..."
-            sleep 15
+            sleep 20
             
             # Check if port-forward process is still running
             if ! kill -0 $PF_PID 2>/dev/null; then
-              echo "❌ Port forwarding process died (attempt $attempt)"
+              echo "❌ Port forwarding process died immediately (attempt $attempt)"
               if [ -f /tmp/pf_output.log ]; then
                 echo "Port forwarding output:"
                 cat /tmp/pf_output.log
               fi
               ((attempt++))
-              sleep 5
               continue
             fi
             
-            # Test connection multiple times to ensure stability
+            # Enhanced connection testing with progressive delays
             connection_success=false
-            for i in {1..5}; do
-              if nc -z 127.0.0.1 $DB_PORT; then
-                echo "✓ Port forwarding connection test passed (attempt $i/5)"
+            for i in {1..8}; do
+              sleep 3
+              if nc -z 127.0.0.1 $DB_PORT 2>/dev/null; then
+                echo "✓ Port forwarding connection test passed (attempt $i/8)"
                 connection_success=true
                 break
               else
-                echo "❌ Port forwarding connection test failed (attempt $i/5)"
-                sleep 3
+                echo "❌ Port forwarding connection test failed (attempt $i/8)"
+                # Check if port-forward is still alive
+                if ! kill -0 $PF_PID 2>/dev/null; then
+                  echo "❌ Port forwarding process died during connection testing"
+                  break
+                fi
               fi
             done
             
@@ -323,40 +371,52 @@ jobs:
               echo "❌ All connection tests failed (attempt $attempt)"
               kill $PF_PID 2>/dev/null || true
               ((attempt++))
-              sleep 5
               continue
             fi
             
-            # Extended stability check - wait longer and check multiple times
+            # Extended stability check with more thorough validation
             echo "Running extended stability check..."
             stable=true
-            for check in {1..3}; do
-              sleep 10
+            for check in {1..5}; do
+              sleep 8
+              
+              # Check if process is still alive
               if ! kill -0 $PF_PID 2>/dev/null; then
-                echo "❌ Port forwarding process died during stability check $check/3 (attempt $attempt)"
+                echo "❌ Port forwarding process died during stability check $check/5 (attempt $attempt)"
                 stable=false
                 break
               fi
-              if ! nc -z 127.0.0.1 $DB_PORT; then
-                echo "❌ Connection lost during stability check $check/3 (attempt $attempt)"
+              
+              # Check connection stability
+              if ! nc -z 127.0.0.1 $DB_PORT 2>/dev/null; then
+                echo "❌ Connection lost during stability check $check/5 (attempt $attempt)"
                 stable=false
                 break
               fi
-              echo "✓ Stability check $check/3 passed"
+              
+              # Additional validation: try to establish a brief connection
+              if timeout 5 bash -c "</dev/tcp/127.0.0.1/$DB_PORT" 2>/dev/null; then
+                echo "✓ Stability check $check/5 passed (TCP connection verified)"
+              else
+                echo "❌ TCP connection verification failed during stability check $check/5 (attempt $attempt)"
+                stable=false
+                break
+              fi
             done
             
             if [ "$stable" = true ]; then
               echo "✓ Port forwarding established and stable on ${{ matrix.architecture }} (attempt $attempt)"
+              echo "✓ Final validation: Port forwarding is ready for use"
               return 0
             else
               echo "❌ Stability check failed (attempt $attempt)"
               if [ -f /tmp/pf_output.log ]; then
                 echo "Port forwarding output:"
-                tail -20 /tmp/pf_output.log
+                tail -30 /tmp/pf_output.log
               fi
               kill $PF_PID 2>/dev/null || true
+              cleanup_port_forward
               ((attempt++))
-              sleep 10
             fi
           done
           
@@ -364,12 +424,19 @@ jobs:
           return 1
         }
         
-        # Call the function
+        # Call the function with enhanced error handling
         if ! setup_port_forward; then
           echo "=== Final diagnostics ==="
           kubectl get pods -n $DB_NS -o wide
           kubectl describe pods -n $DB_NS
-          kubectl get events -n $DB_NS --sort-by='.lastTimestamp' | tail -10
+          kubectl get events -n $DB_NS --sort-by='.lastTimestamp' | tail -15
+          kubectl logs -n $DB_NS -l cnpg.io/cluster=$DB_NAME --tail=50
+          
+          # Check for any system-level issues
+          echo "=== System diagnostics ==="
+          lsof -i:$DB_PORT || echo "No processes using port $DB_PORT"
+          netstat -tuln | grep $DB_PORT || echo "Port $DB_PORT not in use"
+          
           exit 1
         fi
 
@@ -411,45 +478,87 @@ jobs:
       run: |
         echo "Setting up port forwarding for performance tests on ${{ matrix.architecture }}..."
         
-        # Function to setup port forwarding with retries for performance tests
+        # Function to setup port forwarding with enhanced retries for performance tests
         setup_perf_port_forward() {
-          local max_attempts=2
+          local max_attempts=4
           local attempt=1
+          local base_sleep=3
           
           while [ $attempt -le $max_attempts ]; do
             echo "Performance test port forwarding attempt $attempt/$max_attempts..."
+            
+            # Progressive backoff for retry delays
+            local retry_delay=$((base_sleep * attempt))
+            if [ $attempt -gt 1 ]; then
+              echo "Waiting ${retry_delay}s before retry attempt..."
+              sleep $retry_delay
+            fi
             
             # Get the actual pod name and ensure it's ready
             POD_NAME=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o jsonpath='{.items[0].metadata.name}')
             if [ -z "$POD_NAME" ]; then
               echo "❌ No DocumentDB pod found"
               kubectl get pods -n $DB_NS
-              return 1
+              ((attempt++))
+              continue
             fi
             echo "Using pod: $POD_NAME"
             
-            # Check pod readiness
-            kubectl wait --for=condition=Ready pod/$POD_NAME -n $DB_NS --timeout=30s || {
-              echo "❌ Pod readiness check failed"
+            # Enhanced pod readiness check
+            pod_ready=false
+            for ready_check in {1..2}; do
+              if kubectl wait --for=condition=Ready pod/$POD_NAME -n $DB_NS --timeout=45s 2>/dev/null; then
+                echo "✓ Pod is ready (check $ready_check/2)"
+                pod_ready=true
+                break
+              else
+                echo "❌ Pod readiness check failed, retrying..."
+                sleep 8
+              fi
+            done
+            
+            if [ "$pod_ready" = false ]; then
+              echo "❌ Pod $POD_NAME is not ready after checks (attempt $attempt)"
               ((attempt++))
               continue
-            }
-            
-            # Clean up any existing port forwarding
-            if [ -f /tmp/perf_pf_pid ]; then
-              old_pid=$(cat /tmp/perf_pf_pid)
-              kill $old_pid 2>/dev/null || true
-              rm -f /tmp/perf_pf_pid /tmp/perf_pf_output.log
             fi
             
-            # Start port-forward
+            # Enhanced cleanup for performance tests
+            cleanup_perf_port_forward() {
+              # Kill any existing performance test port forwarding
+              pkill -f "kubectl port-forward.*$DB_PORT" 2>/dev/null || true
+              
+              # Clean up files
+              for file in /tmp/perf_pf_pid /tmp/perf_pf_output.log; do
+                if [ -f "$file" ]; then
+                  [ -f /tmp/perf_pf_pid ] && kill $(cat /tmp/perf_pf_pid) 2>/dev/null || true
+                  rm -f "$file"
+                fi
+              done
+              
+              # Wait for cleanup
+              sleep 2
+              
+              # Force cleanup if port is still in use
+              local port_users=$(lsof -ti:$DB_PORT 2>/dev/null || true)
+              if [ -n "$port_users" ]; then
+                echo "Force killing processes using port $DB_PORT for performance tests"
+                echo "$port_users" | xargs -r kill -9 2>/dev/null || true
+                sleep 1
+              fi
+            }
+            
+            cleanup_perf_port_forward
+            
+            # Start port-forward with enhanced monitoring
+            echo "Starting performance test port forwarding from pod $POD_NAME..."
             kubectl port-forward pod/$POD_NAME $DB_PORT:$DB_PORT -n $DB_NS > /tmp/perf_pf_output.log 2>&1 &
             PF_PID=$!
             echo $PF_PID > /tmp/perf_pf_pid
             
-            # Wait for port-forward to establish
+            # Wait for port-forward to establish with progressive checking
             echo "Waiting for performance test port forwarding to establish..."
-            sleep 10
+            sleep 15
             
             # Check if port-forward process is still running
             if ! kill -0 $PF_PID 2>/dev/null; then
@@ -459,20 +568,24 @@ jobs:
                 cat /tmp/perf_pf_output.log
               fi
               ((attempt++))
-              sleep 5
               continue
             fi
             
-            # Test connection to ensure stability
+            # Enhanced connection testing for performance tests
             connection_success=false
-            for i in {1..3}; do
-              if nc -z 127.0.0.1 $DB_PORT; then
-                echo "✓ Performance test port forwarding connection test passed (attempt $i/3)"
+            for i in {1..6}; do
+              sleep 2
+              if nc -z 127.0.0.1 $DB_PORT 2>/dev/null; then
+                echo "✓ Performance test port forwarding connection test passed (attempt $i/6)"
                 connection_success=true
                 break
               else
-                echo "❌ Performance test port forwarding connection test failed (attempt $i/3)"
-                sleep 3
+                echo "❌ Performance test port forwarding connection test failed (attempt $i/6)"
+                # Check if port-forward is still alive
+                if ! kill -0 $PF_PID 2>/dev/null; then
+                  echo "❌ Performance test port forwarding process died during connection testing"
+                  break
+                fi
               fi
             done
             
@@ -480,36 +593,69 @@ jobs:
               echo "❌ All performance test connection tests failed (attempt $attempt)"
               kill $PF_PID 2>/dev/null || true
               ((attempt++))
-              sleep 5
               continue
             fi
             
-            # Shorter stability check for performance tests
-            sleep 5
-            if ! kill -0 $PF_PID 2>/dev/null; then
-              echo "❌ Performance test port forwarding process died after initial setup (attempt $attempt)"
+            # Stability check for performance tests
+            echo "Running performance test stability check..."
+            stable=true
+            for check in {1..3}; do
+              sleep 6
+              
+              # Check process health
+              if ! kill -0 $PF_PID 2>/dev/null; then
+                echo "❌ Performance test port forwarding process died during stability check $check/3 (attempt $attempt)"
+                stable=false
+                break
+              fi
+              
+              # Check connection health
+              if ! nc -z 127.0.0.1 $DB_PORT 2>/dev/null; then
+                echo "❌ Performance test connection lost during stability check $check/3 (attempt $attempt)"
+                stable=false
+                break
+              fi
+              
+              # Additional TCP verification
+              if timeout 3 bash -c "</dev/tcp/127.0.0.1/$DB_PORT" 2>/dev/null; then
+                echo "✓ Performance test stability check $check/3 passed"
+              else
+                echo "❌ Performance test TCP verification failed during stability check $check/3 (attempt $attempt)"
+                stable=false
+                break
+              fi
+            done
+            
+            if [ "$stable" = true ]; then
+              echo "✓ Performance test port forwarding established and stable on ${{ matrix.architecture }} (attempt $attempt)"
+              return 0
+            else
+              echo "❌ Performance test stability check failed (attempt $attempt)"
               if [ -f /tmp/perf_pf_output.log ]; then
                 echo "Performance test port forwarding output:"
-                tail -10 /tmp/perf_pf_output.log
+                tail -20 /tmp/perf_pf_output.log
               fi
+              kill $PF_PID 2>/dev/null || true
+              cleanup_perf_port_forward
               ((attempt++))
-              sleep 5
-              continue
             fi
-            
-            echo "✓ Performance test port forwarding established and stable on ${{ matrix.architecture }} (attempt $attempt)"
-            return 0
           done
           
           echo "❌ Failed to establish stable performance test port forwarding after $max_attempts attempts"
           return 1
         }
         
-        # Call the function
+        # Call the function with enhanced error handling
         if ! setup_perf_port_forward; then
           echo "=== Performance test port forwarding diagnostics ==="
           kubectl get pods -n $DB_NS -o wide
-          kubectl get events -n $DB_NS --sort-by='.lastTimestamp' | tail -5
+          kubectl get events -n $DB_NS --sort-by='.lastTimestamp' | tail -10
+          kubectl logs -n $DB_NS -l cnpg.io/cluster=$DB_NAME --tail=30
+          
+          # Check system state
+          echo "=== Performance test system diagnostics ==="
+          lsof -i:$DB_PORT || echo "No processes using port $DB_PORT"
+          
           exit 1
         fi
 

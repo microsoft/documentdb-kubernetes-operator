@@ -239,7 +239,7 @@ jobs:
       run: |
         echo "Setting up port forwarding for comprehensive mongosh tests on ${{ matrix.architecture }}..."
         
-        # Get the actual pod name
+        # Get the actual pod name and ensure it's ready
         POD_NAME=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o jsonpath='{.items[0].metadata.name}')
         if [ -z "$POD_NAME" ]; then
           echo "❌ No DocumentDB pod found"
@@ -248,15 +248,55 @@ jobs:
         fi
         echo "Using pod: $POD_NAME"
         
-        # Start port-forward
-        kubectl port-forward pod/$POD_NAME $DB_PORT:$DB_PORT -n $DB_NS &
+        # Verify pod is ready before attempting port forward
+        if ! kubectl wait --for=condition=Ready pod/$POD_NAME -n $DB_NS --timeout=60s; then
+          echo "❌ Pod $POD_NAME is not ready"
+          kubectl describe pod/$POD_NAME -n $DB_NS
+          exit 1
+        fi
+        
+        # Start port-forward with better error handling
+        kubectl port-forward pod/$POD_NAME $DB_PORT:$DB_PORT -n $DB_NS > /tmp/pf_output.log 2>&1 &
         PF_PID=$!
         echo $PF_PID > /tmp/pf_pid
         
-        # Wait for port-forward
-        sleep 15
-        timeout 60 bash -c 'until nc -z 127.0.0.1 '$DB_PORT'; do sleep 2; done'
-        echo "✓ Port forwarding established on ${{ matrix.architecture }}"
+        # Wait for port-forward to establish and verify it's stable
+        echo "Waiting for port forwarding to establish..."
+        sleep 10
+        
+        # Check if port-forward process is still running
+        if ! kill -0 $PF_PID 2>/dev/null; then
+          echo "❌ Port forwarding process died"
+          cat /tmp/pf_output.log
+          exit 1
+        fi
+        
+        # Test connection multiple times to ensure stability
+        for i in {1..5}; do
+          if ! nc -z 127.0.0.1 $DB_PORT; then
+            echo "❌ Port forwarding connection test failed (attempt $i/5)"
+            if [ $i -eq 5 ]; then
+              echo "Port forwarding output:"
+              cat /tmp/pf_output.log
+              kill $PF_PID 2>/dev/null || true
+              exit 1
+            fi
+            sleep 3
+          else
+            echo "✓ Port forwarding connection test passed (attempt $i/5)"
+            break
+          fi
+        done
+        
+        # Final stability check
+        sleep 5
+        if ! kill -0 $PF_PID 2>/dev/null; then
+          echo "❌ Port forwarding process died after initial setup"
+          cat /tmp/pf_output.log
+          exit 1
+        fi
+        
+        echo "✓ Port forwarding established and stable on ${{ matrix.architecture }}"
 
     - name: Execute comprehensive mongosh tests
       run: |
@@ -285,12 +325,15 @@ jobs:
           kill $PF_PID 2>/dev/null || true
           rm -f /tmp/pf_pid
         fi
+        
+        # Clean up output log
+        rm -f /tmp/pf_output.log
 
     - name: Setup port forwarding for performance tests
       run: |
         echo "Setting up port forwarding for performance tests on ${{ matrix.architecture }}..."
         
-        # Get the actual pod name
+        # Get the actual pod name and ensure it's ready
         POD_NAME=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o jsonpath='{.items[0].metadata.name}')
         if [ -z "$POD_NAME" ]; then
           echo "❌ No DocumentDB pod found"
@@ -299,13 +342,55 @@ jobs:
         fi
         echo "Using pod: $POD_NAME"
         
-        # Start port-forward
-        kubectl port-forward pod/$POD_NAME $DB_PORT:$DB_PORT -n $DB_NS &
+        # Verify pod is ready before attempting port forward
+        if ! kubectl wait --for=condition=Ready pod/$POD_NAME -n $DB_NS --timeout=60s; then
+          echo "❌ Pod $POD_NAME is not ready"
+          kubectl describe pod/$POD_NAME -n $DB_NS
+          exit 1
+        fi
+        
+        # Start port-forward with better error handling
+        kubectl port-forward pod/$POD_NAME $DB_PORT:$DB_PORT -n $DB_NS > /tmp/perf_pf_output.log 2>&1 &
         PF_PID=$!
         echo $PF_PID > /tmp/perf_pf_pid
+        
+        # Wait for port-forward to establish and verify it's stable
+        echo "Waiting for performance test port forwarding to establish..."
         sleep 10
         
-        echo "✓ Performance test port forwarding established"
+        # Check if port-forward process is still running
+        if ! kill -0 $PF_PID 2>/dev/null; then
+          echo "❌ Performance test port forwarding process died"
+          cat /tmp/perf_pf_output.log
+          exit 1
+        fi
+        
+        # Test connection to ensure stability
+        for i in {1..3}; do
+          if ! nc -z 127.0.0.1 $DB_PORT; then
+            echo "❌ Performance test port forwarding connection test failed (attempt $i/3)"
+            if [ $i -eq 3 ]; then
+              echo "Performance test port forwarding output:"
+              cat /tmp/perf_pf_output.log
+              kill $PF_PID 2>/dev/null || true
+              exit 1
+            fi
+            sleep 3
+          else
+            echo "✓ Performance test port forwarding connection test passed (attempt $i/3)"
+            break
+          fi
+        done
+        
+        # Final stability check
+        sleep 3
+        if ! kill -0 $PF_PID 2>/dev/null; then
+          echo "❌ Performance test port forwarding process died after initial setup"
+          cat /tmp/perf_pf_output.log
+          exit 1
+        fi
+        
+        echo "✓ Performance test port forwarding established and stable on ${{ matrix.architecture }}"
 
     - name: Execute performance tests
       run: |
@@ -334,6 +419,9 @@ jobs:
           kill $PF_PID 2>/dev/null || true
           rm -f /tmp/perf_pf_pid
         fi
+        
+        # Clean up output log
+        rm -f /tmp/perf_pf_output.log
 
     - name: Test cluster health and monitoring
       run: |

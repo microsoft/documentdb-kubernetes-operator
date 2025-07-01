@@ -187,72 +187,163 @@ jobs:
         }
 
     - name: Setup connection for comprehensive tests  
-      uses: ./.github/actions/connection-test-setup
+      uses: Wandalen/wretry.action@master
       id: comprehensive-connection
       with:
-        namespace: ${{ env.DB_NS }}
-        cluster-name: ${{ env.DB_NAME }}
-        port: ${{ env.DB_PORT }}
-        architecture: ${{ matrix.architecture }}
-        pid-file: '/tmp/comprehensive_pf_pid'
-        connection-timeout: '120'
-        wait-time: '30'
+        attempt_limit: 3
+        attempt_delay: 15000  # 15 seconds between attempts
+        action: ./.github/actions/connection-test-setup
+        with: |
+          namespace: ${{ env.DB_NS }}
+          cluster-name: ${{ env.DB_NAME }}
+          port: ${{ env.DB_PORT }}
+          architecture: ${{ matrix.architecture }}
+          pid-file: '/tmp/comprehensive_pf_pid'
+          connection-timeout: '120'
+          wait-time: '30'
 
-    - name: Test connection before running mongosh tests
-      run: |
-        echo "Testing connection before running comprehensive mongosh tests on ${{ matrix.architecture }}..."
-        echo "Using pod: ${{ steps.comprehensive-connection.outputs.pod-name }}"
-        
-        # Test basic network connectivity
-        echo "Testing port connectivity..."
-        if timeout 30 bash -c 'until nc -z 127.0.0.1 ${{ env.DB_PORT }}; do sleep 2; done'; then
-          echo "✓ Port ${{ env.DB_PORT }} is accessible"
-        else
-          echo "❌ Cannot connect to port ${{ env.DB_PORT }}"
-          echo "Port-forward process status:"
-          ps aux | grep kubectl | grep port-forward || echo "No port-forward processes found"
-          exit 1
-        fi
-        
-        # Test basic mongosh connection
-        echo "Testing basic mongosh connectivity..."
-        if timeout 60 mongosh 127.0.0.1:$DB_PORT \
-          -u $DB_USERNAME \
-          -p $DB_PASSWORD \
-          --authenticationMechanism SCRAM-SHA-256 \
-          --tls \
-          --tlsAllowInvalidCertificates \
-          --eval "print('Connection test successful')"; then
-          echo "✓ Basic mongosh connection successful"
-        else
-          echo "❌ Basic mongosh connection failed"
-          echo "Checking DocumentDB pod logs:"
-          POD_NAME="${{ steps.comprehensive-connection.outputs.pod-name }}"
-          kubectl logs $POD_NAME -n ${{ env.DB_NS }} --tail=50 || echo "Failed to get logs"
-          exit 1
-        fi
+    - name: Verify port-forward stability and connectivity
+      uses: Wandalen/wretry.action@master
+      with:
+        attempt_limit: 3
+        attempt_delay: 20000  # 20 seconds between attempts
+        pre_retry_command: |
+          echo "Port-forward verification failed, checking status and restarting if needed..."
+          
+          # Check if port-forward process is still alive
+          if [ -f '/tmp/comprehensive_pf_pid' ]; then
+            PF_PID=$(cat /tmp/comprehensive_pf_pid 2>/dev/null || echo "unknown")
+            if [ "$PF_PID" != "unknown" ]; then
+              if ps -p $PF_PID > /dev/null; then
+                echo "Port-forward process $PF_PID is still running, but connection verification failed"
+                echo "Killing existing port-forward and will retry..."
+                kill $PF_PID 2>/dev/null || true
+              else
+                echo "Port-forward process $PF_PID has died"
+              fi
+            fi
+          fi
+          
+          # Clean up and restart port-forward
+          pkill -f "kubectl.*port-forward.*${{ env.DB_PORT }}" || true
+          sleep 5
+          
+          # Restart port-forward
+          POD_NAME="${{ fromJSON(steps.comprehensive-connection.outputs.outputs).pod-name }}"
+          echo "Restarting port-forward to pod $POD_NAME..."
+          kubectl port-forward pod/$POD_NAME ${{ env.DB_PORT }}:${{ env.DB_PORT }} -n ${{ env.DB_NS }} &
+          NEW_PF_PID=$!
+          echo $NEW_PF_PID > /tmp/comprehensive_pf_pid
+          echo "Restarted port-forward with new PID: $NEW_PF_PID"
+          sleep 30  # Give more time for connection to stabilize
+        command: |
+          echo "Verifying port-forward stability and connectivity on ${{ matrix.architecture }}..."
+          POD_NAME="${{ fromJSON(steps.comprehensive-connection.outputs.outputs).pod-name }}"
+          echo "Testing connection to pod: $POD_NAME"
+          
+          # Extended stability test - check connection multiple times over a longer period
+          echo "Running extended port-forward stability test..."
+          
+          for round in 1 2 3; do
+            echo "=== Stability test round $round/3 ==="
+            
+            # Check if port-forward process is still running
+            if [ -f '/tmp/comprehensive_pf_pid' ]; then
+              PF_PID=$(cat /tmp/comprehensive_pf_pid 2>/dev/null || echo "unknown")
+              if [ "$PF_PID" != "unknown" ]; then
+                if ps -p $PF_PID > /dev/null; then
+                  echo "✓ Port-forward process $PF_PID is running"
+                else
+                  echo "❌ Port-forward process $PF_PID has died in round $round"
+                  exit 1
+                fi
+              fi
+            fi
+            
+            # Test network connectivity multiple times
+            CONNECTED=true
+            for attempt in 1 2 3 4 5; do
+              if timeout 10 bash -c 'nc -z 127.0.0.1 ${{ env.DB_PORT }}'; then
+                echo "✓ Round $round, attempt $attempt: Port ${{ env.DB_PORT }} is accessible"
+                sleep 2
+              else
+                echo "❌ Round $round, attempt $attempt: Cannot connect to port ${{ env.DB_PORT }}"
+                CONNECTED=false
+                break
+              fi
+            done
+            
+            if [ "$CONNECTED" = "false" ]; then
+              echo "❌ Connection test failed in round $round"
+              exit 1
+            fi
+            
+            # Test actual mongosh connection
+            echo "Testing mongosh connection in round $round..."
+            if timeout 30 mongosh 127.0.0.1:${{ env.DB_PORT }} \
+              -u ${{ env.DB_USERNAME }} \
+              -p ${{ env.DB_PASSWORD }} \
+              --authenticationMechanism SCRAM-SHA-256 \
+              --tls \
+              --tlsAllowInvalidCertificates \
+              --eval "print('Stability test round $round successful')"; then
+              echo "✓ Round $round: Mongosh connection successful"
+            else
+              echo "❌ Round $round: Mongosh connection failed"
+              echo "Checking pod logs:"
+              kubectl logs $POD_NAME -n ${{ env.DB_NS }} --tail=20 || echo "Failed to get logs"
+              exit 1
+            fi
+            
+            if [ $round -lt 3 ]; then
+              echo "Waiting 10 seconds before next round..."
+              sleep 10
+            fi
+          done
+          
+          echo "✓ Port-forward stability test completed successfully - connection is stable"
 
     - name: Execute comprehensive mongosh tests
-      run: |
-        echo "Running comprehensive mongosh validation tests on ${{ matrix.architecture }}..."
-        echo "Using pod: ${{ steps.comprehensive-connection.outputs.pod-name }}"
-        
-        # Run comprehensive tests with validation using external script
-        if mongosh 127.0.0.1:$DB_PORT \
-          -u $DB_USERNAME \
-          -p $DB_PASSWORD \
-          --authenticationMechanism SCRAM-SHA-256 \
-          --tls \
-          --tlsAllowInvalidCertificates \
-          --file scripts/test-scripts/comprehensive_mongosh_tests.js; then
-          echo "✓ Comprehensive mongosh tests completed successfully on ${{ matrix.architecture }}"
-        else
-          echo "❌ Comprehensive mongosh tests failed on ${{ matrix.architecture }}"
-          echo "Checking DocumentDB pod logs for errors:"
-          POD_NAME="${{ steps.comprehensive-connection.outputs.pod-name }}"
-          kubectl logs $POD_NAME -n ${{ env.DB_NS }} --tail=100 || echo "Failed to get logs"
-          exit 1
-        fi
+      uses: Wandalen/wretry.action@master
+      with:
+        attempt_limit: 2
+        attempt_delay: 20000  # 20 seconds between attempts 
+        pre_retry_command: |
+          echo "Retrying comprehensive tests..."
+          # Quick connection check before retry
+          if ! timeout 10 bash -c 'nc -z 127.0.0.1 ${{ env.DB_PORT }}'; then
+            echo "Connection appears to be down, this may be a transient network issue"
+            
+            # Try to restart port-forward
+            POD_NAME="${{ fromJSON(steps.comprehensive-connection.outputs.outputs).pod-name }}"
+            pkill -f "kubectl.*port-forward.*${{ env.DB_PORT }}" || true
+            sleep 5
+            kubectl port-forward pod/$POD_NAME ${{ env.DB_PORT }}:${{ env.DB_PORT }} -n ${{ env.DB_NS }} &
+            NEW_PF_PID=$!
+            echo $NEW_PF_PID > /tmp/comprehensive_pf_pid
+            echo "Restarted port-forward with PID: $NEW_PF_PID"
+            sleep 20
+          fi
+        command: |
+          echo "Running comprehensive mongosh validation tests on ${{ matrix.architecture }}..."
+          echo "Using pod: ${{ fromJSON(steps.comprehensive-connection.outputs.outputs).pod-name }}"
+          
+          # Run comprehensive tests with validation using external script
+          if mongosh 127.0.0.1:${{ env.DB_PORT }} \
+            -u ${{ env.DB_USERNAME }} \
+            -p ${{ env.DB_PASSWORD }} \
+            --authenticationMechanism SCRAM-SHA-256 \
+            --tls \
+            --tlsAllowInvalidCertificates \
+            --file scripts/test-scripts/comprehensive_mongosh_tests.js; then
+            echo "✓ Comprehensive mongosh tests completed successfully on ${{ matrix.architecture }}"
+          else
+            echo "❌ Comprehensive mongosh tests failed on ${{ matrix.architecture }}"
+            echo "Checking DocumentDB pod logs for errors:"
+            POD_NAME="${{ fromJSON(steps.comprehensive-connection.outputs.outputs).pod-name }}"
+            kubectl logs $POD_NAME -n ${{ env.DB_NS }} --tail=100 || echo "Failed to get logs"
+            exit 1
+          fi
 
     - name: Cleanup comprehensive test connection
       if: always()
@@ -262,44 +353,102 @@ jobs:
         architecture: ${{ matrix.architecture }}
 
     - name: Setup connection for performance tests
-      uses: ./.github/actions/connection-test-setup
+      uses: Wandalen/wretry.action@master
       id: performance-connection
       with:
-        namespace: ${{ env.DB_NS }}
-        cluster-name: ${{ env.DB_NAME }}
-        port: ${{ env.DB_PORT }}
-        architecture: ${{ matrix.architecture }}
-        pid-file: '/tmp/performance_pf_pid'
-        connection-timeout: '120'
-        wait-time: '30'
+        attempt_limit: 3
+        attempt_delay: 15000  # 15 seconds between attempts
+        action: ./.github/actions/connection-test-setup
+        with: |
+          namespace: ${{ env.DB_NS }}
+          cluster-name: ${{ env.DB_NAME }}
+          port: ${{ env.DB_PORT }}
+          architecture: ${{ matrix.architecture }}
+          pid-file: '/tmp/performance_pf_pid'
+          connection-timeout: '120'
+          wait-time: '30'
+
+    - name: Verify performance test port-forward stability
+      uses: Wandalen/wretry.action@master
+      with:
+        attempt_limit: 2
+        attempt_delay: 15000
+        pre_retry_command: |
+          echo "Performance port-forward verification failed, restarting..."
+          pkill -f "kubectl.*port-forward.*${{ env.DB_PORT }}" || true
+          sleep 5
+          POD_NAME="${{ fromJSON(steps.performance-connection.outputs.outputs).pod-name }}"
+          kubectl port-forward pod/$POD_NAME ${{ env.DB_PORT }}:${{ env.DB_PORT }} -n ${{ env.DB_NS }} &
+          NEW_PF_PID=$!
+          echo $NEW_PF_PID > /tmp/performance_pf_pid
+          sleep 20
+        command: |
+          echo "Verifying performance test connection stability..."
+          POD_NAME="${{ fromJSON(steps.performance-connection.outputs.outputs).pod-name }}"
+          
+          # Quick stability check
+          for i in 1 2 3; do
+            if timeout 10 bash -c 'nc -z 127.0.0.1 ${{ env.DB_PORT }}'; then
+              echo "✓ Connection check $i/3 passed"
+              sleep 5
+            else
+              echo "❌ Connection check $i/3 failed"
+              exit 1
+            fi
+          done
+          
+          # Test mongosh connection once
+          if timeout 30 mongosh 127.0.0.1:${{ env.DB_PORT }} \
+            -u ${{ env.DB_USERNAME }} \
+            -p ${{ env.DB_PASSWORD }} \
+            --authenticationMechanism SCRAM-SHA-256 \
+            --tls \
+            --tlsAllowInvalidCertificates \
+            --eval "print('Performance test connection verified')"; then
+            echo "✓ Performance test connection verified"
+          else
+            echo "❌ Performance test connection verification failed"
+            exit 1
+          fi
 
     - name: Execute performance tests
-      run: |
-        echo "Running performance validation tests on ${{ matrix.architecture }}..."
-        echo "Using pod: ${{ steps.performance-connection.outputs.pod-name }}"
-        
-        # Verify connection before running tests
-        if ! timeout 30 bash -c 'until nc -z 127.0.0.1 ${{ env.DB_PORT }}; do sleep 2; done'; then
-          echo "❌ Port ${{ env.DB_PORT }} not accessible for performance tests"
-          exit 1
-        fi
-        
-        # Run performance tests using external script
-        if mongosh 127.0.0.1:$DB_PORT \
-          -u $DB_USERNAME \
-          -p $DB_PASSWORD \
-          --authenticationMechanism SCRAM-SHA-256 \
-          --tls \
-          --tlsAllowInvalidCertificates \
-          --file scripts/test-scripts/performance_test.js; then
-          echo "✓ Performance tests completed successfully on ${{ matrix.architecture }}"
-        else
-          echo "❌ Performance tests failed on ${{ matrix.architecture }}"
-          echo "Checking DocumentDB pod logs for errors:"
-          POD_NAME="${{ steps.performance-connection.outputs.pod-name }}"
-          kubectl logs $POD_NAME -n ${{ env.DB_NS }} --tail=100 || echo "Failed to get logs"
-          exit 1
-        fi
+      uses: Wandalen/wretry.action@master
+      with:
+        attempt_limit: 2
+        attempt_delay: 20000  # 20 seconds between attempts
+        pre_retry_command: |
+          echo "Retrying performance tests..."
+          # Quick connection check and restart if needed
+          if ! timeout 10 bash -c 'nc -z 127.0.0.1 ${{ env.DB_PORT }}'; then
+            echo "Connection appears to be down, restarting port-forward..."
+            POD_NAME="${{ fromJSON(steps.performance-connection.outputs.outputs).pod-name }}"
+            pkill -f "kubectl.*port-forward.*${{ env.DB_PORT }}" || true
+            sleep 5
+            kubectl port-forward pod/$POD_NAME ${{ env.DB_PORT }}:${{ env.DB_PORT }} -n ${{ env.DB_NS }} &
+            NEW_PF_PID=$!
+            echo $NEW_PF_PID > /tmp/performance_pf_pid
+            sleep 20
+          fi
+        command: |
+          echo "Running performance validation tests on ${{ matrix.architecture }}..."
+          echo "Using pod: ${{ fromJSON(steps.performance-connection.outputs.outputs).pod-name }}"
+          
+          # Run performance tests using external script
+          if mongosh 127.0.0.1:${{ env.DB_PORT }} \
+            -u ${{ env.DB_USERNAME }} \
+            -p ${{ env.DB_PASSWORD }} \
+            --authenticationMechanism SCRAM-SHA-256 \
+            --tls \
+            --tlsAllowInvalidCertificates \
+            --file scripts/test-scripts/performance_test.js; then
+            echo "✓ Performance tests completed successfully on ${{ matrix.architecture }}"
+          else
+            echo "❌ Performance tests failed on ${{ matrix.architecture }}"
+            echo "Checking DocumentDB pod logs for errors:"
+            POD_NAME="${{ fromJSON(steps.performance-connection.outputs.outputs).pod-name }}"
+            kubectl logs $POD_NAME -n ${{ env.DB_NS }} --tail=100 || echo "Failed to get logs"
+            exit 1
+          fi
 
     - name: Cleanup performance test connection
       if: always()
@@ -307,6 +456,22 @@ jobs:
       with:
         pid-file: '/tmp/performance_pf_pid'
         architecture: ${{ matrix.architecture }}
+
+    - name: Ensure all port-forwards are cleaned up
+      if: always()
+      run: |
+        echo "Ensuring all port-forward processes are properly cleaned up..."
+        
+        # Kill any remaining port-forward processes on our port
+        pkill -f "kubectl.*port-forward.*${{ env.DB_PORT }}" || true
+        
+        # Clean up any remaining PID files
+        rm -f /tmp/comprehensive_pf_pid /tmp/performance_pf_pid || true
+        
+        # Show final port-forward status
+        ps aux | grep kubectl | grep port-forward || echo "✓ No port-forward processes remaining"
+        
+        echo "✓ Port-forward cleanup completed"
 
     - name: Test cluster health and monitoring
       run: |

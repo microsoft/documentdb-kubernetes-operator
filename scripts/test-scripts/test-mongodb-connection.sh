@@ -263,15 +263,26 @@ print("✓ Department grouping validation passed");
 // Test 4: Update Operations
 print("\n=== Test 4: Update Operations ===");
 
+// Helper function to handle Long objects
+function getLongValue(val) {
+  if (typeof val === 'object' && val !== null && 'low' in val) {
+    return val.low; // Extract the actual number from Long object
+  }
+  return val;
+}
+
 // Update single document
 var updateResult = db.test_collection.updateOne(
   { name: "Alice" },
   { $set: { title: "Senior Engineer", lastModified: new Date() } }
 );
 
-print("Update result - Modified:", updateResult.modifiedCount, "Matched:", updateResult.matchedCount);
-if (updateResult.modifiedCount !== 1 || updateResult.matchedCount !== 1) {
-  throw new Error("Expected 1 modified and 1 matched document, got modified=" + updateResult.modifiedCount + ", matched=" + updateResult.matchedCount);
+var modifiedCount = getLongValue(updateResult.modifiedCount);
+var matchedCount = getLongValue(updateResult.matchedCount);
+
+print("Update result - Modified:", modifiedCount, "Matched:", matchedCount);
+if (modifiedCount !== 1 || matchedCount !== 1) {
+  throw new Error("Expected 1 modified and 1 matched document, got modified=" + modifiedCount + ", matched=" + matchedCount);
 }
 print("✓ Single update validation passed");
 
@@ -288,9 +299,10 @@ var bulkUpdateResult = db.test_collection.updateMany(
   { $inc: { salary: 5000 }, $set: { salaryAdjusted: true } }
 );
 
-print("Bulk update result - Modified:", bulkUpdateResult.modifiedCount);
-if (bulkUpdateResult.modifiedCount !== 1) { // Only Bob should match
-  throw new Error("Expected 1 document to be updated in bulk operation, got " + bulkUpdateResult.modifiedCount);
+var bulkModifiedCount = getLongValue(bulkUpdateResult.modifiedCount);
+print("Bulk update result - Modified:", bulkModifiedCount);
+if (bulkModifiedCount !== 1) { // Only Bob should match
+  throw new Error("Expected 1 document to be updated in bulk operation, got " + bulkModifiedCount);
 }
 print("✓ Bulk update validation passed");
 

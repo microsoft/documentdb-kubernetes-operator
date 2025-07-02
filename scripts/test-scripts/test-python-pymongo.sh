@@ -220,7 +220,7 @@ validate_test(value_5_docs[0]["status"] == "active", "Document with value 5 has 
 validate_test(value_5_docs[0]["type"] == "integration_test", "Document with value 5 has correct type")
 
 # Test range queries
-high_value_docs = list(collection.find({"value": {"\\$gte": 7}}))
+high_value_docs = list(collection.find({"value": {"\$gte": 7}}))
 validate_test(len(high_value_docs) == 3, "Found exactly 3 documents with value >= 7")
 expected_values = {7, 8, 9}
 found_values = {doc["value"] for doc in high_value_docs}
@@ -228,8 +228,8 @@ validate_test(found_values == expected_values, f"High value documents have corre
 
 # Test aggregation and validate results
 pipeline = [
-    {"\\$match": {"status": "active"}},
-    {"\\$group": {"_id": "\\$status", "total": {"\\$sum": "\\$value"}, "count": {"\\$sum": 1}}}
+    {"\$match": {"status": "active"}},
+    {"\$group": {"_id": "\$status", "total": {"\$sum": "\$value"}, "count": {"\$sum": 1}}}
 ]
 agg_result = list(collection.aggregate(pipeline))
 print(f"Aggregation result: {agg_result}")
@@ -242,8 +242,8 @@ validate_test(agg_result[0]["count"] == 10, "Aggregation count is correct: 10")
 
 # Test update operations
 update_result = collection.update_many(
-    {"value": {"\\$lt": 5}},
-    {"\\$set": {"status": "updated"}}
+    {"value": {"\$lt": 5}},
+    {"\$set": {"status": "updated"}}
 )
 validate_test(update_result.modified_count == 5, f"Updated exactly 5 documents (got {update_result.modified_count})")
 
@@ -270,9 +270,9 @@ validate_test(sorted_values == expected_sorted, f"Documents sorted correctly: {s
 
 # Test complex aggregation with multiple stages
 complex_pipeline = [
-    {"\\$match": {"value": {"\\$gte": 3}}},
-    {"\\$group": {"_id": "\\$status", "avg_value": {"\\$avg": "\\$value"}, "max_value": {"\\$max": "\\$value"}}},
-    {"\\$sort": {"_id": 1}}
+    {"\$match": {"value": {"\$gte": 3}}},
+    {"\$group": {"_id": "\$status", "avg_value": {"\$avg": "\$value"}, "max_value": {"\$max": "\$value"}}},
+    {"\$sort": {"_id": 1}}
 ]
 complex_result = list(collection.aggregate(complex_pipeline))
 print(f"Complex aggregation result: {complex_result}")

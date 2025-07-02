@@ -44,7 +44,7 @@ spec:
         - --server-key=/server/tls.key
         - --client-cert=/client/tls.crt
         - --server-address=:9090
-        image: ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-sidecar-injector:001
+        image: "{{ .Values.image.sidecarinjector.repository }}:{{ .Values.image.sidecarinjector.tag }}"
         name: cnpg-i-sidecar-injector
         ports:
         - containerPort: 9090

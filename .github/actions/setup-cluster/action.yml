@@ -66,9 +66,9 @@ runs:
         if [[ "${{ inputs.use-local-chart }}" == "true" ]]; then
           echo "Installing from local Helm chart..."
           
-          # Extract and prepare local chart
-          if [ -f ../../artifacts/build-helm-chart/documentdb-operator-${{ inputs.chart-version }}.tgz ]; then
-            tar -xzf ../../artifacts/build-helm-chart/documentdb-operator-${{ inputs.chart-version }}.tgz
+          # Extract and prepare local chart - artifacts are in the workspace root
+          if [ -f ./artifacts/build-helm-chart/documentdb-operator-${{ inputs.chart-version }}.tgz ]; then
+            tar -xzf ./artifacts/build-helm-chart/documentdb-operator-${{ inputs.chart-version }}.tgz
             
             # Install the operator using the local chart
             helm install documentdb-operator ./documentdb-operator \
@@ -78,7 +78,8 @@ runs:
               --timeout=8m
           else
             echo "❌ Local Helm chart artifact not found"
-            ls -la ../../artifacts/build-helm-chart/ || echo "Artifact directory not found"
+            ls -la ./artifacts/build-helm-chart/ || echo "Artifact directory not found"
+            ls -la ./artifacts/ || echo "No artifacts directory found"
             exit 1
           fi
         else

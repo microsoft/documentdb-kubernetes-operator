@@ -10,5 +10,9 @@ image:
     repository: ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-k8s-operator
     pullPolicy: Always
     tag: preview
+  sidecarinjector:
+    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-sidecar-injector
+    pullPolicy: Always
+    tag: "001"
 cloudnative-pg:
   namespaceOverride: cnpg-system

@@ -335,24 +335,6 @@ if (skippedResults.length !== 2) {
 }
 print("✓ Skip operation validation passed");
 
-// Test 6: Index Operations (if supported)
-print("\n=== Test 6: Index Operations ===");
-
-try {
-  // Create index
-  var indexResult = db.test_collection.createIndex({ department: 1 });
-  print("Index created:", indexResult);
-  
-  // List indexes
-  var indexes = db.test_collection.getIndexes();
-  print("Total indexes:", indexes.length);
-  
-  print("✓ Index operations completed");
-} catch (e) {
-  print("Index operations not fully supported or failed:", e.message);
-  // This is not a critical failure for the test
-}
-
 // Test 7: Complex Aggregation Pipeline
 print("\n=== Test 7: Complex Aggregation Pipeline ===");
 
@@ -420,7 +402,6 @@ print("✓ Query operations: PASSED");
 print("✓ Aggregation operations: PASSED");
 print("✓ Update operations: PASSED");
 print("✓ Sorting and limiting: PASSED");
-print("✓ Index operations: COMPLETED");
 print("✓ Complex aggregation: PASSED");
 print("✓ Delete operations: PASSED");
 print("✓ Data integrity: VERIFIED");

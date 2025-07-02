@@ -19,6 +19,10 @@ inputs:
   repository-owner:
     description: 'GitHub repository owner'
     required: true
+  use-local-chart:
+    description: 'Whether to use local chart instead of registry'
+    required: false
+    default: 'false'
 runs:
   using: 'composite'
   steps:
@@ -56,18 +60,42 @@ runs:
         kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n ${{ inputs.cert-manager-namespace }} --timeout=300s
         kubectl wait --for=condition=Available deployment/cert-manager-webhook -n ${{ inputs.cert-manager-namespace }} --timeout=300s
         
-        # Login to GHCR for Helm
-        echo "Logging in to GitHub Container Registry..."
-        echo "${{ inputs.github-token }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
-        
-        # Install the DocumentDB operator using the newly created chart
+        # Install the DocumentDB operator
         echo "Installing DocumentDB operator with chart version: ${{ inputs.chart-version }}"
-        helm install documentdb-operator oci://ghcr.io/${{ inputs.repository-owner }}/documentdb-operator \
-          --version ${{ inputs.chart-version }} \
-          --namespace ${{ inputs.operator-namespace }} \
-          --create-namespace \
-          --wait \
-          --timeout=8m
+        
+        if [[ "${{ inputs.use-local-chart }}" == "true" ]]; then
+          echo "Installing from local Helm chart..."
+          
+          # Extract and prepare local chart
+          if [ -f ../../artifacts/build-helm-chart/documentdb-operator-${{ inputs.chart-version }}.tgz ]; then
+            tar -xzf ../../artifacts/build-helm-chart/documentdb-operator-${{ inputs.chart-version }}.tgz
+            
+            # Install the operator using the local chart
+            helm install documentdb-operator ./documentdb-operator \
+              --namespace ${{ inputs.operator-namespace }} \
+              --create-namespace \
+              --wait \
+              --timeout=8m
+          else
+            echo "❌ Local Helm chart artifact not found"
+            ls -la ../../artifacts/build-helm-chart/ || echo "Artifact directory not found"
+            exit 1
+          fi
+        else
+          echo "Installing from registry..."
+          
+          # Login to GHCR for Helm
+          echo "Logging in to GitHub Container Registry..."
+          echo "${{ inputs.github-token }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+          
+          # Install the operator using the registry chart
+          helm install documentdb-operator oci://ghcr.io/${{ inputs.repository-owner }}/documentdb-operator \
+            --version ${{ inputs.chart-version }} \
+            --namespace ${{ inputs.operator-namespace }} \
+            --create-namespace \
+            --wait \
+            --timeout=8m
+        fi
         
         # Verify operator installation
         echo "Verifying DocumentDB operator installation..."

@@ -20,7 +20,7 @@ permissions:
 
 env:
   DEFAULT_MANIFEST_TAG: 'test'
-  IMAGE_NAME: documentdb-kubernetes-operator
+  IMAGE_NAME: documentdb-k8s-operator
   IMAGE_TAG: ${{ github.run_id }}-$(date +'%Y-%m-%d')
 
 jobs:

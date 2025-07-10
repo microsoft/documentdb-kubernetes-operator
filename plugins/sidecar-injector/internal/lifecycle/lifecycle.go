@@ -114,6 +114,7 @@ func (impl Implementation) reconcileMetadata(
 	}
 
 	// Add USERNAME and PASSWORD environment variables from secret
+	// TODO: Make this configurable and expose it in the configuration
 	logger.Info("Adding USERNAME and PASSWORD environment variables from secret")
 	envVars = append(envVars,
 		corev1.EnvVar{

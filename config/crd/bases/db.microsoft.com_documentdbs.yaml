@@ -48,6 +48,10 @@ spec:
           spec:
             description: DocumentDBSpec defines the desired state of DocumentDB.
             properties:
+              azureDNSPrefix:
+                description: AzureDNSPrefix specifies the Azure specific IP details
+                  for the cluster.
+                type: string
               clusterReplication:
                 description: ClusterReplication configures cross-cluster replication
                   for DocumentDB.
@@ -61,6 +65,9 @@ spec:
                   enableFleetForCrossCloud:
                     description: EnableFleetForCrossCloud determines whether to use
                       KubeFleet mechanics for the replication
+                    type: boolean
+                  highAvailability:
+                    description: Whether or not to have replicas on the primary cluster.
                     type: boolean
                   primary:
                     description: Primary is the name of the primary cluster for replication.
@@ -123,6 +130,9 @@ spec:
                 maximum: 1
                 minimum: 1
                 type: integer
+              logLevel:
+                description: Overrides default log level for the DocumentDB cluster.
+                type: string
               nodeCount:
                 description: NodeCount is the number of nodes in the DocumentDB cluster.
                   Must be 1.
@@ -162,6 +172,10 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
+              walReplicaPluginName:
+                description: WalReplicaPluginName is the name of the wal replica plugin
+                  to use.
+                type: string
             required:
             - instancesPerNode
             - nodeCount
@@ -172,9 +186,13 @@ spec:
             properties:
               connectionString:
                 type: string
+              localPrimary:
+                type: string
               status:
                 description: Status reflects the status field from the underlying
                   CNPG Cluster.
+                type: string
+              targetPrimary:
                 type: string
             type: object
         type: object

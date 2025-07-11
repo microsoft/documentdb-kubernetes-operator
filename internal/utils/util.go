@@ -22,24 +22,29 @@ import (
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
 )
 
-// DeleteService deletes a Service for a given DocumentDB instance
-func DeleteService(ctx context.Context, c client.Client, serviceName, namespace string) error {
-	service := &corev1.Service{}
-	err := c.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: namespace}, service)
-	if err == nil {
-		err = c.Delete(ctx, service)
-		if err != nil {
-			return err
+// GetDocumentDBServiceDefinition returns the LoadBalancer Service definition for a given DocumentDB instance
+func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, replicationContext *ReplicationContext, namespace string, serviceType corev1.ServiceType) *corev1.Service {
+	// If no local HA, these two should be empty
+	selector := map[string]string{
+		"disabled": "true",
+	}
+	if replicationContext.EndpointEnabled() {
+		selector = map[string]string{
+			LABEL_APP:          documentdb.Name,
+			LABEL_REPLICA_TYPE: "primary", // Service forwards traffic to primary replicas
+			LABEL_ROLE:         "primary",
 		}
 	}
-	return nil
-}
 
-// GetDocumentDBServiceDefinition returns the LoadBalancer Service definition for a given DocumentDB instance
-func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, namespace string, serviceType corev1.ServiceType) *corev1.Service {
+	// Ensure service name doesn't exceed 63 characters (Kubernetes limit)
+	serviceName := DOCUMENTDB_SERVICE_PREFIX + replicationContext.Self
+	if len(serviceName) > 63 {
+		serviceName = serviceName[:63]
+	}
+
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      DOCUMENTDB_SERVICE_PREFIX + documentdb.Name, // Unique service name
+			Name:      serviceName,
 			Namespace: namespace,
 			// CRITICAL: Set owner reference so service gets deleted when DocumentDB instance is deleted
 			OwnerReferences: []metav1.OwnerReference{
@@ -54,10 +59,7 @@ func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, namespace 
 			},
 		},
 		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{
-				LABEL_APP:          documentdb.Name,
-				LABEL_REPLICA_TYPE: "primary", // Service forwards traffic to primary replicas
-			},
+			Selector: selector,
 			Ports: []corev1.ServicePort{
 				{Name: "gateway", Protocol: corev1.ProtocolTCP, Port: GetPortFor(GATEWAY_PORT), TargetPort: intstr.FromInt(int(GetPortFor(GATEWAY_PORT)))},
 			},
@@ -137,8 +139,8 @@ func EnsureServiceIP(ctx context.Context, service *corev1.Service) (string, erro
 	return "", fmt.Errorf("unsupported service type: %s", service.Spec.Type)
 }
 
-// GetOrCreateService checks if the Service already exists, and creates it if not.
-func GetOrCreateService(ctx context.Context, c client.Client, service *corev1.Service) (*corev1.Service, error) {
+// UpsertService checks if the Service already exists, and creates it if not.
+func UpsertService(ctx context.Context, c client.Client, service *corev1.Service) (*corev1.Service, error) {
 	log := log.FromContext(ctx)
 	foundService := &corev1.Service{}
 	err := c.Get(ctx, types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, foundService)
@@ -154,6 +156,10 @@ func GetOrCreateService(ctx context.Context, c client.Client, service *corev1.Se
 				return nil, err
 			}
 		} else {
+			return nil, err
+		}
+	} else {
+		if err := c.Update(ctx, foundService); err != nil {
 			return nil, err
 		}
 	}
@@ -351,4 +357,18 @@ func GetDocumentDBImageForInstance(documentdb *dbpreview.DocumentDB) string {
 
 	// Fall back to default
 	return DEFAULT_DOCUMENTDB_IMAGE
+}
+
+func GenerateServiceName(source, target, resourceGroup string) string {
+	name := fmt.Sprintf("%s-%s", source, target)
+	diff := 63 - len(name) - len(resourceGroup) - 2
+	if diff >= 0 {
+		return name
+	} else {
+		// truncate source and target region names equally if needed
+		truncateBy := (-diff + 1) / 2 // +1 to handle odd numbers
+		sourceLen := len(source) - truncateBy
+		targetLen := len(target) - truncateBy
+		return fmt.Sprintf("%s-%s", source[0:sourceLen], target[0:targetLen])
+	}
 }

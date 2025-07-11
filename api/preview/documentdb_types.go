@@ -42,11 +42,17 @@ type DocumentDBSpec struct {
 	// a default secret name `documentdb-credentials` is used.
 	DocumentDbCredentialSecret string `json:"documentDbCredentialSecret,omitempty"`
 
+	// AzureDNSPrefix specifies the Azure specific IP details for the cluster.
+	AzureDNSPrefix string `json:"azureDNSPrefix,omitempty"`
+
 	// ClusterReplication configures cross-cluster replication for DocumentDB.
 	ClusterReplication *ClusterReplication `json:"clusterReplication,omitempty"`
 
 	// SidecarInjectorPluginName is the name of the sidecar injector plugin to use.
 	SidecarInjectorPluginName string `json:"sidecarInjectorPluginName,omitempty"`
+
+	// WalReplicaPluginName is the name of the wal replica plugin to use.
+	WalReplicaPluginName string `json:"walReplicaPluginName,omitempty"`
 
 	// ExposeViaService configures how to expose DocumentDB via a Kubernetes service.
 	// This can be a LoadBalancer or ClusterIP service.
@@ -58,6 +64,9 @@ type DocumentDBSpec struct {
 	Environment string `json:"environment,omitempty"`
 
 	Timeouts Timeouts `json:"timeouts,omitempty"`
+
+	// Overrides default log level for the DocumentDB cluster.
+	LogLevel string `json:"logLevel,omitempty"`
 }
 
 type Resource struct {
@@ -81,6 +90,8 @@ type ClusterReplication struct {
 	Primary string `json:"primary"`
 	// ClusterList is the list of clusters participating in replication.
 	ClusterList []string `json:"clusterList"`
+	// Whether or not to have replicas on the primary cluster.
+	HighAvailability bool `json:"highAvailability,omitempty"`
 }
 
 type ExposeViaService struct {
@@ -100,6 +111,8 @@ type DocumentDBStatus struct {
 	// Status reflects the status field from the underlying CNPG Cluster.
 	Status           string `json:"status,omitempty"`
 	ConnectionString string `json:"connectionString,omitempty"`
+	TargetPrimary    string `json:"targetPrimary,omitempty"`
+	LocalPrimary     string `json:"localPrimary,omitempty"`
 }
 
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.status",description="CNPG Cluster Status"

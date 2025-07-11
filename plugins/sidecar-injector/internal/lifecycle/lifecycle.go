@@ -182,8 +182,10 @@ func (impl Implementation) reconcileMetadata(
 		},
 	}
 
-	// Check if the pod has the label replication_cluster_type=replica
-	if mutatedPod.Labels["replication_cluster_type"] == "replica" {
+	log.Printf("Labels before mutation: %v", mutatedPod.Labels)
+
+	// Check if the pod has the label replication_cluster_type=replica or is not a primary by number
+	if mutatedPod.Labels["replication_cluster_type"] == "replica" || mutatedPod.Labels["role"] == "replica" {
 		sidecar.Args = []string{"--create-user", "false", "--start-pg", "false", "--pg-port", "5432"}
 	} else {
 		sidecar.Args = []string{"--create-user", "true", "--start-pg", "false", "--pg-port", "5432"}

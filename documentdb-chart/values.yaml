@@ -19,6 +19,8 @@ image:
   sidecarinjector:
     repository: ghcr.io/microsoft/documentdb-kubernetes-operator/sidecar
     pullPolicy: Always
-    
+  walreplica:
+    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/wal-replica
+    pullPolicy: Always
 cloudnative-pg:
   namespaceOverride: cnpg-system

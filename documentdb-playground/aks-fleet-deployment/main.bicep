@@ -17,7 +17,7 @@ param memberRegions array = [
 param kubernetesVersion string = ''
 
 @description('VM size for the hub cluster nodes')
-param hubVmSize string = 'Standard_DS2_v2'
+param hubVmSize string = 'Standard_DS3_v2'
 
 @description('Number of nodes per cluster')
 param nodeCount int = 1

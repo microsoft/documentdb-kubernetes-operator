@@ -109,7 +109,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	documentdbImage := util.GetDocumentDBImageForInstance(documentdb)
 
 	currentCnpgCluster := &cnpgv1.Cluster{}
-	desiredCnpgCluster := cnpg.GetCnpgClusterSpec(req, documentdb, documentdbImage, documentdb.Name, logger)
+	desiredCnpgCluster := cnpg.GetCnpgClusterSpec(req, documentdb, documentdbImage, documentdb.Name, replicationContext.StorageClass, logger)
 
 	if replicationContext.IsReplicating() {
 		err = r.AddClusterReplicationToClusterSpec(ctx, documentdb, replicationContext, desiredCnpgCluster)
@@ -133,7 +133,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Check if anything has changed in the generated cnpg spec
-	err, requeueTime := r.TryUpdateCluster(ctx, currentCnpgCluster, desiredCnpgCluster, documentdb)
+	err, requeueTime := r.TryUpdateCluster(ctx, currentCnpgCluster, desiredCnpgCluster, documentdb, replicationContext)
 	if err != nil {
 		logger.Error(err, "Failed to update CNPG Cluster")
 	}
@@ -157,7 +157,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if currentCnpgCluster.Status.Phase == "Cluster in healthy state" && replicationContext.IsPrimary() {
 		grantCommand := "GRANT documentdb_admin_role TO streaming_replica;"
 
-		if err := r.executeSQLCommand(ctx, documentdb, req.Namespace, replicationContext.Self, grantCommand, "grant-permissions"); err != nil {
+		if err := r.executeSQLCommand(ctx, documentdb, replicationContext, grantCommand, "grant-permissions"); err != nil {
 			logger.Error(err, "Failed to grant permissions to streaming_replica")
 			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 		}
@@ -302,13 +302,14 @@ func Promote(ctx context.Context, cli client.Client,
 }
 
 // executeSQLCommand creates a pod to execute SQL commands against the azure-cluster-rw service
-func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdb *dbpreview.DocumentDB, namespace, self, sqlCommand, uniqueName string) error {
+// TODO: Should find a less intrusive way to do this with CNPG
+func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdb *dbpreview.DocumentDB, replicationContext *util.ReplicationContext, sqlCommand, uniqueName string) error {
 	zero := int32(0)
-	host := self + "-rw"
+	host := replicationContext.Self + "-rw"
 	sqlPod := &batchv1.Job{
 		ObjectMeta: ctrl.ObjectMeta{
 			Name:      fmt.Sprintf("%s-%s-sql-executor", documentdb.Name, uniqueName),
-			Namespace: namespace,
+			Namespace: documentdb.Namespace,
 		},
 		Spec: batchv1.JobSpec{
 			Template: corev1.PodTemplateSpec{
@@ -346,6 +347,15 @@ func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdb
 			},
 			TTLSecondsAfterFinished: &zero,
 		},
+	}
+
+	if replicationContext.IsIstioNetworking() {
+		sqlPod.Spec.Template.ObjectMeta =
+			ctrl.ObjectMeta{
+				Annotations: map[string]string{
+					"sidecar.istio.io/inject": "false",
+				},
+			}
 	}
 
 	if err := r.Client.Create(ctx, sqlPod); err != nil {

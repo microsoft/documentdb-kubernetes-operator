@@ -36,6 +36,9 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 	if err != nil {
 		return err
 	}
+	if self == source {
+		return fmt.Errorf("Must have at least one remote cluster")
+	}
 
 	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
 		err = r.CreateServiceImportAndExport(ctx, source, self, documentdb)
@@ -57,6 +60,19 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 				Database: "postgres",
 				Owner:    "postgres",
 			},
+		}
+	} else if documentdb.Spec.ClusterReplication.HighAvailability {
+		// If primary and HA we want a local standby and a slot for the WAL replica
+		cnpgCluster.Spec.Instances = 2
+		cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL =
+			append(cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL,
+				"select * from pg_create_physical_replication_slot('wal_replica');")
+		// Also need to configure quorum writes
+		cnpgCluster.Spec.PostgresConfiguration.Synchronous = &cnpgv1.SynchronousReplicaConfiguration{
+			Method:          cnpgv1.SynchronousReplicaConfigurationMethodAny,
+			Number:          2,
+			StandbyNamesPre: []string{source},
+			DataDurability:  cnpgv1.DataDurabilityLevelRequired,
 		}
 	}
 

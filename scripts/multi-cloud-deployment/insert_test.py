@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+
+import sys
+import time
+from pymongo import MongoClient, errors
+from datetime import datetime
+
+if len(sys.argv) != 2:
+    print("Usage: python insert_test.py <connection_string>")
+    sys.exit(1)
+
+connection_string = sys.argv[1]
+
+client = MongoClient(connection_string)
+
+db = client.testdb
+collection = db.testcollection
+
+print(f"Starting insert operations for 10 minutes...")
+print(f"Using: {connection_string.split('@')[1] if '@' in connection_string else 'local'}")
+print()
+print(f"{'Inserted Document':<30} {'Read Count':<15}")
+print("-" * 65)
+start_time = time.time()
+end_time = start_time + (10 * 60)  # 10 minutes
+count = 0
+restart = True
+
+while time.time() < end_time:
+    failed = False
+    write_result = ""
+    try:
+        doc = {
+            "count": count,
+            "message": f"Insert operation {count}"
+        }
+        result = collection.insert_one(doc)
+        write_result = result.inserted_id
+        count += 1
+    except Exception as e:
+        failed = True
+        short_err = getattr(getattr(e, 'details', {}), 'get', lambda *_: None)('errmsg')
+        print(f"Error: {short_err or str(e)}")
+        if restart:
+            client.close()
+            print(f"Reconnecting write client...")
+            print(f"Still using: {connection_string.split('@')[1] if '@' in connection_string else 'local'}")
+            time.sleep(120) # Wait for DNS cache to expire
+            # Create new client to force DNS re-resolution
+            client = MongoClient(connection_string)
+            db = client.testdb
+            collection = db.testcollection 
+            restart = False
+
+    try:
+        read_count = collection.count_documents({})
+        if not failed:
+            print(f"{str(write_result):<30} {read_count:<15}")
+    except Exception as e:
+        pass
+    
+    time.sleep(1)  
+
+print(f"Completed {count} insert operations in 10 minutes")
+final_read_count = collection.count_documents({})
+print(f"Final read count: {final_read_count}")
+client.close()

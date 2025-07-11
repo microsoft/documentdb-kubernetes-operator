@@ -16,7 +16,7 @@ if [ -z "$MEMBER_CLUSTERS" ]; then
   exit 1
 fi
 
-PRIMARY_CLUSTER=$(kubectl get documentdb $DOCUMENTDB_NAME -n $DOCUMENTDB_NAMESPACE -o json | jq ".spec.clusterReplication.primary")
+PRIMARY_CLUSTER=$(kubectl --context "$HUB_CONTEXT" get documentdb $DOCUMENTDB_NAME -n $DOCUMENTDB_NAMESPACE -o json | jq -r ".spec.clusterReplication.primary")
 
 # Convert to array
 CLUSTER_ARRAY=($MEMBER_CLUSTERS)

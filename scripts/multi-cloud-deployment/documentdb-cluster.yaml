@@ -3,6 +3,8 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: documentdb-preview-ns
+  labels:
+    istio-injection: enabled
 
 ---
 
@@ -29,12 +31,11 @@ spec:
   documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   gatewayImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   resource:
-    storage:
-      pvcSize: 10Gi
+    pvcSize: 10Gi
   clusterReplication:
     highAvailability: true
-    crossCloudNetworkingStrategy: KubeFleet
     primary: {{PRIMARY_CLUSTER}}
+    crossCloudNetworkingStrategy: Istio
     clusterList:
 {{CLUSTER_LIST}}
   exposeViaService:

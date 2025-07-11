@@ -144,7 +144,7 @@ fi
 while read -r cluster; do
   [ -z "$cluster" ] && continue
   set +e
-  az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$cluster" --admin --overwrite-existing >/dev/null 2>&1
+  az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$cluster" --overwrite-existing >/dev/null 2>&1
   rc=$?
   set -e
   if [ $rc -eq 0 ]; then

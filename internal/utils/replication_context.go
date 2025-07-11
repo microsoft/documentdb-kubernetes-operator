@@ -14,13 +14,22 @@ import (
 )
 
 type ReplicationContext struct {
-	Self                string
-	Others              []string
-	PrimaryRegion       string
-	currentLocalPrimary string
-	targetLocalPrimary  string
-	state               replicationState
+	Self                         string
+	Others                       []string
+	PrimaryRegion                string
+	CrossCloudNetworkingStrategy crossCloudNetworkingStrategy
+	currentLocalPrimary          string
+	targetLocalPrimary           string
+	state                        replicationState
 }
+
+type crossCloudNetworkingStrategy string
+
+const (
+	None      crossCloudNetworkingStrategy = "None"
+	KubeFleet crossCloudNetworkingStrategy = "KubeFleet"
+	Istio     crossCloudNetworkingStrategy = "Istio"
+)
 
 type replicationState int32
 
@@ -33,8 +42,9 @@ const (
 func GetReplicationContext(ctx context.Context, client client.Client, documentdb dbpreview.DocumentDB) (*ReplicationContext, error) {
 	if documentdb.Spec.ClusterReplication == nil {
 		return &ReplicationContext{
-			state: NoReplication,
-			Self:  documentdb.Name,
+			state:                        NoReplication,
+			CrossCloudNetworkingStrategy: None,
+			Self:                         documentdb.Name,
 		}, nil
 	}
 
@@ -46,8 +56,9 @@ func GetReplicationContext(ctx context.Context, client client.Client, documentdb
 	// If no remote clusters, then just proceed with a regular cluster
 	if len(others) == 0 {
 		return &ReplicationContext{
-			state: NoReplication,
-			Self:  documentdb.Name,
+			state:                        NoReplication,
+			Self:                         documentdb.Name,
+			CrossCloudNetworkingStrategy: None,
 		}, nil
 	}
 
@@ -59,12 +70,13 @@ func GetReplicationContext(ctx context.Context, client client.Client, documentdb
 	primaryRegion := documentdb.Spec.ClusterReplication.Primary
 
 	return &ReplicationContext{
-		Self:                self,
-		Others:              others,
-		PrimaryRegion:       primaryRegion,
-		state:               state,
-		targetLocalPrimary:  documentdb.Status.TargetPrimary,
-		currentLocalPrimary: documentdb.Status.LocalPrimary,
+		Self:                         self,
+		Others:                       others,
+		PrimaryRegion:                primaryRegion,
+		CrossCloudNetworkingStrategy: crossCloudNetworkingStrategy(documentdb.Spec.ClusterReplication.CrossCloudNetworkingStrategy),
+		state:                        state,
+		targetLocalPrimary:           documentdb.Status.TargetPrimary,
+		currentLocalPrimary:          documentdb.Status.LocalPrimary,
 	}, nil
 }
 
@@ -114,7 +126,7 @@ func (r ReplicationContext) EndpointEnabled() bool {
 func (r ReplicationContext) GenerateExternalClusterServices(namespace string, fleetEnabled bool) func(yield func(string, string) bool) {
 	return func(yield func(string, string) bool) {
 		for _, other := range r.Others {
-			serviceName := r.Self + "-rw." + namespace + ".svc"
+			serviceName := other + "-rw." + namespace + ".svc"
 			if fleetEnabled {
 				serviceName = namespace + "-" + generateServiceName(other, r.Self, namespace) + ".fleet-system.svc"
 			}
@@ -178,7 +190,7 @@ func splitSelfAndOthers(ctx context.Context, client client.Client, documentdb db
 	self := documentdb.Name
 	var err error
 
-	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
+	if documentdb.Spec.ClusterReplication.CrossCloudNetworkingStrategy != string(None) {
 		self, err = GetSelfName(ctx, client)
 		if err != nil {
 			return "", nil, err
@@ -207,4 +219,12 @@ func GetSelfName(ctx context.Context, client client.Client) (string, error) {
 		return "", fmt.Errorf("name key not found in kube-system:cluster-name configmap")
 	}
 	return self, nil
+}
+
+func (r *ReplicationContext) IsKubeFleetNetworking() bool {
+	return r.CrossCloudNetworkingStrategy == KubeFleet
+}
+
+func (r *ReplicationContext) IsIstioNetworking() bool {
+	return r.CrossCloudNetworkingStrategy == Istio
 }

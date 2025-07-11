@@ -58,10 +58,10 @@ spec:
                     items:
                       type: string
                     type: array
-                  enableFleetForCrossCloud:
-                    description: EnableFleetForCrossCloud determines whether to use
-                      KubeFleet mechanics for the replication
-                    type: boolean
+                  crossCloudNetworkingStrategy:
+                    description: CrossCloudNetworking determines whether to use KubeFleet
+                      mechanics for the replication
+                    type: string
                   highAvailability:
                     description: Whether or not to have replicas on the primary cluster.
                     type: boolean

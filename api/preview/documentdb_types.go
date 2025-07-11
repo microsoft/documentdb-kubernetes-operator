@@ -31,8 +31,9 @@ type DocumentDBSpec struct {
 	// SidecarInjectorPluginName is the name of the sidecar injector plugin to use.
 	SidecarInjectorPluginName string `json:"sidecarInjectorPluginName,omitempty"`
 
-	// PublicLoadBalancer configures the public load balancer for DocumentDB.
-	PublicLoadBalancer PublicLoadBalancer `json:"publicLoadBalancer,omitempty"`
+	// ExposeViaService configures how to expose DocumentDB via a Kubernetes service.
+	// This can be a LoadBalancer or ClusterIP service.
+	ExposeViaService ExposeViaService `json:"exposeViaService,omitempty"`
 
 	Timeouts Timeouts `json:"timeouts,omitempty"`
 }
@@ -49,9 +50,10 @@ type ClusterReplication struct {
 	ClusterList []string `json:"clusterList"`
 }
 
-type PublicLoadBalancer struct {
-	// Enabled determines whether a public load balancer is created for DocumentDB.
-	Enabled bool `json:"enabled"`
+type ExposeViaService struct {
+	// ServiceType determines the type of service to expose for DocumentDB.
+	// +kubebuilder:validation:Enum=LoadBalancer;ClusterIP
+	ServiceType string `json:"serviceType"`
 }
 
 type Timeouts struct {

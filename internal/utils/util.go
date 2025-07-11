@@ -22,12 +22,12 @@ import (
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
 )
 
-// DeleteLoadbalancer deletes the LoadBalancer Service for a given CosmosDB instance
-func DeleteLoadbalancer(ctx context.Context, c client.Client, loadBalancerName, namespace string) error {
-	loadBalancer := &corev1.Service{}
-	err := c.Get(ctx, types.NamespacedName{Name: loadBalancerName, Namespace: namespace}, loadBalancer)
+// DeleteService deletes a Service for a given DocumentDB instance
+func DeleteService(ctx context.Context, c client.Client, serviceName, namespace string) error {
+	service := &corev1.Service{}
+	err := c.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: namespace}, service)
 	if err == nil {
-		err = c.Delete(ctx, loadBalancer)
+		err = c.Delete(ctx, service)
 		if err != nil {
 			return err
 		}
@@ -35,39 +35,53 @@ func DeleteLoadbalancer(ctx context.Context, c client.Client, loadBalancerName, 
 	return nil
 }
 
-// GetDocumentDBLoadBalancerDefinition returns the LoadBalancer Service definition for a given CosmosDB instance
-func GetDocumentDBLoadBalancerDefinition(documentdb *dbpreview.DocumentDB, namespace string) *corev1.Service {
+// GetDocumentDBServiceDefinition returns the LoadBalancer Service definition for a given DocumentDB instance
+func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, namespace string, serviceType corev1.ServiceType) *corev1.Service {
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      LOADBALANCER_PREFIX + documentdb.Name, // Unique service name
+			Name:      DOCUMENTDB_SERVICE_PREFIX + documentdb.Name, // Unique service name
 			Namespace: namespace,
 		},
 		Spec: corev1.ServiceSpec{
 			Selector: map[string]string{
 				LABEL_APP:          documentdb.Name,
-				LABEL_REPLICA_TYPE: "primary", // Load Balancer forwards traffic to primary replicas
+				LABEL_REPLICA_TYPE: "primary", // Service forwards traffic to primary replicas
 			},
 			Ports: []corev1.ServicePort{
 				{Name: "gateway", Protocol: corev1.ProtocolTCP, Port: GetPortFor(GATEWAY_PORT), TargetPort: intstr.FromInt(int(GetPortFor(GATEWAY_PORT)))},
 			},
-			Type: corev1.ServiceTypeLoadBalancer, // Public LoadBalancer service
+			Type: serviceType,
 		},
 	}
 }
 
-// EnsureLoadBalancerIP ensures that the LoadBalancer has an IP assigned and returns it, or returns an error if not available
-func EnsureLoadBalancerIP(ctx context.Context, service *corev1.Service) (string, error) {
+// EnsureServiceIP ensures that the Service has an IP assigned and returns it, or returns an error if not available
+func EnsureServiceIP(ctx context.Context, service *corev1.Service) (string, error) {
 	if service == nil {
 		return "", fmt.Errorf("service is nil")
 	}
-	retries := 5
-	for i := 0; i < retries; i++ {
-		if len(service.Status.LoadBalancer.Ingress) > 0 && service.Status.LoadBalancer.Ingress[0].IP != "" {
-			return service.Status.LoadBalancer.Ingress[0].IP, nil
+
+	// For ClusterIP services, return the ClusterIP directly
+	if service.Spec.Type == corev1.ServiceTypeClusterIP {
+		if service.Spec.ClusterIP != "" && service.Spec.ClusterIP != "None" {
+			return service.Spec.ClusterIP, nil
 		}
-		time.Sleep(time.Second * 10)
+		return "", fmt.Errorf("ClusterIP not assigned")
 	}
-	return "", fmt.Errorf("LoadBalancer IP not assigned after %d retries", retries)
+
+	// For LoadBalancer services, wait for external IP to be assigned
+	if service.Spec.Type == corev1.ServiceTypeLoadBalancer {
+		retries := 5
+		for i := 0; i < retries; i++ {
+			if len(service.Status.LoadBalancer.Ingress) > 0 && service.Status.LoadBalancer.Ingress[0].IP != "" {
+				return service.Status.LoadBalancer.Ingress[0].IP, nil
+			}
+			time.Sleep(time.Second * 10)
+		}
+		return "", fmt.Errorf("LoadBalancer IP not assigned after %d retries", retries)
+	}
+
+	return "", fmt.Errorf("unsupported service type: %s", service.Spec.Type)
 }
 
 // GetOrCreateService checks if the Service already exists, and creates it if not.
@@ -236,12 +250,9 @@ func DeleteRoleBinding(ctx context.Context, c client.Client, name, namespace str
 }
 
 // GenerateConnectionString returns a MongoDB connection string for the DocumentDB instance
-func GenerateConnectionString(documentdb *dbpreview.DocumentDB, loadBalancerIP string) string {
-	if loadBalancerIP == "" {
-		return ""
-	}
+func GenerateConnectionString(documentdb *dbpreview.DocumentDB, serviceIp string) string {
 	documentDbUsername := getDocumentDbUsername()
-	return fmt.Sprintf("mongodb://%s:<password>%s:%d/?replicaSet=rs0", documentDbUsername, loadBalancerIP, GetPortFor(GATEWAY_PORT))
+	return fmt.Sprintf("mongodb://%s:<password>%s:%d/?replicaSet=rs0", documentDbUsername, serviceIp, GetPortFor(GATEWAY_PORT))
 }
 
 func getDocumentDbUsername() string {

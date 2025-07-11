@@ -15,5 +15,5 @@ spec:
   documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   resource:
     pvcSize: 10Gi
-  publicLoadBalancer:
-    enabled: true
+  exposeViaService:
+    serviceType: LoadBalancer

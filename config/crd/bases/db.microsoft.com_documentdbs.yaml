@@ -64,6 +64,21 @@ spec:
               documentDBImage:
                 description: DocumentDBImage is the container image to use for DocumentDB.
                 type: string
+              exposeViaService:
+                description: |-
+                  ExposeViaService configures how to expose DocumentDB via a Kubernetes service.
+                  This can be a LoadBalancer or ClusterIP service.
+                properties:
+                  serviceType:
+                    description: ServiceType determines the type of service to expose
+                      for DocumentDB.
+                    enum:
+                    - LoadBalancer
+                    - ClusterIP
+                    type: string
+                required:
+                - serviceType
+                type: object
               instancesPerNode:
                 description: InstancesPerNode is the number of DocumentDB instances
                   per node. Must be 1.
@@ -76,17 +91,6 @@ spec:
                 maximum: 1
                 minimum: 1
                 type: integer
-              publicLoadBalancer:
-                description: PublicLoadBalancer configures the public load balancer
-                  for DocumentDB.
-                properties:
-                  enabled:
-                    description: Enabled determines whether a public load balancer
-                      is created for DocumentDB.
-                    type: boolean
-                required:
-                - enabled
-                type: object
               resource:
                 description: Resource specifies the storage resources for DocumentDB.
                 properties:

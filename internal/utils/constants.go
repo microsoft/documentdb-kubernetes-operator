@@ -20,6 +20,7 @@ const (
 
 	LABEL_APP                      = "app"
 	LABEL_REPLICA_TYPE             = "replica_type"
+	LABEL_ROLE                     = "role"
 	LABEL_NODE_INDEX               = "node_index"
 	LABEL_SERVICE_TYPE             = "service_type"
 	LABEL_REPLICATION_CLUSTER_TYPE = "replication_cluster_type"
@@ -27,6 +28,8 @@ const (
 	DOCUMENTDB_SERVICE_PREFIX = "documentdb-service-"
 
 	DEFAULT_SIDECAR_INJECTOR_PLUGIN = "cnpg-i-sidecar-injector.documentdb.io"
+
+	DEFAULT_WAL_REPLICA_PLUGIN = "cnpg-i-wal-replica.documentdb.io"
 
 	CNPG_DEFAULT_STOP_DELAY = 30
 )

@@ -1,154 +1,31 @@
 # DocumentDB Kubernetes Operator
 
-The DocumentDB Kubernetes Operator is an open-source project to run and manage [DocumentDB](https://github.com/microsoft/documentdb) on Kubernetes. `DocumentDB` is the engine powering vCore-based Azure Cosmos DB for MongoDB. It is built on top of PostgreSQL and offers a native implementation of document-oriented NoSQL database, enabling CRUD operations on BSON data types.
+A Kubernetes operator for managing DocumentDB clusters in your Kubernetes environment. This operator provides a native Kubernetes way to deploy, manage, and scale DocumentDB instances with MongoDB-compatible API.
 
-As part of a DocumentDB cluster installation, the operator deploys and manages a set of PostgreSQL instance(s), the [DocumentDB Gateway](https://github.com/microsoft/documentdb/tree/main/pg_documentdb_gw), as well as other Kubernetes resources. While PostgreSQL is used as the underlying storage engine, the gateway ensures that you can connect to the DocumentDB cluster using MongoDB-compatible drivers, APIs, and tools.
+## 🚀 What is DocumentDB Kubernetes Operator?
 
-> **Note:** This project is under active development but not yet recommended for production use. We welcome your feedback and contributions!
+The DocumentDB Kubernetes Operator extends Kubernetes with Custom Resource Definitions (CRDs) to manage DocumentDB clusters declaratively. It leverages the power of Kubernetes controllers to ensure your DocumentDB deployments are always in the desired state.
 
-## Quickstart
+### Key Features
 
-This quickstart guide will walk you through the steps to install the operator, deploy a DocumentDB cluster, access it using `mongosh`, and perform basic operations.
+- **Declarative Management**: Define your DocumentDB clusters using Kubernetes manifests
+- **Automated Operations**: Automatic deployment, scaling, and lifecycle management
+- **MongoDB Compatibility**: Full MongoDB API compatibility for seamless application integration
+- **Cloud Native**: Built on CloudNative-PG for robust PostgreSQL foundation
+- **Helm Chart Support**: Easy installation and configuration via Helm
+- **Production Ready**: Designed for enterprise-grade deployments
 
-### Prerequisites
+## ⚡ Quick Start
 
-- [Helm](https://helm.sh/docs/intro/install/) installed.
-- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/) installed.
-- A local Kubernetes cluster such as [minikube](https://minikube.sigs.k8s.io/docs/start/), or [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) installed. You are free to use any other Kubernetes cluster, but that's not a requirement for this quickstart.
-- Install [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/) to connect to the DocumentDB cluster.
+To get started with the DocumentDB Kubernetes Operator, follow our comprehensive [Quick Start Guide](https://microsoft.github.io/documentdb-kubernetes-operator/v1/)
 
-### Start a local Kubernetes cluster
+## 📚 Documentation
 
-If you are using `minikube`, use the following command:
+For comprehensive documentation, installation guides, configuration options, and examples, visit our [GitHub Pages documentation](https://microsoft.github.io/documentdb-kubernetes-operator).
 
-```sh
-minikube start
-```
+### Quick Links
 
-If you are using `kind`, use the following command:
-
-```sh
-kind create cluster
-```
-
-### Install `cert-manager`
-
-[cert-manager](https://cert-manager.io/docs/) is used to manage TLS certificates for the DocumentDB cluster.
-
-> If you already have `cert-manager` installed, you can skip this step.
-
-```sh
-helm repo add jetstack https://charts.jetstack.io
-helm repo update
-helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
-```
-
-Verify that `cert-manager` is installed correctly:
-
-```sh
-kubectl get pods -n cert-manager
-```
-
-Output:
-
-```text
-NAMESPACE           NAME                                            READY   STATUS    RESTARTS
-cert-manager        cert-manager-6794b8d569-d7lwd                   1/1     Running   0
-cert-manager        cert-manager-cainjector-7f69cd69f7-pd9bc        1/1     Running   0          
-cert-manager        cert-manager-webhook-6cc5dccc4b-7jmrh           1/1     Running   0          
-```
-
-### Install `documentdb-operator` using the Helm chart
-
-> The DocumentDB operator utilizes the [CloudNativePG operator](https://cloudnative-pg.io/docs/) behind the scenes, and installs it in the `cnpg-system` namespace. At this point, it is assumed that the CloudNativePG operator is **not** pre-installed in your cluster.
-
-Use the following command to install the DocumentDB operator:
-
-```sh
-helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator --version 0.0.1 --namespace documentdb-operator --create-namespace
-```
-
-This will install the operator in the `documentdb-operator` namespace. Verify that it is running:
-
-```sh
-kubectl get deployment -n documentdb-operator
-```
-
-Output:
-
-```text
-NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
-documentdb-operator   1/1     1            1           113s
-```
-
-You should also see the DocumentDB operator CRDs installed in the cluster:
-
-```sh
-kubectl get crd | grep documentdb
-```
-
-Output:
-
-```text
-documentdbs.db.microsoft.com
-```
-
-### Deploy a DocumentDB cluster
-
-Create a single-node DocumentDB cluster:
-
-```sh
-cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: documentdb-preview-ns
----
-apiVersion: db.microsoft.com/preview
-kind: DocumentDB
-metadata:
-  name: documentdb-preview
-  namespace: documentdb-preview-ns
-spec:
-  nodeCount: 1
-  instancesPerNode: 1
-  documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
-  resource:
-    pvcSize: 10Gi
-  publicLoadBalancer:
-    enabled: false
-EOF
-```
-
-Wait for the DocumentDB cluster to be fully initialized. Verify that it is running:
-
-```sh
-kubectl get pods -n documentdb-preview-ns
-```
-
-Output:
-
-```text
-NAME                   READY   STATUS    RESTARTS   AGE
-documentdb-preview-1   2/2     Running   0          26m
-```
-
-You can also check the DocumentDB CRD instance:
-
-```sh
-kubectl get DocumentDB -n documentdb-preview-ns
-```
-
-Output:
-
-```text
-NAME                 AGE
-documentdb-preview   28m
-```
-
-### Connect to the DocumentDB cluster
-
-The DocumentDB `Pod` has the Gateway container running as a sidecar. To keep things simple, the quickstart does not use a public load balancer. So you can connect to the DocumentDB instance directly through the Gateway port `10260`. For both `minikube` and `kind`, this can be easily done using port forwarding:
+- [Installation Guide](https://microsoft.github.io/documentdb-kubernetes-operator/v1/quick-start)
 
 ```sh
 kubectl port-forward pod/documentdb-preview-1 10260:10260 -n documentdb-preview-ns
@@ -295,58 +172,32 @@ documentdb-service-documentdb-preview   LoadBalancer   10.0.228.243   52.149.56.
 
 ### Delete the DocumentDB cluster and other resources
 
-```sh
-kubectl delete DocumentDB documentdb-preview -n documentdb-preview-ns
+### Development Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/microsoft/documentdb-kubernetes-operator.git
+cd documentdb-kubernetes-operator
+
+# Build the operator
+make build
+
+# Run tests
+make test
+
+# Deploy to your cluster
+make deploy
 ```
 
-The `Pod` should now be terminated:
+## 📄 License
 
-```sh
-kubectl get pods -n documentdb-preview-ns
-```
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-Uninstall the DocumentDB operator:
+## 🔒 Security
 
-```sh
-helm uninstall documentdb-operator --namespace documentdb-operator
-```
+For security concerns, please review our [Security Policy](SECURITY.md).
 
-Output:
+## 💬 Support
 
-```text
-These resources were kept due to the resource policy:
-[CustomResourceDefinition] poolers.postgresql.cnpg.io
-[CustomResourceDefinition] publications.postgresql.cnpg.io
-[CustomResourceDefinition] scheduledbackups.postgresql.cnpg.io
-[CustomResourceDefinition] subscriptions.postgresql.cnpg.io
-[CustomResourceDefinition] backups.postgresql.cnpg.io
-[CustomResourceDefinition] clusterimagecatalogs.postgresql.cnpg.io
-[CustomResourceDefinition] clusters.postgresql.cnpg.io
-[CustomResourceDefinition] databases.postgresql.cnpg.io
-[CustomResourceDefinition] imagecatalogs.postgresql.cnpg.io
-
-release "documentdb-operator" uninstalled
-```
-
-Verify that the `Pod` is removed:
-
-```sh
-kubectl get pods -n documentdb-preview-ns
-```
-
-Delete namespace, and CRDs:
-
-```sh
-kubectl delete namespace documentdb-operator
-
-kubectl delete crd backups.postgresql.cnpg.io \
-  clusterimagecatalogs.postgresql.cnpg.io \
-  clusters.postgresql.cnpg.io \
-  databases.postgresql.cnpg.io \
-  imagecatalogs.postgresql.cnpg.io \
-  poolers.postgresql.cnpg.io \
-  publications.postgresql.cnpg.io \
-  scheduledbackups.postgresql.cnpg.io \
-  subscriptions.postgresql.cnpg.io \
-  documentdbs.db.microsoft.com
-```
+- Create an [issue](https://github.com/microsoft/documentdb-kubernetes-operator/issues) for bug reports and feature requests
+- Check our [documentation](https://microsoft.github.io/documentdb-kubernetes-operator) for common questions

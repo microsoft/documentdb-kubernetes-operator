@@ -1,0 +1,21 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: sidecarinjector-server
+spec:
+  secretName: sidecarinjector-server-tls
+  commonName: "sidecar-injector"
+  dnsNames:
+    - sidecar-injector
+
+  duration: 2160h # 90d
+  renewBefore: 360h # 15d
+
+  isCA: false
+  usages:
+    - server auth
+
+  issuerRef:
+    name: selfsigned-issuer
+    kind: Issuer
+    group: cert-manager.io

@@ -1,0 +1,405 @@
+name: E2E Test - DocumentDB with mongosh
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      documentdb_version:
+        description: 'DocumentDB image version to test'
+        required: false
+        default: '16'
+      node_count:
+        description: 'Number of DocumentDB nodes'
+        required: false
+        default: '1'
+      test_level:
+        description: 'Test level to run'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - quick
+          - integration
+          - full
+
+permissions:
+  packages: write
+  contents: read
+  id-token: write
+  actions: read
+  attestations: write
+
+env:
+  CERT_MANAGER_NS: cert-manager
+  OPERATOR_NS: documentdb-operator
+  DB_NS: documentdb-e2e-test
+  DB_NAME: documentdb-e2e
+  DB_USERNAME: default_user
+  DB_PASSWORD: Admin100
+  DB_PORT: 10260
+
+jobs:
+  # Use the reusable build workflow
+  build:
+    name: Build Images and Charts
+    uses: ./.github/workflows/build-and-package.yml
+    with:
+      image_tag_prefix: 'e2e-test'
+      chart_version_prefix: '0.1.0'
+      push_to_registry: true
+    secrets: inherit
+
+  e2e-test:
+    name: Run E2E Tests
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    needs: build
+    
+    strategy:
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-latest
+          # - architecture: arm64
+          #   runner: ubuntu-22.04-arm
+        # Test different scenarios
+        test_scenario:
+          - name: "single-node"
+            node_count: 1
+            instances_per_node: 1
+    
+    env:
+      # Use outputs from the build workflow
+      IMAGE_NAME: documentdb-kubernetes-operator
+      IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+      CHART_VERSION: ${{ needs.build.outputs.chart_version }}
+      ARCHITECTURE: ${{ matrix.architecture }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Verify built image exists
+      run: |
+        echo "Verifying that our newly built image exists..."
+        echo "Expected image: ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+        
+        # Login to GHCR to check image
+        echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+        
+        # Try to pull the image to verify it exists
+        docker pull ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+        echo "✓ Image verified successfully"
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq curl netcat-openbsd
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'latest'
+
+    - name: Install MongoDB Shell (mongosh)
+      run: |
+        echo "Installing mongosh for ${{ matrix.architecture }} architecture..."
+        
+        # Install mongosh using the official installation method
+        curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+        
+        if [[ "${{ matrix.architecture }}" == "arm64" ]]; then
+          echo "deb [ arch=arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        else
+          echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        fi
+        
+        sudo apt-get update
+        sudo apt-get install -y mongodb-mongosh
+        mongosh --version
+        echo "✓ mongosh installed successfully for ${{ matrix.architecture }}"
+
+    - name: Create kind cluster
+      uses: helm/kind-action@v1.8.0
+      with:
+        cluster_name: documentdb-e2e-${{ matrix.architecture }}-${{ matrix.test_scenario.name }}
+
+    - name: Wait for cluster to be ready
+      run: |
+        echo "Waiting for ${{ matrix.architecture }} cluster to be ready..."
+        kubectl cluster-info
+        kubectl wait --for=condition=Ready nodes --all --timeout=300s
+        
+        # Verify node architecture
+        echo "Node architecture verification:"
+        kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'
+        echo ""
+
+    - name: Install cert-manager
+      run: |
+        echo "Installing cert-manager on ${{ matrix.architecture }}..."
+        helm repo add jetstack https://charts.jetstack.io
+        helm repo update
+        
+        helm install cert-manager jetstack/cert-manager \
+          --namespace $CERT_MANAGER_NS \
+          --create-namespace \
+          --set installCRDs=true \
+          --wait --timeout=10m
+
+    - name: Install DocumentDB Operator
+      run: |
+        echo "Installing DocumentDB Operator on ${{ matrix.architecture }} using newly built chart version: ${{ env.CHART_VERSION }}"
+        
+        # Log in to GHCR for Helm
+        echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+        
+        # Install the operator using the newly created chart
+        helm install documentdb-operator oci://ghcr.io/${{ github.repository_owner }}/documentdb-operator \
+          --version ${{ env.CHART_VERSION }} \
+          --namespace $OPERATOR_NS \
+          --create-namespace \
+          --wait --timeout=15m
+        
+        kubectl wait --for=condition=Available deployment/documentdb-operator -n $OPERATOR_NS --timeout=300s
+        
+        # Verify that our newly built image is being used
+        echo "Verifying operator deployment uses our newly built image on ${{ matrix.architecture }}..."
+        kubectl get deployment documentdb-operator -n $OPERATOR_NS -o jsonpath='{.spec.template.spec.containers[0].image}'
+        echo ""
+
+    - name: Deploy DocumentDB Cluster - ${{ matrix.test_scenario.name }}
+      run: |
+        echo "Deploying DocumentDB cluster with configuration: ${{ matrix.test_scenario.name }} on ${{ matrix.architecture }}"
+        
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: ${DB_NS}
+        ---
+        apiVersion: db.microsoft.com/preview
+        kind: DocumentDB
+        metadata:
+          name: ${DB_NAME}
+          namespace: ${DB_NS}
+        spec:
+          nodeCount: ${{ matrix.test_scenario.node_count }}
+          instancesPerNode: ${{ matrix.test_scenario.instances_per_node }}
+          documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:${{ github.event.inputs.documentdb_version || '16' }}
+          resource:
+            pvcSize: 10Gi
+          publicLoadBalancer:
+            enabled: false
+        EOF
+
+    - name: Wait for DocumentDB cluster to be ready
+      run: |
+        echo "Waiting for DocumentDB cluster to be ready on ${{ matrix.architecture }}..."
+        
+        # Calculate expected pod count
+        expected_pods=${{ matrix.test_scenario.node_count }}
+        
+        timeout=900  # 15 minutes
+        end_time=$((SECONDS + timeout))
+        
+        while [ $SECONDS -lt $end_time ]; do
+          ready_pods=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o json | \
+                       jq '.items[] | select(.status.phase == "Running" and ([.status.containerStatuses[] | .ready] | all))' | \
+                       jq -s 'length')
+          
+          if [[ "$ready_pods" -eq "$expected_pods" ]]; then
+            echo "DocumentDB cluster is ready on ${{ matrix.architecture }}! ($ready_pods/$expected_pods pods ready)"
+            break
+          fi
+          
+          echo "Waiting for DocumentDB pods on ${{ matrix.architecture }}... ($ready_pods/$expected_pods ready)"
+          kubectl get pods -n $DB_NS
+          sleep 15
+        done
+        
+        if [ $SECONDS -ge $end_time ]; then
+          echo "Timeout waiting for DocumentDB cluster on ${{ matrix.architecture }}"
+          kubectl describe pods -n $DB_NS
+          exit 1
+        fi
+
+    - name: Setup port forwarding for comprehensive tests
+      run: |
+        echo "Setting up port forwarding for comprehensive mongosh tests on ${{ matrix.architecture }}..."
+        
+        # Get the actual pod name
+        POD_NAME=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o jsonpath='{.items[0].metadata.name}')
+        if [ -z "$POD_NAME" ]; then
+          echo "❌ No DocumentDB pod found"
+          kubectl get pods -n $DB_NS
+          exit 1
+        fi
+        echo "Using pod: $POD_NAME"
+        
+        # Start port-forward
+        kubectl port-forward pod/$POD_NAME $DB_PORT:$DB_PORT -n $DB_NS &
+        PF_PID=$!
+        echo $PF_PID > /tmp/pf_pid
+        
+        # Wait for port-forward
+        sleep 15
+        timeout 60 bash -c 'until nc -z 127.0.0.1 '$DB_PORT'; do sleep 2; done'
+        echo "✓ Port forwarding established on ${{ matrix.architecture }}"
+
+    - name: Execute comprehensive mongosh tests
+      run: |
+        echo "Running comprehensive mongosh validation tests on ${{ matrix.architecture }}..."
+        
+        # Run comprehensive tests with validation using external script
+        if mongosh 127.0.0.1:$DB_PORT \
+          -u $DB_USERNAME \
+          -p $DB_PASSWORD \
+          --authenticationMechanism SCRAM-SHA-256 \
+          --tls \
+          --tlsAllowInvalidCertificates \
+          --file scripts/test-scripts/comprehensive_mongosh_tests.js; then
+          echo "✓ Comprehensive mongosh tests completed successfully on ${{ matrix.architecture }}"
+        else
+          echo "❌ Comprehensive mongosh tests failed on ${{ matrix.architecture }}"
+          exit 1
+        fi
+
+    - name: Cleanup comprehensive test port forwarding
+      if: always()
+      run: |
+        # Stop port-forward if it exists
+        if [ -f /tmp/pf_pid ]; then
+          PF_PID=$(cat /tmp/pf_pid)
+          kill $PF_PID 2>/dev/null || true
+          rm -f /tmp/pf_pid
+        fi
+
+    - name: Setup port forwarding for performance tests
+      run: |
+        echo "Setting up port forwarding for performance tests on ${{ matrix.architecture }}..."
+        
+        # Get the actual pod name
+        POD_NAME=$(kubectl get pods -n $DB_NS -l cnpg.io/cluster=$DB_NAME -o jsonpath='{.items[0].metadata.name}')
+        if [ -z "$POD_NAME" ]; then
+          echo "❌ No DocumentDB pod found"
+          kubectl get pods -n $DB_NS
+          exit 1
+        fi
+        echo "Using pod: $POD_NAME"
+        
+        # Start port-forward
+        kubectl port-forward pod/$POD_NAME $DB_PORT:$DB_PORT -n $DB_NS &
+        PF_PID=$!
+        echo $PF_PID > /tmp/perf_pf_pid
+        sleep 10
+        
+        echo "✓ Performance test port forwarding established"
+
+    - name: Execute performance tests
+      run: |
+        echo "Running performance validation tests on ${{ matrix.architecture }}..."
+        
+        # Run performance tests using external script
+        if mongosh 127.0.0.1:$DB_PORT \
+          -u $DB_USERNAME \
+          -p $DB_PASSWORD \
+          --authenticationMechanism SCRAM-SHA-256 \
+          --tls \
+          --tlsAllowInvalidCertificates \
+          --file scripts/test-scripts/performance_test.js; then
+          echo "✓ Performance tests completed successfully on ${{ matrix.architecture }}"
+        else
+          echo "❌ Performance tests failed on ${{ matrix.architecture }}"
+          exit 1
+        fi
+
+    - name: Cleanup performance testing
+      if: always()
+      run: |
+        # Stop performance test port-forward
+        if [ -f /tmp/perf_pf_pid ]; then
+          PF_PID=$(cat /tmp/perf_pf_pid)
+          kill $PF_PID 2>/dev/null || true
+          rm -f /tmp/perf_pf_pid
+        fi
+
+    - name: Test cluster health and monitoring
+      run: |
+        echo "Testing cluster health and monitoring on ${{ matrix.architecture }}..."
+        
+        # Check DocumentDB resource status
+        kubectl get documentdb $DB_NAME -n $DB_NS -o yaml
+        
+        # Check pod resources and health
+        kubectl top pods -n $DB_NS --containers || echo "Metrics server not available"
+        
+        # Check logs for any errors
+        kubectl logs -n $DB_NS -l cnpg.io/cluster=$DB_NAME --tail=50
+        
+        # Check events
+        kubectl get events -n $DB_NS --sort-by='.lastTimestamp'
+
+    - name: Collect comprehensive logs on failure
+      if: failure()
+      run: |
+        echo "=== Comprehensive Failure Diagnostics for ${{ matrix.architecture }} ==="
+        
+        # Check if kubectl is working
+        if ! kubectl version --client &>/dev/null; then
+          echo "kubectl not available"
+          exit 0
+        fi
+        
+        # Check if cluster is accessible
+        if ! kubectl cluster-info &>/dev/null; then
+          echo "Cluster not accessible"
+          kubectl config current-context || echo "No kubectl context found"
+          kubectl config get-contexts || echo "No contexts available"
+          exit 0
+        fi
+        
+        echo "=== System Information ==="
+        kubectl version --client || echo "Failed to get kubectl version"
+        helm version || echo "Failed to get helm version"
+        docker --version || echo "Failed to get docker version"
+        
+        echo "=== Cluster State ==="
+        kubectl get nodes -o wide || echo "Failed to get nodes"
+        kubectl get pods --all-namespaces -o wide || echo "Failed to get pods"
+        
+        echo "=== DocumentDB Resources ==="
+        kubectl get documentdb -A -o yaml || echo "Failed to get DocumentDB resources"
+        kubectl describe documentdb $DB_NAME -n $DB_NS || echo "Failed to describe DocumentDB"
+        
+        echo "=== Storage Information ==="
+        kubectl get pv,pvc -A || echo "Failed to get storage info"
+        
+        echo "=== Pod Details ==="
+        kubectl describe pods -n $DB_NS || echo "Failed to describe pods"
+        
+        echo "=== Container Logs ==="
+        for pod in $(kubectl get pods -n $DB_NS -o name 2>/dev/null); do
+          echo "--- Logs for $pod ---"
+          kubectl logs $pod -n $DB_NS --all-containers=true --tail=100 || echo "Failed to get logs for $pod"
+        done
+        
+        echo "=== Operator Logs ==="
+        kubectl logs -n $OPERATOR_NS deployment/documentdb-operator --tail=200 || echo "Failed to get operator logs"
+        
+        echo "=== CNPG Operator Logs ==="
+        kubectl logs -n cnpg-system --all-containers=true --tail=100 || echo "CNPG logs not available"
+        
+        echo "=== Events ==="
+        kubectl get events --all-namespaces --sort-by='.lastTimestamp' || echo "Failed to get events"

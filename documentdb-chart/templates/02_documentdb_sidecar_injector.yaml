@@ -2,13 +2,13 @@ apiVersion: v1
 kind: Service
 metadata:
   annotations:
-    cnpg.io/pluginClientSecret: helloworld-client-tls
+    cnpg.io/pluginClientSecret: sidecarinjector-client-tls
     cnpg.io/pluginPort: "9090"
-    cnpg.io/pluginServerSecret: helloworld-server-tls
+    cnpg.io/pluginServerSecret: sidecarinjector-server-tls
   labels:
-    app: hello-world
-    cnpg.io/pluginName: cnpg-i-hello-world.cloudnative-pg.io
-  name: hello-world
+    app: sidecar-injector
+    cnpg.io/pluginName: cnpg-i-sidecar-injector.cloudnative-pg.io
+  name: sidecar-injector
   namespace: cnpg-system
 spec:
   ports:
@@ -16,26 +16,26 @@ spec:
     protocol: TCP
     targetPort: 9090
   selector:
-    app: hello-world
+    app: sidecar-injector
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: hello-world
-  name: hello-world
+    app: sidecar-injector
+  name: sidecar-injector
   namespace: cnpg-system
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: hello-world
+      app: sidecar-injector
   strategy: {}
   template:
     metadata:
       creationTimestamp: null
       labels:
-        app: hello-world
+        app: sidecar-injector
     spec:
       containers:
       - args:
@@ -44,8 +44,8 @@ spec:
         - --server-key=/server/tls.key
         - --client-cert=/client/tls.crt
         - --server-address=:9090
-        image: ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-sidecar-injector:preview
-        name: cnpg-i-hello-world
+        image: ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-sidecar-injector:001
+        name: cnpg-i-sidecar-injector
         ports:
         - containerPort: 9090
           protocol: TCP
@@ -58,18 +58,18 @@ spec:
       volumes:
       - name: server
         secret:
-          secretName: helloworld-server-tls
+          secretName: sidecarinjector-server-tls
       - name: client
         secret:
-          secretName: helloworld-client-tls
+          secretName: sidecarinjector-client-tls
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: helloworld-client
+  name: sidecarinjector-client
   namespace: cnpg-system
 spec:
-  commonName: helloworld-client
+  commonName: sidecarinjector-client
   duration: 2160h
   isCA: false
   issuerRef:
@@ -77,19 +77,19 @@ spec:
     kind: Issuer
     name: selfsigned-issuer
   renewBefore: 360h
-  secretName: helloworld-client-tls
+  secretName: sidecarinjector-client-tls
   usages:
   - client auth
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: helloworld-server
+  name: sidecarinjector-server
   namespace: cnpg-system
 spec:
-  commonName: hello-world
+  commonName: sidecar-injector
   dnsNames:
-  - hello-world
+  - sidecar-injector
   duration: 2160h
   isCA: false
   issuerRef:
@@ -97,7 +97,7 @@ spec:
     kind: Issuer
     name: selfsigned-issuer
   renewBefore: 360h
-  secretName: helloworld-server-tls
+  secretName: sidecarinjector-server-tls
   usages:
   - server auth
 ---

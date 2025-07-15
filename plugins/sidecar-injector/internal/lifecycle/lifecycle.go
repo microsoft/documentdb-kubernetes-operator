@@ -182,8 +182,11 @@ func (impl Implementation) reconcileMetadata(
 		},
 	}
 
-	// Check if the pod has the label replication_cluster_type=replica
-	if mutatedPod.Labels["replication_cluster_type"] == "replica" {
+	// Check if the pod has the label replication_cluster_type=replica or is not a primary by number
+	// TODO this logic should be different in case primary changes
+	instanceName := mutatedPod.Labels["cnpg.io/instanceName"]
+	isLocalReplica := len(instanceName) > 2 && instanceName[len(instanceName)-2:] != "-1"
+	if mutatedPod.Labels["replication_cluster_type"] == "replica" || isLocalReplica {
 		sidecar.Args = []string{"--create-user", "false", "--start-pg", "false", "--pg-port", "5432"}
 	} else {
 		sidecar.Args = []string{"--create-user", "true", "--start-pg", "false", "--pg-port", "5432"}

@@ -54,13 +54,12 @@ spec:
                     items:
                       type: string
                     type: array
+                  highAvailability:
+                    description: Whether or not to have replicas on the primary cluster.
+                    type: boolean
                   primary:
                     description: Primary is the name of the primary cluster for replication.
                     type: string
-                  highAvailability:
-                    description: HighAvailability indicates whether or not to have
-                      replicas on the primary cluster.
-                    type: boolean
                 required:
                 - clusterList
                 - primary

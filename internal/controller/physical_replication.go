@@ -17,6 +17,7 @@ import (
 	fleetv1alpha1 "go.goms.io/fleet-networking/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -45,9 +46,16 @@ func (r *DocumentDBReconciler) AddPhysicalReplicationToClusterSpec(
 		return err
 	}
 
-	// No more errors possible, so we can edit the spec
 	isPrimary := documentdb.Spec.ClusterReplication.Primary == self
 
+	if documentdb.Spec.ClusterReplication.HighAvailability && isPrimary {
+		err = r.CreateWALReplica(ctx, documentdb, self)
+		if err != nil {
+			return err
+		}
+	}
+
+	// No more errors possible, so we can safely edit the spec
 	cnpgCluster.Name = self
 
 	if !isPrimary {
@@ -68,8 +76,8 @@ func (r *DocumentDBReconciler) AddPhysicalReplicationToClusterSpec(
 		// Also need to configure quorum writes
 		cnpgCluster.Spec.PostgresConfiguration.Synchronous = &cnpgv1.SynchronousReplicaConfiguration{
 			Method:          cnpgv1.SynchronousReplicaConfigurationMethodAny,
-			Number:          2,
-			StandbyNamesPre: []string{source},
+			Number:          3,
+			StandbyNamesPre: []string{source, "pg_receivewal"},
 			DataDurability:  cnpgv1.DataDurabilityLevelRequired,
 		}
 	}
@@ -417,4 +425,110 @@ func (r *DocumentDBReconciler) CreateTokenService(ctx context.Context, token str
 	}
 
 	return nil
+}
+
+func (r *DocumentDBReconciler) CreateWALReplica(ctx context.Context, documentdb dbpreview.DocumentDB, self string) error {
+	walReplicaName := self + "-wal-replica"
+
+	// Needs a PVC to store the wal data
+	existingPVC := &corev1.PersistentVolumeClaim{}
+	err := r.Get(ctx, types.NamespacedName{Name: walReplicaName, Namespace: documentdb.Namespace}, existingPVC)
+	if err != nil && errors.IsNotFound(err) {
+		log.Log.Info("WAL replica PVC not found. Creating a new WAL replica PVC")
+
+		walReplicaPVC := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      walReplicaName,
+				Namespace: documentdb.Namespace,
+			},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{
+					corev1.ReadWriteOnce,
+				},
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceStorage: resource.MustParse("1Gi"),
+					},
+				},
+			},
+		}
+
+		err = r.Create(ctx, walReplicaPVC)
+		if err != nil {
+			return fmt.Errorf("failed to create WAL replica PVC: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("failed to check for existing WAL replica PVC: %w", err)
+	}
+
+	// Check if the WAL replica pod already exists
+	existingPod := &corev1.Pod{}
+	err = r.Get(ctx, types.NamespacedName{Name: walReplicaName, Namespace: documentdb.Namespace}, existingPod)
+	if err != nil && errors.IsNotFound(err) {
+		// Pod doesn't exist, create it
+		log.Log.Info("WAL replica pod not found. Creating a new WAL replica pod")
+
+		walReplicaPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      walReplicaName,
+				Namespace: documentdb.Namespace,
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:  "wal-replica",
+						Image: util.DEFAULT_DOCUMENTDB_IMAGE,
+						Command: []string{
+							"/usr/lib/postgresql/16/bin/pg_receivewal",
+						},
+						Args: []string{
+							"--directory=/var/lib/postgresql/wal",
+							"--slot=wal_replica",
+							"--compress=0",
+							"--host=" + self + "-rw",
+							"--port=5432",
+							"--username=postgres",
+							"--no-password",
+							"--verbose",
+							"--synchronous",
+						},
+						VolumeMounts: []corev1.VolumeMount{
+							{
+								Name:      walReplicaName,
+								MountPath: "/var/lib/postgresql/wal",
+							},
+						},
+					},
+				},
+				Volumes: []corev1.Volume{
+					{
+						Name: walReplicaName,
+						VolumeSource: corev1.VolumeSource{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: walReplicaName,
+							},
+						},
+					},
+				},
+				SecurityContext: &corev1.PodSecurityContext{
+					RunAsUser:  int64Ptr(105),
+					RunAsGroup: int64Ptr(103),
+					FSGroup:    int64Ptr(103),
+				},
+				RestartPolicy: corev1.RestartPolicyAlways,
+			},
+		}
+
+		err = r.Create(ctx, walReplicaPod)
+		if err != nil {
+			return fmt.Errorf("failed to create WAL replica pod: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("failed to check for existing WAL replica pod: %w", err)
+	}
+
+	return nil
+}
+func int64Ptr(i int64) *int64 {
+	return &i
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/cloudnative-pg/cnpg-i/pkg/lifecycle"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/utils/pointer"
 
 	"github.com/documentdb/cnpg-i-sidecar-injector/internal/config"
@@ -87,7 +88,8 @@ func (impl Implementation) reconcileMetadata(
 		return nil, err
 	}
 
-	logger := log.FromContext(ctx).WithName("cnpg_i_example_lifecyle")
+	reconcileID := string(uuid.NewUUID())
+	logger := log.FromContext(ctx).WithName(reconcileID)
 	helper := common.NewPlugin(
 		*cluster,
 		metadata.PluginName,
@@ -127,8 +129,11 @@ func (impl Implementation) reconcileMetadata(
 		},
 	}
 
-	// Check if the pod has the label replication_cluster_type=replica
-	if mutatedPod.Labels["replication_cluster_type"] == "replica" {
+	// Check if the pod has the label replication_cluster_type=replica or is not a primary by number
+	// TODO this logic should be different in case primary changes
+	instanceName := mutatedPod.Labels["cnpg.io/instanceName"]
+	isLocalReplica := len(instanceName) > 2 && instanceName[len(instanceName)-2:] != "-1"
+	if mutatedPod.Labels["replication_cluster_type"] == "replica" || isLocalReplica {
 		sidecar.Args = []string{"--create-user", "false", "--start-pg", "false", "--pg-port", "5432"}
 	} else {
 		sidecar.Args = []string{"--create-user", "true", "--start-pg", "false", "--pg-port", "5432"}

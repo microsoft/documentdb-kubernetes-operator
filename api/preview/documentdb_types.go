@@ -47,6 +47,8 @@ type ClusterReplication struct {
 	Primary string `json:"primary"`
 	// ClusterList is the list of clusters participating in replication.
 	ClusterList []string `json:"clusterList"`
+	// Whether or not to have replicas on the primary cluster.
+	HighAvailability bool `json:"highAvailability,omitempty"`
 }
 
 type PublicLoadBalancer struct {

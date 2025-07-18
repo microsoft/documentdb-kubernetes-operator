@@ -22,7 +22,7 @@ const (
 
 	HEADLESS_INTERNAL_SERVICE_TYPE = "headless-internal-service"
 
-	LOADBALANCER_PREFIX = "documentdb-service-"
+	DOCUMENTDB_SERVICE_PREFIX = "documentdb-service-"
 
 	DEFAULT_SIDECAR_INJECTOR_PLUGIN = "cnpg-i-sidecar-injector.cloudnative-pg.io"
 

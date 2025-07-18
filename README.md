@@ -31,10 +31,10 @@ For comprehensive documentation, installation guides, configuration options, and
 kubectl port-forward pod/documentdb-preview-1 10260:10260 -n documentdb-preview-ns
 ```
 
-Connect using [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/):
+Connect using [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/). Use the username and password from the `documentdb-credentials` secret you created earlier:
 
 ```sh
-mongosh 127.0.0.1:10260 -u default_user -p Admin100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates
+mongosh 127.0.0.1:10260 -u k8s_secret_user -p K8sSecret100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates
 ```
 
 Execute the following commands to create a database and a collection, and insert some documents:

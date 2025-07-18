@@ -93,6 +93,56 @@ Output:
 documentdbs.db.microsoft.com
 ```
 
+### Store DocumentDB credentials in K8s Secret
+
+Before deploying the DocumentDB cluster, create a Kubernetes secret to store the DocumentDB credentials. The sidecar injector plugin will automatically inject these credentials as environment variables into the DocumentDB gateway container.
+
+Create the secret with your desired username and password:
+
+```sh
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: documentdb-preview-ns
+---
+# DocumentDB Credentials Secret
+# 
+# Login credentials:
+# Username: k8s_secret_user
+# Password: K8sSecret100
+#
+# Connect using mongosh:
+# mongosh 127.0.0.1:10260 -u k8s_secret_user -p K8sSecret100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates
+#
+apiVersion: v1
+kind: Secret
+metadata:
+  name: documentdb-credentials
+  namespace: documentdb-preview-ns
+type: Opaque
+stringData:
+  username: k8s_secret_user     
+  password: K8sSecret100        
+EOF
+```
+
+Verify the secret is created:
+
+```sh
+kubectl get secret documentdb-credentials -n documentdb-preview-ns
+```
+
+Output:
+
+```text
+NAME                     TYPE     DATA   AGE
+documentdb-credentials   Opaque   2      10s
+```
+
+> **Note:** The sidecar injector plugin requires the secret to be named `documentdb-credentials` and must contain `username` and `password` keys. The plugin will automatically inject these as `USERNAME` and `PASSWORD` environment variables into the DocumentDB gateway container.
+
+
 ### Deploy a DocumentDB cluster
 
 Create a single-node DocumentDB cluster:

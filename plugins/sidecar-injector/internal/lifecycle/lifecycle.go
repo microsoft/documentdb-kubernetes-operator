@@ -105,6 +105,42 @@ func (impl Implementation) reconcileMetadata(
 
 	mutatedPod := pod.DeepCopy()
 
+	// Initialize environment variables
+	envVars := []corev1.EnvVar{
+		{
+			Name:  "OTEL_EXPORTER_OTLP_ENDPOINT",
+			Value: "http://localhost:4412",
+		},
+	}
+
+	// Add USERNAME and PASSWORD environment variables from secret
+	// TODO: Make this configurable and expose it in the configuration
+	logger.Info("Adding USERNAME and PASSWORD environment variables from secret")
+	envVars = append(envVars,
+		corev1.EnvVar{
+			Name: "USERNAME",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: "documentdb-credentials",
+					},
+					Key: "username",
+				},
+			},
+		},
+		corev1.EnvVar{
+			Name: "PASSWORD",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: "documentdb-credentials",
+					},
+					Key: "password",
+				},
+			},
+		},
+	)
+
 	// Initialize the sidecar container
 	sidecar := &corev1.Container{
 		Name:            "documentdb-gateway",
@@ -115,12 +151,7 @@ func (impl Implementation) reconcileMetadata(
 				ContainerPort: 10260,
 			},
 		},
-		Env: []corev1.EnvVar{
-			{
-				Name:  "OTEL_EXPORTER_OTLP_ENDPOINT",
-				Value: "http://localhost:4412",
-			},
-		},
+		Env: envVars,
 		SecurityContext: &corev1.SecurityContext{
 			RunAsUser:  pointer.Int64(1000),
 			RunAsGroup: pointer.Int64(1000),

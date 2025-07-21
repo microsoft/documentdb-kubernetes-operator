@@ -146,8 +146,8 @@ switched to db soccer_league
 For the quickstart, you connected to DocumentDB using port forwarding. If you are using a Kubernetes cluster in the cloud (for example, [Azure Kubernetes Service](https://learn.microsoft.com/en-us/azure/aks/)), and want to use a `LoadBalancer` service instead, enable it in the `DocumentDB` spec as follows:
 
 ```yaml
-publicLoadBalancer:
-    enabled: true
+exposeViaService:
+  serviceType: ClusterIP
 ```
 
 > `LoadBalancer` service is also supported in [minikube](https://minikube.sigs.k8s.io/docs/handbook/accessing/) and [kind](https://kind.sigs.k8s.io/docs/user/loadbalancer).

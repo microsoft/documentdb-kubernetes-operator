@@ -335,8 +335,8 @@ spec:
     clusterList:
       - azure-cluster-name
       - on-prem-cluster-name
-  publicLoadBalancer:
-    enabled: true
+  exposeViaService:
+    serviceType: ClusterIP
 
 ---
 

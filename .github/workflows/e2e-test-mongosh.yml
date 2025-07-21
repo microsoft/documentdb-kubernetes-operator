@@ -259,8 +259,8 @@ jobs:
           documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:${{ github.event.inputs.documentdb_version || '16' }}
           resource:
             pvcSize: 10Gi
-          publicLoadBalancer:
-            enabled: false
+          exposeViaService:
+            serviceType: ClusterIP
         EOF
 
     - name: Wait for DocumentDB cluster to be ready

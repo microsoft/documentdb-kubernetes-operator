@@ -165,8 +165,8 @@ spec:
   documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   resource:
     pvcSize: 10Gi
-  publicLoadBalancer:
-    enabled: false
+  exposeViaService:
+    serviceType: ClusterIP
 EOF
 ```
 
@@ -323,8 +323,8 @@ switched to db sample_mflix
 For the quickstart, you connected to DocumentDB using port forwarding. If you are using a Kubernetes cluster in the cloud (for example, [Azure Kubernetes Service](https://learn.microsoft.com/en-us/azure/aks/)), and want to use a `LoadBalancer` service instead, enable it in the `DocumentDB` spec as follows:
 
 ```yaml
-publicLoadBalancer:
-    enabled: true
+exposeViaService:
+    serviceType: LoadBalancer
 ```
 
 > `LoadBalancer` service is also supported in [minikube](https://minikube.sigs.k8s.io/docs/handbook/accessing/) and [kind](https://kind.sigs.k8s.io/docs/user/loadbalancer).

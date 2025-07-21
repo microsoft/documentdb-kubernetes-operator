@@ -11,13 +11,17 @@ on:
         description: 'Target tag to apply (default: latest)'
         required: false
         default: 'latest'
+      repo_name:
+        description: 'Repository name for the container image'
+        required: false
+        default: 'documentdb-k8s-operator'
 
 permissions:
   contents: read
   packages: write
 
 env:
-  REPO_NAME: documentdb-kubernetes-operator
+  REPO_NAME: ${{ github.event.inputs.repo_name }}
 
 jobs:
   copy-and-push-manifest:

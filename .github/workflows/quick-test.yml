@@ -167,8 +167,8 @@ jobs:
           documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
           resource:
             pvcSize: 5Gi
-          publicLoadBalancer:
-            enabled: false
+          exposeViaService:
+            serviceType: ClusterIP
         EOF
         
         echo "DocumentDB resource created, waiting for cluster to be ready..."

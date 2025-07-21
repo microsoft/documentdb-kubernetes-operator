@@ -60,8 +60,8 @@ runs:
           documentDBImage: ${{ inputs.documentdb-image }}
           resource:
             pvcSize: ${{ inputs.pvc-size }}
-          publicLoadBalancer:
-            enabled: ${{ inputs.public-load-balancer }}
+          exposeViaService:
+            serviceType: ClusterIP
         EOF
         
         echo "DocumentDB resource created on ${{ inputs.architecture }}, waiting for cluster to be ready..."

@@ -62,21 +62,28 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	// Only create/manage the public LoadBalancer if enabled in the CRD spec
-	if documentdb.Spec.PublicLoadBalancer.Enabled {
-		// Define the Public LoadBalancer Service for this DocumentDB instance
-		loadBalancer := util.GetDocumentDBLoadBalancerDefinition(documentdb, req.Namespace)
+	var documentDbServiceIp string
+	// Only create/manage the service if ExposeViaService is configured
+	if documentdb.Spec.ExposeViaService.ServiceType != "" {
+		serviceType := corev1.ServiceTypeClusterIP
+		if documentdb.Spec.ExposeViaService.ServiceType == "LoadBalancer" {
+			serviceType = corev1.ServiceTypeLoadBalancer // Public LoadBalancer service
+		}
 
-		// Check if the LoadBalancer Service already exists for this instance
-		foundService, err := util.GetOrCreateService(ctx, r.Client, loadBalancer)
+		// Define the Service for this DocumentDB instance
+		ddbService := util.GetDocumentDBServiceDefinition(documentdb, req.Namespace, serviceType)
+
+		// Check if the DocumentDB Service already exists for this instance
+		foundService, err := util.GetOrCreateService(ctx, r.Client, ddbService)
 		if err != nil {
-			log.Info("Failed to create DocumentDB LoadBalancer Service; Requeuing.")
+			log.Info("Failed to create DocumentDB Service; Requeuing.")
 			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 		}
 
-		// Ensure LoadBalancer has an IP assigned
-		if err := util.EnsureLoadBalancerIP(ctx, foundService); err != nil {
-			log.Info("DocumentDB LoadBalancer External IP not assigned, Requeuing.")
+		// Ensure DocumentDB Service has an IP assigned
+		documentDbServiceIp, err = util.EnsureServiceIP(ctx, foundService)
+		if err != nil {
+			log.Info("DocumentDB Service IP not assigned, Requeuing.")
 			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 		}
 	}
@@ -96,7 +103,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	currentCnpgCluster := &cnpgv1.Cluster{}
 	desiredCnpgCluster := cnpg.GetCnpgClusterSpec(req, *documentdb, documentdbImage, documentdb.Name, log)
 
-	err = r.AddPhysicalReplicationToClusterSpec(ctx, *documentdb, desiredCnpgCluster)
+	err = r.AddClusterReplicationToClusterSpec(ctx, *documentdb, desiredCnpgCluster)
 	if err != nil {
 		log.Error(err, "Failed to add physical replication features cnpg Cluster spec; Proceeding as single cluster.")
 		return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
@@ -122,12 +129,15 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: requeueTime}, nil
 	}
 
-	// Update DocumentDB status with CNPG Cluster status
+	// Update DocumentDB status with CNPG Cluster status and connection string
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: desiredCnpgCluster.Name, Namespace: req.Namespace}, currentCnpgCluster); err == nil {
 		if currentCnpgCluster.Status.Phase != "" {
 			documentdb.Status.Status = currentCnpgCluster.Status.Phase
+			if documentDbServiceIp != "" {
+				documentdb.Status.ConnectionString = util.GenerateConnectionString(documentdb, documentDbServiceIp)
+			}
 			if err := r.Status().Update(ctx, documentdb); err != nil {
-				log.Error(err, "Failed to update DocumentDB status with CNPG Cluster status")
+				log.Error(err, "Failed to update DocumentDB status and connection string")
 			}
 		}
 	}
@@ -139,10 +149,10 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 func (r *DocumentDBReconciler) cleanupResources(ctx context.Context, req ctrl.Request, documentdb *dbpreview.DocumentDB) error {
 	log := log.FromContext(ctx)
 
-	// Cleanup DocumentDB LoadBalancer Service
-	if documentdb.Spec.PublicLoadBalancer.Enabled {
-		loadBalancerName := util.LOADBALANCER_PREFIX + req.Name
-		if err := util.DeleteLoadbalancer(ctx, r.Client, loadBalancerName, req.Namespace); err != nil {
+	// Cleanup DocumentDB Service
+	if documentdb.Spec.ExposeViaService.ServiceType != "" {
+		serviceName := util.DOCUMENTDB_SERVICE_PREFIX + req.Name
+		if err := util.DeleteService(ctx, r.Client, serviceName, req.Namespace); err != nil {
 			return err
 		}
 	}

@@ -31,8 +31,9 @@ type DocumentDBSpec struct {
 	// SidecarInjectorPluginName is the name of the sidecar injector plugin to use.
 	SidecarInjectorPluginName string `json:"sidecarInjectorPluginName,omitempty"`
 
-	// PublicLoadBalancer configures the public load balancer for DocumentDB.
-	PublicLoadBalancer PublicLoadBalancer `json:"publicLoadBalancer,omitempty"`
+	// ExposeViaService configures how to expose DocumentDB via a Kubernetes service.
+	// This can be a LoadBalancer or ClusterIP service.
+	ExposeViaService ExposeViaService `json:"exposeViaService,omitempty"`
 
 	Timeouts Timeouts `json:"timeouts,omitempty"`
 }
@@ -43,15 +44,18 @@ type Resource struct {
 }
 
 type ClusterReplication struct {
+	// EnableFleetForCrossCloud determines whether to use KubeFleet mechanics for the replication
+	EnableFleetForCrossCloud bool `json:"enableFleetForCrossCloud,omitempty"`
 	// Primary is the name of the primary cluster for replication.
 	Primary string `json:"primary"`
 	// ClusterList is the list of clusters participating in replication.
 	ClusterList []string `json:"clusterList"`
 }
 
-type PublicLoadBalancer struct {
-	// Enabled determines whether a public load balancer is created for DocumentDB.
-	Enabled bool `json:"enabled"`
+type ExposeViaService struct {
+	// ServiceType determines the type of service to expose for DocumentDB.
+	// +kubebuilder:validation:Enum=LoadBalancer;ClusterIP
+	ServiceType string `json:"serviceType"`
 }
 
 type Timeouts struct {
@@ -63,7 +67,8 @@ type Timeouts struct {
 // DocumentDBStatus defines the observed state of DocumentDB.
 type DocumentDBStatus struct {
 	// Status reflects the status field from the underlying CNPG Cluster.
-	Status string `json:"status,omitempty"`
+	Status           string `json:"status,omitempty"`
+	ConnectionString string `json:"connectionString,omitempty"`
 }
 
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.status",description="CNPG Cluster Status"

@@ -19,6 +19,10 @@ spec:
       jsonPath: .status.status
       name: Status
       type: string
+    - description: MongoDB Connection String
+      jsonPath: .status.connectionString
+      name: Connection String
+      type: string
     name: preview
     schema:
       openAPIV3Schema:

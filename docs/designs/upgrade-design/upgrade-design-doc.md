@@ -64,19 +64,29 @@ This foundational knowledge ensures that operators implementing these upgrade st
 
 ## Upgrade Scenarios
 
-### 1. Operator Upgrade (Helm Chart)
+### 1. DocumentDB Operator Upgrade (Helm Chart)
 - **Trigger**: New operator version release
 - **Scope**: Control plane components
 - **Impact**: Low (no data plane disruption)
 
-### 2. Gateway Image Upgrade
+### 2. Sidecar Injector Upgrade
+- **Trigger**: Updates to injection logic
+- **Scope**: Control plane webhook
+- **Impact**: Medium (affects new pod creation)
+
+### 3. Gateway Image Upgrade
 - **Trigger**: New gateway version with features/fixes
 - **Scope**: Data plane (requires pod restart)
 - **Impact**: Medium (rolling restart of pods)
 - **State**: **Stateless** - Gateway containers have no persistent state
 - **Risk**: Low - No data loss risk, only temporary connection disruption
 
-### 3. PostgreSQL Database Upgrade
+### 4. CNPG Operator Upgrade
+- **Trigger**: Upstream CNPG operator updates
+- **Scope**: Control plane and data plane
+- **Impact**: Variable (depends on CNPG upgrade requirements)
+
+### 5. PostgreSQL Database Upgrade
 - **Trigger**: PostgreSQL version bump (e.g., 14.x → 15.x or 14.2 → 14.3)
 - **Scope**: Data plane (requires careful database migration)
 - **Impact**: High (potential data migration and downtime required)
@@ -86,7 +96,7 @@ This foundational knowledge ensures that operators implementing these upgrade st
   - **Minor Version**: 14.2 → 14.3 (in-place upgrade, low risk)
   - **Major Version**: 14.x → 15.x (migration required, high risk)
 
-### 4. DocumentDB Extension Upgrade
+### 6. DocumentDB Postgres Extension Upgrade
 - **Trigger**: DocumentDB extension updates (new features, bug fixes, compatibility)
 - **Scope**: Data plane (requires extension update within PostgreSQL)
 - **Impact**: Medium to High (depends on extension changes)
@@ -96,16 +106,6 @@ This foundational knowledge ensures that operators implementing these upgrade st
   - **Patch Updates**: Bug fixes, minor improvements (medium risk)
   - **Feature Updates**: New DocumentDB features, API changes (high risk)
   - **Breaking Changes**: Schema modifications, compatibility breaks (very high risk)
-
-### 5. CNPG Operator Upgrade
-- **Trigger**: Upstream CNPG operator updates
-- **Scope**: Control plane and data plane
-- **Impact**: Variable (depends on CNPG upgrade requirements)
-
-### 6. Sidecar Injector Upgrade
-- **Trigger**: Updates to injection logic
-- **Scope**: Control plane webhook
-- **Impact**: Medium (affects new pod creation)
 
 ## Upgrade Strategies
 
@@ -121,7 +121,7 @@ The DocumentDB operator upgrade focuses on the core operator deployment and Cust
 - **RBAC Resources**: Service accounts, roles, and bindings
 - **Custom Resource Definitions**: DocumentDB CRDs with version support
 
-**Note**: CNPG operator dependency management is handled separately. See [Section 5: CNPG Operator Upgrade Strategy](#5-cnpg-operator-upgrade-strategy) for details on CNPG version coupling and upgrade procedures.
+**Note**: CNPG operator dependency management is handled separately. See [Section 4: CNPG Operator Upgrade Strategy](#4-cnpg-operator-upgrade-strategy) for details on CNPG version coupling and upgrade procedures.
 
 #### B. Upgrade Strategy
 
@@ -153,7 +153,7 @@ kubectl rollout status deployment/documentdb-operator -n documentdb-system
 - **Zero Data Impact**: Operator upgrades don't affect PostgreSQL data or running clusters
 - **Fast Rollback**: Helm rollback is simple for control plane components
 
-**Note**: For stateful components (PostgreSQL data migration), see [Section 3: PostgreSQL Database Upgrade Strategy](#3-postgresql-database-upgrade-strategy) which covers blue-green deployments for database upgrades.
+**Note**: For stateful components (PostgreSQL data migration), see [Section 5: PostgreSQL Database Upgrade Strategy](#5-postgresql-database-upgrade-strategy) which covers blue-green deployments for database upgrades.
 
 #### C. CRD Upgrade Handling
 
@@ -372,7 +372,214 @@ echo "=== Rollback complete ==="
 ```
 
 
-### 2. Gateway Image Upgrade Strategy
+### 2. Sidecar Injector Upgrade Strategy
+
+The DocumentDB Sidecar Injector is a **stateless** webhook that automatically injects the DocumentDB Gateway container into CNPG PostgreSQL pods. It runs as a CNPG plugin and focuses purely on injection logic and lifecycle management.
+
+#### A. Sidecar Injector Architecture
+
+**Component Overview:**
+- **Injector Service**: CNPG plugin service running on port 9090
+- **Deployment**: Single replica deployment in `cnpg-system` namespace  
+- **TLS Certificates**: Mutual TLS between injector and CNPG operator
+- **Injection Logic**: Code that determines when and how to inject gateway containers
+- **Lifecycle Management**: Handles container lifecycle events and coordination
+
+**Key Dependencies:**
+```yaml
+# From values.yaml - Sidecar Injector Image Only
+image:
+  sidecarinjector:
+    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-sidecar-injector
+    tag: "001"  # Sidecar injector version
+```
+
+**Note**: Gateway image configuration is handled separately in Section 3 (Gateway Upgrade Strategy).
+
+#### B. Upgrade Scenarios
+
+##### Sidecar Injector Code Update
+**Trigger**: New injection logic, bug fixes, webhook configuration changes, or TLS handling improvements
+**Impact**: Affects new pod creation immediately; existing pods require manual recreation to benefit from new injector logic
+**Risk**: Medium - Injection failures affect new PostgreSQL pods; pod recreation uses CNPG rolling restarts (no service disruption with multiple replicas)
+
+**Common Update Types:**
+- Injection logic improvements
+- Webhook security enhancements  
+- TLS certificate management updates
+- CNPG plugin API compatibility updates
+- Lifecycle management refinements
+
+**Important**: Since the sidecar injector only affects **new pod creation**, existing pods will continue running with the old injection configuration until they are recreated. For critical injector updates (security fixes, compatibility updates), you must recreate existing pods to apply the new injection logic.
+
+#### C. Upgrade Strategy
+
+**Rolling Update (Recommended)**
+
+Since the sidecar injector is a **stateless** component, rolling updates provide the optimal balance of safety and simplicity:
+
+```bash
+# Step 1: Update sidecar injector image in values.yaml
+cat <<EOF > values-update.yaml
+image:
+  sidecarinjector:
+    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-sidecar-injector
+    tag: "002"  # New injector version
+EOF
+
+# Step 2: Upgrade via Helm (Rolling Update)
+helm upgrade documentdb-operator ./documentdb-chart \
+  --namespace documentdb-system \
+  --values values-update.yaml \
+  --wait \
+  --timeout 300s
+
+# Step 3: Verify injector deployment rollout
+kubectl rollout status deployment/sidecar-injector -n cnpg-system
+
+# Step 4: Verify injector webhook is active
+kubectl get mutatingwebhookconfiguration documentdb-sidecar-injector
+
+# Step 5: Test injection on new pods (verify new injector logic works)
+kubectl apply -f - <<EOF
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: test-new-injection
+spec:
+  instances: 1
+  postgresql:
+    parameters:
+      shared_preload_libraries: "documentdb"
+EOF
+
+# Wait for pod creation and verify new injection logic
+kubectl wait --for=condition=Ready pod -l cnpg.io/cluster=test-new-injection --timeout=300s
+kubectl describe pod -l cnpg.io/cluster=test-new-injection | grep -A5 "gateway"
+
+# Step 6: Recreate existing pods to apply new injector logic
+# This step is REQUIRED for existing pods to benefit from the new injector
+echo "Recreating existing DocumentDB pods to apply new injector logic..."
+
+# Option A: Rolling restart of existing CNPG clusters (Recommended)
+for cluster in $(kubectl get clusters.postgresql.cnpg.io -A -o jsonpath='{.items[*].metadata.name}'); do
+  namespace=$(kubectl get clusters.postgresql.cnpg.io $cluster -A -o jsonpath='{.items[0].metadata.namespace}')
+  echo "Restarting cluster: $cluster in namespace: $namespace"
+  
+  # Trigger rolling restart via CNPG
+  kubectl annotate clusters.postgresql.cnpg.io $cluster -n $namespace \
+    cnpg.io/reloadedAt="$(date -Iseconds)"
+  
+  # Wait for restart to complete
+  kubectl wait --for=condition=Ready clusters.postgresql.cnpg.io/$cluster -n $namespace --timeout=600s
+done
+
+# Option B: Manual pod deletion (Alternative approach)
+# kubectl delete pods -l cnpg.io/cluster --all-namespaces --wait=false
+# kubectl wait --for=condition=Ready pod -l cnpg.io/cluster --all-namespaces --timeout=600s
+
+# Step 7: Verify all pods now have the new injection configuration
+kubectl get pods -l cnpg.io/cluster --all-namespaces -o custom-columns=\
+"NAMESPACE:.metadata.namespace,NAME:.metadata.name,CONTAINERS:.spec.containers[*].name"
+
+# Clean up test cluster
+kubectl delete cluster test-new-injection
+```
+
+**Important Considerations for Pod Recreation:**
+- **Service Continuity**: CNPG performs rolling restarts to maintain service availability (no downtime with multiple replicas)
+- **Data Persistence**: Pod recreation does not affect PostgreSQL data (stored in PVCs)
+- **Connection Handling**: With multiple replicas, client connections can be handled by remaining pods during rolling restart
+- **Single Replica Clusters**: Brief connection interruption possible during pod restart (consider scaling up temporarily)
+- **Monitoring**: Monitor application health during pod recreation process
+
+#### D. Validation and Troubleshooting
+
+**Post-Upgrade Validation:**
+```bash
+# Check injector pod logs for errors
+kubectl logs -l app=sidecar-injector -n cnpg-system --tail=50
+
+# Verify webhook configuration is updated
+kubectl get mutatingwebhookconfiguration documentdb-sidecar-injector -o yaml
+
+# Validate injection logic on newly created pods
+kubectl apply -f - <<EOF
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: validate-injection
+spec:
+  instances: 1
+  postgresql:
+    parameters:
+      shared_preload_libraries: "documentdb"
+EOF
+
+# Wait for pod creation and verify new injection worked
+kubectl wait --for=condition=Ready pod -l cnpg.io/cluster=validate-injection --timeout=300s
+kubectl get pod -l cnpg.io/cluster=validate-injection -o jsonpath='{.items[0].spec.containers[*].name}'
+
+# Verify recreated existing pods have new injection configuration
+kubectl get pods -l cnpg.io/cluster --all-namespaces -o custom-columns=\
+"NAMESPACE:.metadata.namespace,NAME:.metadata.name,CREATED:.metadata.creationTimestamp"
+
+# Check that recreated pods have expected container configuration
+for pod in $(kubectl get pods -l cnpg.io/cluster --all-namespaces -o jsonpath='{.items[*].metadata.name}'); do
+  echo "Pod: $pod"
+  kubectl get pod $pod -o jsonpath='{.spec.containers[*].name}' && echo
+done
+
+# Clean up validation resources
+kubectl delete cluster validate-injection
+```
+
+**Troubleshooting Common Issues:**
+
+1. **Injector webhook not responding:**
+```bash
+# Check injector pod status
+kubectl get pods -l app=sidecar-injector -n cnpg-system
+
+# Check webhook configuration
+kubectl describe mutatingwebhookconfiguration documentdb-sidecar-injector
+
+# Verify TLS certificates
+kubectl get secret sidecar-injector-certs -n cnpg-system -o yaml
+```
+
+2. **Pod recreation failed:**
+```bash
+# Check CNPG cluster status
+kubectl get clusters.postgresql.cnpg.io -A -o wide
+
+# Check pod events for recreation issues
+kubectl describe pods -l cnpg.io/cluster
+
+# Manual pod deletion if annotation-based restart failed
+kubectl delete pods -l cnpg.io/cluster=<cluster-name> -n <namespace>
+```
+
+3. **Injection not applied to recreated pods:**
+```bash
+# Verify injector is targeting correct pods
+kubectl get mutatingwebhookconfiguration documentdb-sidecar-injector -o jsonpath='{.webhooks[0].namespaceSelector}'
+
+# Check if pods have required labels/annotations for injection
+kubectl describe pods -l cnpg.io/cluster | grep -E "(Labels|Annotations)"
+```
+
+**Rollback Strategy:**
+```bash
+# Helm rollback to previous injector version
+helm rollback documentdb-operator --namespace documentdb-system
+
+# Or manual image rollback
+kubectl patch deployment sidecar-injector -n cnpg-system -p \
+  '{"spec":{"template":{"spec":{"containers":[{"name":"sidecar-injector","image":"ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-sidecar-injector:001"}]}}}}'
+```
+
+### 3. Gateway Image Upgrade Strategy
 
 The Gateway container is **stateless** and acts as a protocol translator between MongoDB clients and PostgreSQL. Gateway image upgrades are handled through the **sidecar injector**, which injects the specified gateway image version into CNPG PostgreSQL pods.
 
@@ -648,25 +855,227 @@ done
 echo "=== Gateway rollback complete ==="
 ```
 
-#### F. Gateway Upgrade Best Practices
+### 4. CNPG Operator Upgrade Strategy
 
-**Pre-Production Validation:**
-- Test gateway upgrades in staging environment first
-- Validate MongoDB API compatibility with new gateway version
-- Verify all MongoDB operations work correctly
+The CloudNativePG (CNPG) operator manages PostgreSQL clusters and is a critical dependency for DocumentDB. CNPG upgrades are **tightly coupled** with DocumentDB operator versions to ensure compatibility and stability.
 
-**Production Deployment:**
-- Schedule gateway upgrades during maintenance windows
-- Monitor application metrics during and after upgrade
-- Have rollback plan ready and tested
+**Important**: CNPG operator upgrades are **not** available as standalone upgrades for customers. The CNPG version is bundled with and upgraded automatically as part of DocumentDB operator upgrades.
 
-**Key Considerations:**
-- **Stateless Nature**: Gateway containers have no persistent state, making upgrades safer
-- **Rolling Restart**: CNPG ensures no service interruption with multiple replicas
-- **Injection Timing**: New gateway image only affects newly created pods until restart
-- **Compatibility**: Ensure new gateway version is compatible with PostgreSQL and DocumentDB extension versions
+#### A. Version Coupling Policy
 
-### 3. PostgreSQL Database Upgrade Strategy
+**CNPG-DocumentDB Version Binding:**
+- Each DocumentDB operator version is tested and certified with a specific CNPG version
+- CNPG upgrades are only available through DocumentDB operator upgrades
+- This ensures full compatibility testing and reduces upgrade complexity for customers
+
+**Supported Upgrade Path:**
+```
+DocumentDB v1.2.0 + CNPG v0.24.0 
+         ↓
+DocumentDB v1.3.0 + CNPG v0.26.0 
+         ↓
+DocumentDB v1.4.0 + CNPG v0.28.0
+```
+
+#### B. CNPG Upgrade via DocumentDB Operator
+
+##### Helm Dependency Management (Only Supported Method)
+```yaml
+# documentdb-chart/Chart.yaml
+dependencies:
+  - name: cloudnative-pg
+    version: "0.26.0"  # Locked to DocumentDB operator version
+    repository: https://cloudnative-pg.github.io/charts
+    condition: cnpg.enabled
+```
+
+**Upgrade Process:**
+```bash
+# CNPG is upgraded automatically as part of DocumentDB operator upgrade
+helm upgrade documentdb-operator ./documentdb-chart \
+  --namespace documentdb-system \
+  --wait \
+  --timeout 900s
+```
+
+**Note**: Customers cannot and should not upgrade CNPG independently. Any attempt to do so may result in:
+- Incompatibility issues between DocumentDB and CNPG
+- Unsupported configuration states
+- Potential data corruption or service disruption
+
+#### C. CNPG Dependency Management
+
+**Helm Dependency Update Process:**
+```bash
+# Step 1: Update CNPG dependency (performed automatically during DocumentDB upgrade)
+helm dependency update ./documentdb-chart
+
+# Step 2: Verify CNPG chart version in dependencies
+helm dependency list ./documentdb-chart
+
+# Expected output:
+# NAME            VERSION  REPOSITORY                              STATUS
+# cloudnative-pg  0.26.0   https://cloudnative-pg.github.io/charts ok
+```
+
+**CNPG Upgrade Validation Process:**
+```bash
+# Step 1: Validate CNPG CRDs before upgrade
+kubectl get crd clusters.postgresql.cnpg.io -o jsonpath='{.spec.versions[*].name}'
+
+# Step 2: Check existing CNPG cluster health
+kubectl get clusters.postgresql.cnpg.io -A -o wide
+
+# Step 3: Verify CNPG controller status
+kubectl get deployment cnpg-controller-manager -n cnpg-system
+
+# Step 4: Validate CNPG webhooks
+kubectl get validatingwebhookconfiguration cnpg-validating-webhook-configuration
+kubectl get mutatingwebhookconfiguration cnpg-mutating-webhook-configuration
+
+# Step 5: Check CNPG operator logs for errors
+kubectl logs -n cnpg-system -l app.kubernetes.io/name=cloudnative-pg --tail=50
+```
+
+**Troubleshooting CNPG Dependency Issues:**
+```bash
+# If CNPG dependency update fails
+rm -rf ./documentdb-chart/charts/cloudnative-pg-*.tgz
+rm -f ./documentdb-chart/Chart.lock
+helm dependency update ./documentdb-chart
+
+# If CNPG version conflicts occur
+helm dependency build ./documentdb-chart --skip-refresh
+
+# Validate CNPG compatibility matrix
+kubectl get deployment cnpg-controller-manager -n cnpg-system -o jsonpath='{.spec.template.spec.containers[0].image}'
+```
+
+#### D. CNPG Version Compatibility Validation
+
+**Automated Compatibility Check:**
+```bash
+#!/bin/bash
+# validate-cnpg-compatibility.sh
+
+CNPG_VERSION=$1
+DOCUMENTDB_VERSION=$(helm list -n documentdb-system -o json | jq -r '.[] | select(.name=="documentdb-operator") | .app_version')
+
+echo "=== CNPG-DocumentDB Compatibility Validation ==="
+echo "Validating CNPG $CNPG_VERSION compatibility with DocumentDB $DOCUMENTDB_VERSION"
+
+# Check if DocumentDB operator is installed
+if [ -z "$DOCUMENTDB_VERSION" ]; then
+    echo "❌ DocumentDB operator not found. Install DocumentDB operator first."
+    exit 1
+fi
+
+# Check CRD compatibility
+echo "Checking CRD versions..."
+CNPG_CRD_VERSIONS=$(kubectl get crd clusters.postgresql.cnpg.io -o jsonpath='{.spec.versions[*].name}' 2>/dev/null || echo "")
+if [ -z "$CNPG_CRD_VERSIONS" ]; then
+    echo "❌ CNPG CRDs not found"
+    exit 1
+fi
+echo "Available CNPG CRD versions: $CNPG_CRD_VERSIONS"
+
+# Validate API version compatibility matrix
+case $CNPG_VERSION in
+    "0.24."*)
+        if [[ $DOCUMENTDB_VERSION == "1.2."* ]]; then
+            echo "✅ Compatible: DocumentDB $DOCUMENTDB_VERSION + CNPG $CNPG_VERSION"
+        else
+            echo "❌ Incompatible: DocumentDB $DOCUMENTDB_VERSION requires CNPG 0.24.x"
+            exit 1
+        fi
+        ;;
+    "0.26."*)
+        if [[ $DOCUMENTDB_VERSION == "1.3."* ]]; then
+            echo "✅ Compatible: DocumentDB $DOCUMENTDB_VERSION + CNPG $CNPG_VERSION"
+        else
+            echo "❌ Incompatible: DocumentDB $DOCUMENTDB_VERSION not compatible with CNPG 0.26.x"
+            exit 1
+        fi
+        ;;
+    "0.28."*)
+        if [[ $DOCUMENTDB_VERSION == "1.4."* ]]; then
+            echo "✅ Compatible: DocumentDB $DOCUMENTDB_VERSION + CNPG $CNPG_VERSION"
+        else
+            echo "❌ Incompatible: DocumentDB $DOCUMENTDB_VERSION not compatible with CNPG 0.28.x"
+            exit 1
+        fi
+        ;;
+    *)
+        echo "❌ Unknown CNPG version $CNPG_VERSION - check compatibility matrix"
+        exit 1
+        ;;
+esac
+
+# Verify CNPG controller health
+echo "Checking CNPG controller health..."
+kubectl get deployment cnpg-controller-manager -n cnpg-system -o wide
+if [ $? -ne 0 ]; then
+    echo "❌ CNPG controller not healthy"
+    exit 1
+fi
+
+# Check existing CNPG clusters
+echo "Checking existing CNPG clusters..."
+kubectl get clusters.postgresql.cnpg.io -A -o wide
+
+echo "=== Compatibility validation complete ==="
+```
+
+#### E. Integrated DocumentDB + CNPG Upgrade Process
+
+When upgrading the DocumentDB operator, CNPG is automatically upgraded as part of the same Helm operation. This ensures version compatibility and reduces operational complexity.
+
+**Complete Upgrade Flow:**
+```bash
+# Step 1: Pre-upgrade validation
+./validate-cnpg-compatibility.sh $(helm show chart ./documentdb-chart/charts/cloudnative-pg-*.tgz | grep "^version:" | cut -d' ' -f2)
+
+# Step 2: Update Helm dependencies (includes CNPG chart)
+helm dependency update ./documentdb-chart
+
+# Step 3: Perform integrated upgrade (DocumentDB + CNPG)
+helm upgrade documentdb-operator ./documentdb-chart \
+  --namespace documentdb-system \
+  --wait \
+  --timeout 900s \
+  --atomic
+
+# Step 4: Verify both operators are healthy
+kubectl get deployment documentdb-operator -n documentdb-system
+kubectl get deployment cnpg-controller-manager -n cnpg-system
+
+# Step 5: Validate DocumentDB clusters are still functional
+kubectl get documentdb -A -o wide
+kubectl get clusters.postgresql.cnpg.io -A -o wide
+```
+
+**Upgrade Sequence (Automatic):**
+1. **CNPG CRDs**: Updated first to support new API versions
+2. **CNPG Controller**: Upgraded to new version with backward compatibility
+3. **DocumentDB CRDs**: Updated with any schema changes
+4. **DocumentDB Controller**: Upgraded to work with new CNPG version
+5. **Webhooks**: Updated to maintain admission control functionality
+
+**Post-Upgrade Validation:**
+```bash
+# Verify version alignment
+DOCUMENTDB_VERSION=$(kubectl get deployment documentdb-operator -n documentdb-system -o jsonpath='{.spec.template.spec.containers[0].image}')
+CNPG_VERSION=$(kubectl get deployment cnpg-controller-manager -n cnpg-system -o jsonpath='{.spec.template.spec.containers[0].image}')
+
+echo "DocumentDB Version: $DOCUMENTDB_VERSION"
+echo "CNPG Version: $CNPG_VERSION"
+
+# Test DocumentDB functionality
+kubectl get documentdb -A -o wide
+mongosh "mongodb://username:password@my-documentdb-service:27017/test" --eval "db.test.findOne()"
+```
+
+### 5. PostgreSQL Database Upgrade Strategy
 
 PostgreSQL is **stateful** and contains all persistent application data. This requires careful planning, extensive testing, and robust backup strategies.
 
@@ -864,7 +1273,7 @@ echo "Green cluster removed, blue cluster restored to full operation"
 
 **Important**: For detailed data migration procedures, storage verification, and advanced backup/restore strategies, refer to the dedicated backup/restore guide: `docs/designs/backup-restore/backup-restore-guide.md`
 
-### 4. DocumentDB Extension Upgrade Strategy
+### 6. DocumentDB Extension Upgrade Strategy
 
 The DocumentDB extension provides MongoDB-compatible functionality within PostgreSQL. Extension upgrades require careful coordination with PostgreSQL versions and thorough testing of MongoDB API compatibility.
 
@@ -951,447 +1360,6 @@ EOF
 - MongoDB drivers may need updates
 - Application code may require changes for new features
 - Connection strings and authentication may be affected
-
-### 5. CNPG Operator Upgrade Strategy
-
-The CloudNativePG (CNPG) operator manages PostgreSQL clusters and is a critical dependency for DocumentDB. CNPG upgrades are **tightly coupled** with DocumentDB operator versions to ensure compatibility and stability.
-
-**Important**: CNPG operator upgrades are **not** available as standalone upgrades for customers. The CNPG version is bundled with and upgraded automatically as part of DocumentDB operator upgrades.
-
-#### A. Version Coupling Policy
-
-**CNPG-DocumentDB Version Binding:**
-- Each DocumentDB operator version is tested and certified with a specific CNPG version
-- CNPG upgrades are only available through DocumentDB operator upgrades
-- This ensures full compatibility testing and reduces upgrade complexity for customers
-
-**Supported Upgrade Path:**
-```
-DocumentDB v1.2.0 + CNPG v0.24.0 
-         ↓
-DocumentDB v1.3.0 + CNPG v0.26.0 
-         ↓
-DocumentDB v1.4.0 + CNPG v0.28.0
-```
-
-#### B. CNPG Upgrade via DocumentDB Operator
-
-##### Helm Dependency Management (Only Supported Method)
-```yaml
-# documentdb-chart/Chart.yaml
-dependencies:
-  - name: cloudnative-pg
-    version: "0.26.0"  # Locked to DocumentDB operator version
-    repository: https://cloudnative-pg.github.io/charts
-    condition: cnpg.enabled
-```
-
-**Upgrade Process:**
-```bash
-# CNPG is upgraded automatically as part of DocumentDB operator upgrade
-helm upgrade documentdb-operator ./documentdb-chart \
-  --namespace documentdb-system \
-  --wait \
-  --timeout 900s
-```
-
-**Note**: Customers cannot and should not upgrade CNPG independently. Any attempt to do so may result in:
-- Incompatibility issues between DocumentDB and CNPG
-- Unsupported configuration states
-- Potential data corruption or service disruption
-
-#### C. CNPG Dependency Management
-
-**Helm Dependency Update Process:**
-```bash
-# Step 1: Update CNPG dependency (performed automatically during DocumentDB upgrade)
-helm dependency update ./documentdb-chart
-
-# Step 2: Verify CNPG chart version in dependencies
-helm dependency list ./documentdb-chart
-
-# Expected output:
-# NAME            VERSION  REPOSITORY                              STATUS
-# cloudnative-pg  0.26.0   https://cloudnative-pg.github.io/charts ok
-```
-
-**Manual Dependency Validation (if needed):**
-```bash
-# Validate Chart.yaml dependencies
-cat ./documentdb-chart/Chart.yaml | grep -A 5 dependencies
-
-# Check downloaded CNPG chart
-ls -la ./documentdb-chart/charts/
-# Should show: cloudnative-pg-0.26.0.tgz
-
-# Inspect CNPG chart contents
-helm show chart ./documentdb-chart/charts/cloudnative-pg-0.26.0.tgz
-```
-
-**CNPG Upgrade Validation Process:**
-```bash
-# Step 1: Validate CNPG CRDs before upgrade
-kubectl get crd clusters.postgresql.cnpg.io -o jsonpath='{.spec.versions[*].name}'
-
-# Step 2: Check existing CNPG cluster health
-kubectl get clusters.postgresql.cnpg.io -A -o wide
-
-# Step 3: Verify CNPG controller status
-kubectl get deployment cnpg-controller-manager -n cnpg-system
-
-# Step 4: Validate CNPG webhooks
-kubectl get validatingwebhookconfiguration cnpg-validating-webhook-configuration
-kubectl get mutatingwebhookconfiguration cnpg-mutating-webhook-configuration
-
-# Step 5: Check CNPG operator logs for errors
-kubectl logs -n cnpg-system -l app.kubernetes.io/name=cloudnative-pg --tail=50
-```
-
-**Troubleshooting CNPG Dependency Issues:**
-```bash
-# If CNPG dependency update fails
-rm -rf ./documentdb-chart/charts/cloudnative-pg-*.tgz
-rm -f ./documentdb-chart/Chart.lock
-helm dependency update ./documentdb-chart
-
-# If CNPG version conflicts occur
-helm dependency build ./documentdb-chart --skip-refresh
-
-# Validate CNPG compatibility matrix
-kubectl get deployment cnpg-controller-manager -n cnpg-system -o jsonpath='{.spec.template.spec.containers[0].image}'
-```
-
-#### D. CNPG Version Compatibility Validation
-
-**Automated Compatibility Check:**
-```bash
-#!/bin/bash
-# validate-cnpg-compatibility.sh
-
-CNPG_VERSION=$1
-DOCUMENTDB_VERSION=$(helm list -n documentdb-system -o json | jq -r '.[] | select(.name=="documentdb-operator") | .app_version')
-
-echo "=== CNPG-DocumentDB Compatibility Validation ==="
-echo "Validating CNPG $CNPG_VERSION compatibility with DocumentDB $DOCUMENTDB_VERSION"
-
-# Check if DocumentDB operator is installed
-if [ -z "$DOCUMENTDB_VERSION" ]; then
-    echo "❌ DocumentDB operator not found. Install DocumentDB operator first."
-    exit 1
-fi
-
-# Check CRD compatibility
-echo "Checking CRD versions..."
-CNPG_CRD_VERSIONS=$(kubectl get crd clusters.postgresql.cnpg.io -o jsonpath='{.spec.versions[*].name}' 2>/dev/null || echo "")
-if [ -z "$CNPG_CRD_VERSIONS" ]; then
-    echo "❌ CNPG CRDs not found"
-    exit 1
-fi
-echo "Available CNPG CRD versions: $CNPG_CRD_VERSIONS"
-
-# Validate API version compatibility matrix
-case $CNPG_VERSION in
-    "0.24."*)
-        if [[ $DOCUMENTDB_VERSION == "1.2."* ]]; then
-            echo "✅ Compatible: DocumentDB $DOCUMENTDB_VERSION + CNPG $CNPG_VERSION"
-        else
-            echo "❌ Incompatible: DocumentDB $DOCUMENTDB_VERSION requires CNPG 0.24.x"
-            exit 1
-        fi
-        ;;
-    "0.26."*)
-        if [[ $DOCUMENTDB_VERSION == "1.3."* ]]; then
-            echo "✅ Compatible: DocumentDB $DOCUMENTDB_VERSION + CNPG $CNPG_VERSION"
-        else
-            echo "❌ Incompatible: DocumentDB $DOCUMENTDB_VERSION not compatible with CNPG 0.26.x"
-            exit 1
-        fi
-        ;;
-    "0.28."*)
-        if [[ $DOCUMENTDB_VERSION == "1.4."* ]]; then
-            echo "✅ Compatible: DocumentDB $DOCUMENTDB_VERSION + CNPG $CNPG_VERSION"
-        else
-            echo "❌ Incompatible: DocumentDB $DOCUMENTDB_VERSION not compatible with CNPG 0.28.x"
-            exit 1
-        fi
-        ;;
-    *)
-        echo "❌ Unknown CNPG version $CNPG_VERSION - check compatibility matrix"
-        exit 1
-        ;;
-esac
-
-# Verify CNPG controller health
-echo "Checking CNPG controller health..."
-kubectl get deployment cnpg-controller-manager -n cnpg-system -o wide
-if [ $? -ne 0 ]; then
-    echo "❌ CNPG controller not healthy"
-    exit 1
-fi
-
-# Check existing CNPG clusters
-echo "Checking existing CNPG clusters..."
-kubectl get clusters.postgresql.cnpg.io -A -o wide
-
-echo "=== Compatibility validation complete ==="
-```
-
-#### E. Integrated DocumentDB + CNPG Upgrade Process
-
-When upgrading the DocumentDB operator, CNPG is automatically upgraded as part of the same Helm operation. This ensures version compatibility and reduces operational complexity.
-
-**Complete Upgrade Flow:**
-```bash
-# Step 1: Pre-upgrade validation
-./validate-cnpg-compatibility.sh $(helm show chart ./documentdb-chart/charts/cloudnative-pg-*.tgz | grep "^version:" | cut -d' ' -f2)
-
-# Step 2: Update Helm dependencies (includes CNPG chart)
-helm dependency update ./documentdb-chart
-
-# Step 3: Perform integrated upgrade (DocumentDB + CNPG)
-helm upgrade documentdb-operator ./documentdb-chart \
-  --namespace documentdb-system \
-  --wait \
-  --timeout 900s \
-  --atomic
-
-# Step 4: Verify both operators are healthy
-kubectl get deployment documentdb-operator -n documentdb-system
-kubectl get deployment cnpg-controller-manager -n cnpg-system
-
-# Step 5: Validate DocumentDB clusters are still functional
-kubectl get documentdb -A -o wide
-kubectl get clusters.postgresql.cnpg.io -A -o wide
-```
-
-**Upgrade Sequence (Automatic):**
-1. **CNPG CRDs**: Updated first to support new API versions
-2. **CNPG Controller**: Upgraded to new version with backward compatibility
-3. **DocumentDB CRDs**: Updated with any schema changes
-4. **DocumentDB Controller**: Upgraded to work with new CNPG version
-5. **Webhooks**: Updated to maintain admission control functionality
-
-**Post-Upgrade Validation:**
-```bash
-# Verify version alignment
-DOCUMENTDB_VERSION=$(kubectl get deployment documentdb-operator -n documentdb-system -o jsonpath='{.spec.template.spec.containers[0].image}')
-CNPG_VERSION=$(kubectl get deployment cnpg-controller-manager -n cnpg-system -o jsonpath='{.spec.template.spec.containers[0].image}')
-
-echo "DocumentDB Version: $DOCUMENTDB_VERSION"
-echo "CNPG Version: $CNPG_VERSION"
-
-# Test DocumentDB functionality
-kubectl get documentdb -A -o wide
-mongosh "mongodb://username:password@my-documentdb-service:27017/test" --eval "db.test.findOne()"
-```
-
-### 6. Sidecar Injector Upgrade Strategy
-
-The DocumentDB Sidecar Injector is a **stateless** webhook that automatically injects the DocumentDB Gateway container into CNPG PostgreSQL pods. It runs as a CNPG plugin and focuses purely on injection logic and lifecycle management.
-
-#### A. Sidecar Injector Architecture
-
-**Component Overview:**
-- **Injector Service**: CNPG plugin service running on port 9090
-- **Deployment**: Single replica deployment in `cnpg-system` namespace  
-- **TLS Certificates**: Mutual TLS between injector and CNPG operator
-- **Injection Logic**: Code that determines when and how to inject gateway containers
-- **Lifecycle Management**: Handles container lifecycle events and coordination
-
-**Key Dependencies:**
-```yaml
-# From values.yaml - Sidecar Injector Image Only
-image:
-  sidecarinjector:
-    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-sidecar-injector
-    tag: "001"  # Sidecar injector version
-```
-
-**Note**: Gateway image configuration is handled separately in Section 3 (Gateway Upgrade Strategy).
-
-#### B. Upgrade Scenarios
-
-##### Sidecar Injector Code Update
-**Trigger**: New injection logic, bug fixes, webhook configuration changes, or TLS handling improvements
-**Impact**: Affects new pod creation immediately; existing pods require manual recreation to benefit from new injector logic
-**Risk**: Medium - Injection failures affect new PostgreSQL pods; pod recreation uses CNPG rolling restarts (no service disruption with multiple replicas)
-
-**Common Update Types:**
-- Injection logic improvements
-- Webhook security enhancements  
-- TLS certificate management updates
-- CNPG plugin API compatibility updates
-- Lifecycle management refinements
-
-**Important**: Since the sidecar injector only affects **new pod creation**, existing pods will continue running with the old injection configuration until they are recreated. For critical injector updates (security fixes, compatibility updates), you must recreate existing pods to apply the new injection logic.
-
-#### C. Upgrade Strategy
-
-**Rolling Update (Recommended)**
-
-Since the sidecar injector is a **stateless** component, rolling updates provide the optimal balance of safety and simplicity:
-
-```bash
-# Step 1: Update sidecar injector image in values.yaml
-cat <<EOF > values-update.yaml
-image:
-  sidecarinjector:
-    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-sidecar-injector
-    tag: "002"  # New injector version
-EOF
-
-# Step 2: Upgrade via Helm (Rolling Update)
-helm upgrade documentdb-operator ./documentdb-chart \
-  --namespace documentdb-system \
-  --values values-update.yaml \
-  --wait \
-  --timeout 300s
-
-# Step 3: Verify injector deployment rollout
-kubectl rollout status deployment/sidecar-injector -n cnpg-system
-
-# Step 4: Verify injector webhook is active
-kubectl get mutatingwebhookconfiguration documentdb-sidecar-injector
-
-# Step 5: Test injection on new pods (verify new injector logic works)
-kubectl apply -f - <<EOF
-apiVersion: postgresql.cnpg.io/v1
-kind: Cluster
-metadata:
-  name: test-new-injection
-spec:
-  instances: 1
-  postgresql:
-    parameters:
-      shared_preload_libraries: "documentdb"
-EOF
-
-# Wait for pod creation and verify new injection logic
-kubectl wait --for=condition=Ready pod -l cnpg.io/cluster=test-new-injection --timeout=300s
-kubectl describe pod -l cnpg.io/cluster=test-new-injection | grep -A5 "gateway"
-
-# Step 6: Recreate existing pods to apply new injector logic
-# This step is REQUIRED for existing pods to benefit from the new injector
-echo "Recreating existing DocumentDB pods to apply new injector logic..."
-
-# Option A: Rolling restart of existing CNPG clusters (Recommended)
-for cluster in $(kubectl get clusters.postgresql.cnpg.io -A -o jsonpath='{.items[*].metadata.name}'); do
-  namespace=$(kubectl get clusters.postgresql.cnpg.io $cluster -A -o jsonpath='{.items[0].metadata.namespace}')
-  echo "Restarting cluster: $cluster in namespace: $namespace"
-  
-  # Trigger rolling restart via CNPG
-  kubectl annotate clusters.postgresql.cnpg.io $cluster -n $namespace \
-    cnpg.io/reloadedAt="$(date -Iseconds)"
-  
-  # Wait for restart to complete
-  kubectl wait --for=condition=Ready clusters.postgresql.cnpg.io/$cluster -n $namespace --timeout=600s
-done
-
-# Option B: Manual pod deletion (Alternative approach)
-# kubectl delete pods -l cnpg.io/cluster --all-namespaces --wait=false
-# kubectl wait --for=condition=Ready pod -l cnpg.io/cluster --all-namespaces --timeout=600s
-
-# Step 7: Verify all pods now have the new injection configuration
-kubectl get pods -l cnpg.io/cluster --all-namespaces -o custom-columns=\
-"NAMESPACE:.metadata.namespace,NAME:.metadata.name,CONTAINERS:.spec.containers[*].name"
-
-# Clean up test cluster
-kubectl delete cluster test-new-injection
-```
-
-**Important Considerations for Pod Recreation:**
-- **Service Continuity**: CNPG performs rolling restarts to maintain service availability (no downtime with multiple replicas)
-- **Data Persistence**: Pod recreation does not affect PostgreSQL data (stored in PVCs)
-- **Connection Handling**: With multiple replicas, client connections can be handled by remaining pods during rolling restart
-- **Single Replica Clusters**: Brief connection interruption possible during pod restart (consider scaling up temporarily)
-- **Monitoring**: Monitor application health during pod recreation process
-
-#### D. Validation and Troubleshooting
-
-**Post-Upgrade Validation:**
-```bash
-# Check injector pod logs for errors
-kubectl logs -l app=sidecar-injector -n cnpg-system --tail=50
-
-# Verify webhook configuration is updated
-kubectl get mutatingwebhookconfiguration documentdb-sidecar-injector -o yaml
-
-# Validate injection logic on newly created pods
-kubectl apply -f - <<EOF
-apiVersion: postgresql.cnpg.io/v1
-kind: Cluster
-metadata:
-  name: validate-injection
-spec:
-  instances: 1
-  postgresql:
-    parameters:
-      shared_preload_libraries: "documentdb"
-EOF
-
-# Wait for pod creation and verify new injection worked
-kubectl wait --for=condition=Ready pod -l cnpg.io/cluster=validate-injection --timeout=300s
-kubectl get pod -l cnpg.io/cluster=validate-injection -o jsonpath='{.items[0].spec.containers[*].name}'
-
-# Verify recreated existing pods have new injection configuration
-kubectl get pods -l cnpg.io/cluster --all-namespaces -o custom-columns=\
-"NAMESPACE:.metadata.namespace,NAME:.metadata.name,CREATED:.metadata.creationTimestamp"
-
-# Check that recreated pods have expected container configuration
-for pod in $(kubectl get pods -l cnpg.io/cluster --all-namespaces -o jsonpath='{.items[*].metadata.name}'); do
-  echo "Pod: $pod"
-  kubectl get pod $pod -o jsonpath='{.spec.containers[*].name}' && echo
-done
-
-# Clean up validation resources
-kubectl delete cluster validate-injection
-```
-
-**Troubleshooting Common Issues:**
-
-1. **Injector webhook not responding:**
-```bash
-# Check injector pod status
-kubectl get pods -l app=sidecar-injector -n cnpg-system
-
-# Check webhook configuration
-kubectl describe mutatingwebhookconfiguration documentdb-sidecar-injector
-
-# Verify TLS certificates
-kubectl get secret sidecar-injector-certs -n cnpg-system -o yaml
-```
-
-2. **Pod recreation failed:**
-```bash
-# Check CNPG cluster status
-kubectl get clusters.postgresql.cnpg.io -A -o wide
-
-# Check pod events for recreation issues
-kubectl describe pods -l cnpg.io/cluster
-
-# Manual pod deletion if annotation-based restart failed
-kubectl delete pods -l cnpg.io/cluster=<cluster-name> -n <namespace>
-```
-
-3. **Injection not applied to recreated pods:**
-```bash
-# Verify injector is targeting correct pods
-kubectl get mutatingwebhookconfiguration documentdb-sidecar-injector -o jsonpath='{.webhooks[0].namespaceSelector}'
-
-# Check if pods have required labels/annotations for injection
-kubectl describe pods -l cnpg.io/cluster | grep -E "(Labels|Annotations)"
-```
-
-**Rollback Strategy:**
-```bash
-# Helm rollback to previous injector version
-helm rollback documentdb-operator --namespace documentdb-system
-
-# Or manual image rollback
-kubectl patch deployment sidecar-injector -n cnpg-system -p \
-  '{"spec":{"template":{"spec":{"containers":[{"name":"sidecar-injector","image":"ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-sidecar-injector:001"}]}}}}'
-```
-
 
 ## Upgrade Orchestration
 

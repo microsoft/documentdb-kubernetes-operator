@@ -32,130 +32,710 @@ This foundational knowledge ensures that operators implementing these upgrade st
 
 ## Architecture Components
 
-### 1. DocumentDB Operator
+**Important**: DocumentDB uses a **unified versioning strategy** where all components are versioned together for simplicity and compatibility assurance.
+
+### Unified Versioning Strategy
+
+**Single Version for All Components:**
+- **DocumentDB Operator Version**: `v1.2.3` controls all component versions
+- **Gateway Image**: Automatically aligned (e.g., `ghcr.io/microsoft/documentdb/gateway:v1.2.3`)
+- **PostgreSQL + Extension**: Automatically aligned (e.g., `mcr.microsoft.com/documentdb/documentdb:16.2-v1.2.3`)
+- **Sidecar Injector**: Automatically aligned (e.g., `ghcr.io/microsoft/documentdb/sidecar-injector:v1.2.3`)
+- **CNPG Operator**: Locked to DocumentDB version (e.g., DocumentDB v1.2.3 → CNPG v0.24.0)
+
+**Benefits of Unified Versioning:**
+- **Simplified Operations**: One version to track instead of managing multiple component versions
+- **Guaranteed Compatibility**: All components tested together as a cohesive unit
+- **Reduced Complexity**: Eliminates version matrix compatibility issues
+- **Easier Rollbacks**: Single version rollback affects all components consistently
+- **Clear Release Management**: Single release pipeline for all components
+
+### Component Details
+
+### 1. DocumentDB Operator (Master Version)
 - **Component**: Custom Kubernetes operator (Go-based)
 - **Distribution**: Helm chart
 - **Function**: Manages DocumentDB custom resources and orchestrates CNPG clusters
-- **Versioning**: Semantic versioning (e.g., v1.2.3)
+- **Versioning**: **Master version** (e.g., v1.2.3) - drives all other component versions
 
-### 2. Gateway Container
+### 2. Gateway Container (Aligned)
 - **Component**: DocumentDB Gateway (MongoDB protocol translator)
 - **Distribution**: Docker image
 - **Function**: Translates MongoDB protocol to PostgreSQL queries
-- **Versioning**: Semantic versioning aligned with operator
+- **Versioning**: **Automatically aligned** with operator version (e.g., gateway:v1.2.3)
 
-### 3. PostgreSQL with DocumentDB Extension
+### 3. PostgreSQL with DocumentDB Extension (Aligned)
 - **Component**: PostgreSQL server with DocumentDB extensions
 - **Distribution**: Docker image
 - **Function**: Data storage and processing layer
-- **Versioning**: PostgreSQL version + DocumentDB extension version
+- **Versioning**: **Automatically aligned** with operator version (e.g., postgres:16.2-v1.2.3)
 
-### 4. CNPG Sidecar Injector
+### 4. CNPG Sidecar Injector (Aligned)
 - **Component**: Sidecar injection webhook
 - **Distribution**: Docker image
 - **Function**: Injects Gateway sidecar into CNPG pods
-- **Versioning**: Semantic versioning aligned with operator
+- **Versioning**: **Automatically aligned** with operator version (e.g., sidecar-injector:v1.2.3)
 
-### 5. CNPG Operator (Dependency)
+### 5. CNPG Operator (Locked Dependency)
 - **Component**: CloudNative-PG operator
 - **Distribution**: Helm chart (as dependency)
 - **Function**: PostgreSQL cluster management
-- **Versioning**: Independent upstream versioning
+- **Versioning**: **Locked to DocumentDB operator version** (e.g., DocumentDB v1.2.3 → CNPG v0.24.0)
 
 ## Upgrade Scenarios
 
-### 1. DocumentDB Operator Upgrade (Helm Chart)
-- **Trigger**: New operator version release
-- **Scope**: Control plane components
-- **Impact**: Low (no data plane disruption)
+**With Unified Versioning**: All component upgrades are triggered by a single DocumentDB operator version upgrade. Individual component upgrades are not available to customers.
 
-### 2. Sidecar Injector Upgrade
-- **Trigger**: Updates to injection logic
-- **Scope**: Control plane webhook
-- **Impact**: Medium (affects new pod creation)
+### 1. DocumentDB Operator Upgrade (Unified Release)
+- **Trigger**: New DocumentDB operator version release (e.g., v1.2.3 → v1.3.0)
+- **Scope**: **All components** upgraded atomically
+- **Impact**: All components (operator, gateway, postgres, sidecar injector) upgraded together
+- **Components Included**:
+  - DocumentDB Operator: v1.2.3 → v1.3.0
+  - Gateway Image: v1.2.3 → v1.3.0
+  - PostgreSQL + Extension: 16.2-v1.2.3 → 16.3-v1.3.0 (or 17.1-v1.3.0 for major PG upgrades)
+  - Sidecar Injector: v1.2.3 → v1.3.0
+  - CNPG Operator: v0.24.0 → v0.26.0 (if required)
 
-### 3. Gateway Image Upgrade
-- **Trigger**: New gateway version with features/fixes
-- **Scope**: Data plane (requires pod restart)
-- **Impact**: Medium (rolling restart of pods)
+### 2. Component-Specific Upgrade Considerations
+
+While all components upgrade together, each has specific characteristics:
+
+#### Gateway Image Upgrade (Part of Unified Release)
 - **State**: **Stateless** - Gateway containers have no persistent state
+- **Impact**: Medium (rolling restart of pods)
 - **Risk**: Low - No data loss risk, only temporary connection disruption
 
-### 4. CNPG Operator Upgrade
-- **Trigger**: Upstream CNPG operator updates
-- **Scope**: Control plane and data plane
-- **Impact**: Variable (depends on CNPG upgrade requirements)
-
-### 5. PostgreSQL Database Upgrade
-- **Trigger**: PostgreSQL version bump (e.g., 14.x → 15.x or 14.2 → 14.3)
-- **Scope**: Data plane (requires careful database migration)
-- **Impact**: High (potential data migration and downtime required)
+#### PostgreSQL Database Upgrade (Part of Unified Release)  
 - **State**: **Stateful** - PostgreSQL contains persistent application data
+- **Impact**: High (potential data migration and downtime required)
 - **Risk**: High - Data migration required, potential for data corruption or loss
 - **Categories**:
-  - **Minor Version**: 14.2 → 14.3 (in-place upgrade, low risk)
-  - **Major Version**: 14.x → 15.x (migration required, high risk)
+  - **Minor Version**: 14.2-v1.2.3 → 14.3-v1.3.0 (in-place upgrade, low risk)
+  - **Major Version**: 14.2-v1.2.3 → 15.1-v1.3.0 (migration required, high risk)
 
-### 6. DocumentDB Postgres Extension Upgrade
-- **Trigger**: DocumentDB extension updates (new features, bug fixes, compatibility)
-- **Scope**: Data plane (requires extension update within PostgreSQL)
+#### DocumentDB Postgres Extension Upgrade (Part of Unified Release)
+- **State**: **Stateful** - Extension may modify schema or data structures  
 - **Impact**: Medium to High (depends on extension changes)
-- **State**: **Stateful** - Extension may modify schema or data structures
 - **Risk**: Medium to High - Extension schema changes may affect data
 - **Categories**:
   - **Patch Updates**: Bug fixes, minor improvements (medium risk)
   - **Feature Updates**: New DocumentDB features, API changes (high risk)
   - **Breaking Changes**: Schema modifications, compatibility breaks (very high risk)
 
+#### Sidecar Injector Upgrade (Part of Unified Release)
+- **State**: **Stateless** - Injection webhook has no persistent state
+- **Impact**: Medium (affects new pod creation)
+- **Risk**: Medium - Injection failures affect new PostgreSQL pods
+
+#### CNPG Operator Upgrade (Part of Unified Release)
+- **Trigger**: Upgrade bundled with DocumentDB operator when CNPG version needs updating
+- **Scope**: Control plane and data plane
+- **Impact**: Variable (depends on CNPG upgrade requirements)
+
 ## Upgrade Strategies
 
-### 1. DocumentDB Operator Upgrade Strategy
+**With Unified Versioning**: There is only **one primary upgrade strategy** - upgrading the DocumentDB operator version, which automatically upgrades all components.
 
-The DocumentDB operator upgrade focuses on the core operator deployment and Custom Resource Definitions (CRDs). This involves upgrading the operator's control plane components and handling CRD version migrations while maintaining backward compatibility.
+### 1. Unified DocumentDB Upgrade Strategy
 
-#### A. Operator Components
+The DocumentDB upgrade process involves upgrading all components together through a single DocumentDB operator version upgrade. This ensures consistency, compatibility, and simplified operations.
 
-**Core Operator Deployment:**
-- **Controller Manager**: Main operator logic and reconciliation loops
-- **Webhook Server**: Admission controllers and CRD conversion webhooks  
-- **RBAC Resources**: Service accounts, roles, and bindings
-- **Custom Resource Definitions**: DocumentDB CRDs with version support
+#### A. Unified Components Upgrade
 
-**Note**: CNPG operator dependency management is handled separately. See [Section 4: CNPG Operator Upgrade Strategy](#4-cnpg-operator-upgrade-strategy) for details on CNPG version coupling and upgrade procedures.
+**All Components Upgraded Together:**
+- **DocumentDB Operator**: Controller, webhooks, CRDs, RBAC
+- **Gateway Image**: MongoDB protocol translator containers
+- **PostgreSQL + Extension**: Database with DocumentDB extension
+- **Sidecar Injector**: Container injection webhook
+- **CNPG Operator**: PostgreSQL cluster management (when version updates required)
 
-#### B. Upgrade Strategy
+**Version Alignment Example:**
+```yaml
+# DocumentDB v1.3.0 Release Bundle
+documentdb-operator: v1.3.0
+gateway: v1.3.0  
+postgres: 16.3-v1.3.0  # PostgreSQL 16.3 + DocumentDB extension v1.3.0
+sidecar-injector: v1.3.0
+cnpg-operator: v0.26.0  # Updated if required for this release
+```
 
-**Rolling Upgrade (Recommended for all DocumentDB operator versions)**
+#### B. Unified Upgrade Strategy
 
-Since the DocumentDB operator manages control plane components (CRDs, controllers, webhooks, RBAC) and does not directly handle stateful data, rolling upgrades are the appropriate strategy for all operator versions.
+**Single Helm Upgrade Command (All Components):**
 
 ```bash
 # Step 1: Pre-upgrade validation
 helm upgrade documentdb-operator ./documentdb-chart \
   --namespace documentdb-system \
+  --version v1.3.0 \
   --dry-run \
   --debug
 
-# Step 2: Perform rolling upgrade
+# Step 2: Perform unified upgrade (all components)
 helm upgrade documentdb-operator ./documentdb-chart \
   --namespace documentdb-system \
+  --version v1.3.0 \
   --wait \
-  --timeout 600s \
+  --timeout 900s \
   --atomic
 
-# Step 3: Verify operator health
+# Step 3: Verify all components health
 kubectl rollout status deployment/documentdb-operator -n documentdb-system
+kubectl rollout status deployment/sidecar-injector -n cnpg-system
+kubectl get clusters.postgresql.cnpg.io -A -o wide
 ```
 
-**Why Rolling Upgrade is Sufficient:**
-- **Stateless Control Plane**: Operator controllers, webhooks, and RBAC are stateless
-- **CRD Compatibility**: CRD versioning and conversion webhooks handle schema evolution
-- **Zero Data Impact**: Operator upgrades don't affect PostgreSQL data or running clusters
-- **Fast Rollback**: Helm rollback is simple for control plane components
+**Upgrade Process Flow:**
+1. **CNPG Operator** (if version update required)
+2. **DocumentDB Operator** (CRDs, controller, webhooks, RBAC)
+3. **Sidecar Injector** (webhook for container injection)
+4. **New pods created** with updated Gateway and PostgreSQL images
+5. **Rolling restart** of existing CNPG clusters to get new images
 
-**Note**: For stateful components (PostgreSQL data migration), see [Section 5: PostgreSQL Database Upgrade Strategy](#5-postgresql-database-upgrade-strategy) which covers blue-green deployments for database upgrades.
+#### C. Component-Specific Handling Within Unified Upgrade
 
-#### C. CRD Upgrade Handling
+While all components upgrade together, each requires specific handling:
+
+##### PostgreSQL Upgrade Handling
+**For Minor PostgreSQL Versions** (e.g., 16.2-v1.2.3 → 16.3-v1.3.0):
+```yaml
+# CNPG handles minor PostgreSQL upgrades automatically  
+spec:
+  imageName: "mcr.microsoft.com/documentdb/documentdb:16.3-v1.3.0"
+```
+
+**For Major PostgreSQL Versions** (e.g., 16.2-v1.2.3 → 17.1-v1.3.0):
+- Blue-green deployment recommended for major PostgreSQL upgrades
+- Data migration required
+- Extended maintenance window needed
+
+##### Gateway Image Handling
+- **Stateless**: No data migration required
+- **Rolling restart**: CNPG automatically restarts pods with new gateway image
+- **Zero data loss**: Only temporary connection interruption
+
+##### Extension Upgrade Handling
+- **In-place**: For compatible extension updates
+- **Migration**: For breaking extension changes (may require blue-green)
+
+#### D. Unified Upgrade Examples
+
+**Example 1: Patch Release (Low Risk)**
+```bash
+# v1.2.3 → v1.2.4 (bug fixes, security patches)
+helm upgrade documentdb-operator ./documentdb-chart --version v1.2.4
+
+# Components updated:
+# - operator: v1.2.3 → v1.2.4
+# - gateway: v1.2.3 → v1.2.4  
+# - postgres: 16.2-v1.2.3 → 16.2-v1.2.4
+# - sidecar-injector: v1.2.3 → v1.2.4
+# - cnpg: no change (still v0.24.0)
+```
+
+**Example 2: Minor Release (Medium Risk)**  
+```bash
+# v1.2.4 → v1.3.0 (new features, minor PostgreSQL bump)
+helm upgrade documentdb-operator ./documentdb-chart --version v1.3.0
+
+# Components updated:
+# - operator: v1.2.4 → v1.3.0
+# - gateway: v1.2.4 → v1.3.0
+# - postgres: 16.2-v1.2.4 → 16.3-v1.3.0 (minor PG upgrade)
+# - sidecar-injector: v1.2.4 → v1.3.0
+# - cnpg: v0.24.0 → v0.26.0 (updated for new features)
+```
+
+**Example 3: Major Release (High Risk)**
+```bash
+# v1.3.0 → v2.0.0 (major PostgreSQL upgrade, breaking changes)
+# Requires blue-green deployment for PostgreSQL migration
+
+# Step 1: Deploy green cluster with v2.0.0
+kubectl apply -f documentdb-v2-green-cluster.yaml
+
+# Step 2: Data migration (PostgreSQL 16.x → 17.x)
+# Step 3: Switch traffic after validation
+# Step 4: Monitor and cleanup blue cluster
+
+# Components updated:
+# - operator: v1.3.0 → v2.0.0
+# - gateway: v1.3.0 → v2.0.0
+# - postgres: 16.3-v1.3.0 → 17.1-v2.0.0 (major PG upgrade)
+# - sidecar-injector: v1.3.0 → v2.0.0
+# - cnpg: v0.26.0 → v0.28.0
+```
+
+#### E. Unified Versioning Benefits and Rationale
+
+**Why Unified Versioning?**
+
+1. **Operational Simplicity**
+   - Single version to track across all environments
+   - No need to manage complex component version matrices
+   - Simplified documentation and support
+
+2. **Guaranteed Compatibility**  
+   - All components tested together as a complete system
+   - Eliminates integration issues between component versions
+   - Reduces testing matrix complexity
+
+3. **Atomic Operations**
+   - All components upgrade together or not at all
+   - Consistent state across all environments
+   - Simplified rollback procedures
+
+4. **Clear Release Management**
+   - Single release pipeline for all components
+   - Clear release notes covering all component changes
+   - Unified changelog and documentation
+
+**Version Tagging Strategy:**
+```bash
+# All component images tagged with same DocumentDB version
+ghcr.io/microsoft/documentdb-operator:v1.3.0
+ghcr.io/microsoft/documentdb-gateway:v1.3.0  
+ghcr.io/microsoft/documentdb-sidecar-injector:v1.3.0
+mcr.microsoft.com/documentdb/documentdb:16.3-v1.3.0
+```
+
+**Helm Chart Version Alignment:**
+```yaml
+# Chart.yaml
+version: v1.3.0  # Helm chart version matches DocumentDB version
+dependencies:
+  - name: cloudnative-pg
+    version: "0.26.0"  # CNPG version locked to DocumentDB v1.3.0
+```
+
+#### F. Unified Rollback Strategy
+
+**With unified versioning, rollback must happen in the reverse order of the upgrade sequence to maintain system stability.**
+
+##### Rollback Order (Reverse of Upgrade Sequence)
+
+1. **CNPG Clusters** - Restart pods to get previous images
+2. **Sidecar Injector** - Rollback injection webhook 
+3. **DocumentDB Operator** - Rollback CRDs, controller, webhooks, RBAC
+4. **CNPG Operator** - Rollback to previous version (if it was upgraded)
+
+##### Hash-Based Change Detection
+
+**Avoid Unnecessary Rollbacks/Updates with Component SHA Matching:**
+
+Each component tracks its current configuration hash to determine if rollback/update is needed:
+
+```bash
+#!/bin/bash
+# component-hash-tracker.sh
+
+# Generate component configuration hashes
+generate_component_hashes() {
+    local revision=$1
+    echo "=== Generating Component Hashes for Revision $revision ==="
+    
+    # Get Helm revision values
+    helm get values documentdb-operator -n documentdb-system --revision $revision -o json > /tmp/values-r${revision}.json
+    
+    # DocumentDB Operator hash (image + configuration)
+    OPERATOR_CONFIG=$(kubectl get deployment documentdb-operator -n documentdb-system -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "not-found")
+    OPERATOR_HASH=$(echo -n "$OPERATOR_CONFIG" | sha256sum | cut -d' ' -f1)
+    
+    # Gateway Image hash (from values or deployment annotation)
+    GATEWAY_CONFIG=$(jq -r '.image.gateway.repository + ":" + .image.gateway.tag' /tmp/values-r${revision}.json 2>/dev/null || echo "not-found")
+    GATEWAY_HASH=$(echo -n "$GATEWAY_CONFIG" | sha256sum | cut -d' ' -f1)
+    
+    # PostgreSQL + Extension hash (from values)
+    POSTGRES_CONFIG=$(jq -r '.image.postgres.repository + ":" + .image.postgres.tag' /tmp/values-r${revision}.json 2>/dev/null || echo "not-found")
+    POSTGRES_HASH=$(echo -n "$POSTGRES_CONFIG" | sha256sum | cut -d' ' -f1)
+    
+    # Sidecar Injector hash
+    SIDECAR_CONFIG=$(kubectl get deployment sidecar-injector -n cnpg-system -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "not-found")
+    SIDECAR_HASH=$(echo -n "$SIDECAR_CONFIG" | sha256sum | cut -d' ' -f1)
+    
+    # CNPG Operator hash
+    CNPG_CONFIG=$(kubectl get deployment cnpg-controller-manager -n cnpg-system -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "not-found")
+    CNPG_HASH=$(echo -n "$CNPG_CONFIG" | sha256sum | cut -d' ' -f1)
+    
+    # Store hashes in ConfigMap for tracking
+    kubectl create configmap documentdb-component-hashes-r${revision} -n documentdb-system \
+        --from-literal=operator-hash=$OPERATOR_HASH \
+        --from-literal=operator-config="$OPERATOR_CONFIG" \
+        --from-literal=gateway-hash=$GATEWAY_HASH \
+        --from-literal=gateway-config="$GATEWAY_CONFIG" \
+        --from-literal=postgres-hash=$POSTGRES_HASH \
+        --from-literal=postgres-config="$POSTGRES_CONFIG" \
+        --from-literal=sidecar-hash=$SIDECAR_HASH \
+        --from-literal=sidecar-config="$SIDECAR_CONFIG" \
+        --from-literal=cnpg-hash=$CNPG_HASH \
+        --from-literal=cnpg-config="$CNPG_CONFIG" \
+        --dry-run=client -o yaml | kubectl apply -f -
+    
+    echo "Component hashes generated for revision $revision:"
+    echo "  Operator: $OPERATOR_HASH ($OPERATOR_CONFIG)"
+    echo "  Gateway: $GATEWAY_HASH ($GATEWAY_CONFIG)"
+    echo "  PostgreSQL: $POSTGRES_HASH ($POSTGRES_CONFIG)"
+    echo "  Sidecar: $SIDECAR_HASH ($SIDECAR_CONFIG)"
+    echo "  CNPG: $CNPG_HASH ($CNPG_CONFIG)"
+}
+
+# Compare component hashes between revisions
+compare_component_hashes() {
+    local current_revision=$1
+    local target_revision=$2
+    
+    echo "=== Comparing Component Hashes: R$current_revision → R$target_revision ==="
+    
+    # Get hash ConfigMaps
+    if ! kubectl get configmap documentdb-component-hashes-r${current_revision} -n documentdb-system >/dev/null 2>&1; then
+        echo "Generating missing hash data for current revision $current_revision..."
+        generate_component_hashes $current_revision
+    fi
+    
+    if ! kubectl get configmap documentdb-component-hashes-r${target_revision} -n documentdb-system >/dev/null 2>&1; then
+        echo "Generating missing hash data for target revision $target_revision..."
+        generate_component_hashes $target_revision
+    fi
+    
+    # Compare each component hash
+    declare -A CHANGED_COMPONENTS
+    declare -A UNCHANGED_COMPONENTS
+    
+    for component in operator gateway postgres sidecar cnpg; do
+        CURRENT_HASH=$(kubectl get configmap documentdb-component-hashes-r${current_revision} -n documentdb-system -o jsonpath="{.data.${component}-hash}" 2>/dev/null || echo "unknown")
+        TARGET_HASH=$(kubectl get configmap documentdb-component-hashes-r${target_revision} -n documentdb-system -o jsonpath="{.data.${component}-hash}" 2>/dev/null || echo "unknown")
+        CURRENT_CONFIG=$(kubectl get configmap documentdb-component-hashes-r${current_revision} -n documentdb-system -o jsonpath="{.data.${component}-config}" 2>/dev/null || echo "unknown")
+        TARGET_CONFIG=$(kubectl get configmap documentdb-component-hashes-r${target_revision} -n documentdb-system -o jsonpath="{.data.${component}-config}" 2>/dev/null || echo "unknown")
+        
+        if [ "$CURRENT_HASH" != "$TARGET_HASH" ]; then
+            CHANGED_COMPONENTS[$component]="$TARGET_CONFIG"
+            echo "🔄 $component: CHANGED ($CURRENT_CONFIG → $TARGET_CONFIG)"
+        else
+            UNCHANGED_COMPONENTS[$component]="$CURRENT_CONFIG"
+            echo "✅ $component: UNCHANGED ($CURRENT_CONFIG)"
+        fi
+    done
+    
+    # Export arrays for use in rollback script
+    export CHANGED_COMPONENTS
+    export UNCHANGED_COMPONENTS
+    
+    # Return change status
+    if [ ${#CHANGED_COMPONENTS[@]} -eq 0 ]; then
+        echo "ℹ️  No component changes detected. Rollback not necessary."
+        return 1
+    else
+        echo "⚠️  ${#CHANGED_COMPONENTS[@]} component(s) changed. Selective rollback required."
+        return 0
+    fi
+}
+```
+
+##### Automated Unified Rollback with Change Detection
+
+**Selective Component Rollback (Only Changed Components):**
+
+```bash
+#!/bin/bash
+# unified-rollback.sh
+
+echo "=== Initiating Unified DocumentDB Rollback with Change Detection ==="
+
+# Step 1: Get current and previous Helm revision
+CURRENT_REVISION=$(helm history documentdb-operator -n documentdb-system --max 1 -o json | jq -r '.[0].revision')
+PREVIOUS_REVISION=$((CURRENT_REVISION - 1))
+
+echo "Rolling back from revision $CURRENT_REVISION to $PREVIOUS_REVISION"
+
+# Step 2: Load change detection functions
+source component-hash-tracker.sh
+
+# Step 3: Generate and compare component hashes
+if ! compare_component_hashes $CURRENT_REVISION $PREVIOUS_REVISION; then
+    echo "ℹ️  No changes detected between revisions. Skipping rollback."
+    exit 0
+fi
+
+# Step 4: Pre-rollback validation (only for changed components)
+echo "=== Pre-Rollback Validation ==="
+
+# Check current component versions before rollback
+echo "Current component versions (will check only changed components):"
+for component in "${!CHANGED_COMPONENTS[@]}"; do
+    case $component in
+        operator)
+            CURRENT_VALUE=$(kubectl get deployment documentdb-operator -n documentdb-system -o jsonpath='{.spec.template.spec.containers[0].image}')
+            echo "  DocumentDB Operator: $CURRENT_VALUE (WILL ROLLBACK)"
+            ;;
+        cnpg)
+            CURRENT_VALUE=$(kubectl get deployment cnpg-controller-manager -n cnpg-system -o jsonpath='{.spec.template.spec.containers[0].image}')
+            echo "  CNPG Operator: $CURRENT_VALUE (WILL ROLLBACK)"
+            ;;
+        gateway|postgres|sidecar)
+            echo "  $component: ${CHANGED_COMPONENTS[$component]} (WILL ROLLBACK via pod restart)"
+            ;;
+    esac
+done
+
+for component in "${!UNCHANGED_COMPONENTS[@]}"; do
+    echo "  $component: ${UNCHANGED_COMPONENTS[$component]} (SKIP - unchanged)"
+done
+
+# Check cluster health before rollback
+kubectl get clusters.postgresql.cnpg.io -A -o wide
+kubectl get documentdb -A -o wide
+
+# Step 5: Selective Component Rollback
+echo "=== Performing Selective Component Rollback ==="
+
+# Rollback operators only if they changed
+if [[ -v CHANGED_COMPONENTS[operator] ]] || [[ -v CHANGED_COMPONENTS[cnpg] ]]; then
+    echo "Rolling back operators (DocumentDB and/or CNPG)..."
+    helm rollback documentdb-operator $PREVIOUS_REVISION -n documentdb-system --wait --timeout=900s
+    
+    if [ $? -ne 0 ]; then
+        echo "❌ Helm rollback failed. Manual intervention required."
+        exit 1
+    fi
+    
+    # Verify operator rollback
+    echo "=== Verifying Operator Rollback ==="
+    if [[ -v CHANGED_COMPONENTS[operator] ]]; then
+        kubectl rollout status deployment/documentdb-operator -n documentdb-system --timeout=300s
+        NEW_OPERATOR=$(kubectl get deployment documentdb-operator -n documentdb-system -o jsonpath='{.spec.template.spec.containers[0].image}')
+        echo "DocumentDB Operator rolled back to: $NEW_OPERATOR"
+    fi
+    
+    if [[ -v CHANGED_COMPONENTS[cnpg] ]]; then
+        kubectl rollout status deployment/cnpg-controller-manager -n cnpg-system --timeout=300s
+        NEW_CNPG=$(kubectl get deployment cnpg-controller-manager -n cnpg-system -o jsonpath='{.spec.template.spec.containers[0].image}')
+        echo "CNPG Operator rolled back to: $NEW_CNPG"
+    fi
+else
+    echo "⏭️  Skipping operator rollback - no changes detected in operator or CNPG components"
+fi
+
+# Step 5: Selective rolling restart of CNPG clusters (only for changed components)
+echo "=== Rolling Back CNPG Clusters with Change Detection ==="
+
+# Only restart clusters if database-related components changed
+if [[ -v CHANGED_COMPONENTS[postgres] ]] || [[ -v CHANGED_COMPONENTS[gateway] ]] || [[ -v CHANGED_COMPONENTS[sidecar] ]]; then
+    echo "Database component changes detected - restarting CNPG clusters..."
+    
+    for cluster in $(kubectl get clusters.postgresql.cnpg.io -A -o jsonpath='{.items[*].metadata.name}'); do
+        namespace=$(kubectl get clusters.postgresql.cnpg.io $cluster -A -o jsonpath='{.items[0].metadata.namespace}')
+        
+        # Get current cluster image to compare with target
+        CURRENT_CLUSTER_IMAGE=$(kubectl get cluster $cluster -n $namespace -o jsonpath='{.spec.imageName}' 2>/dev/null || echo "not-found")
+        
+        echo "Rolling back cluster: $cluster in namespace: $namespace"
+        echo "  Current image: $CURRENT_CLUSTER_IMAGE"
+        echo "  Target PostgreSQL: ${CHANGED_COMPONENTS[postgres]:-unchanged}"
+        echo "  Target Gateway: ${CHANGED_COMPONENTS[gateway]:-unchanged}"
+        echo "  Target Sidecar: ${CHANGED_COMPONENTS[sidecar]:-unchanged}"
+        
+        # Trigger rolling restart to revert to previous images
+        kubectl annotate clusters.postgresql.cnpg.io $cluster -n $namespace \
+            cnpg.io/reloadedAt="$(date -Iseconds)" \
+            rollback.documentdb.microsoft.com/version="$PREVIOUS_REVISION" \
+            rollback.documentdb.microsoft.com/reason="component-change-detected" \
+            --overwrite
+        
+        # Wait for rollback to complete
+        kubectl wait --for=condition=Ready clusters.postgresql.cnpg.io/$cluster -n $namespace --timeout=600s
+        
+        if [ $? -eq 0 ]; then
+            NEW_CLUSTER_IMAGE=$(kubectl get cluster $cluster -n $namespace -o jsonpath='{.spec.imageName}')
+            echo "✅ Cluster $cluster successfully rolled back to: $NEW_CLUSTER_IMAGE"
+        else
+            echo "❌ Cluster $cluster rollback failed - manual intervention required"
+        fi
+    done
+else
+    echo "⏭️  Skipping CNPG cluster restart - no database component changes detected"
+    
+    # Show current cluster status
+    echo "Current cluster status (no changes):"
+    kubectl get clusters.postgresql.cnpg.io -A -o wide | head -10
+fi
+
+# Step 6: Post-rollback validation with change verification
+echo "=== Post-Rollback Validation ==="
+
+# Verify only changed components were actually rolled back
+echo "=== Change Detection Verification ==="
+generate_component_hashes $PREVIOUS_REVISION
+if compare_component_hashes $PREVIOUS_REVISION $PREVIOUS_REVISION; then
+    echo "⚠️  Warning: Hash comparison still shows changes after rollback"
+else
+    echo "✅ All component changes successfully reverted"
+fi
+
+# Verify cluster health
+echo "=== Cluster Health Check ==="
+kubectl get clusters.postgresql.cnpg.io -A -o wide
+kubectl get documentdb -A -o wide
+
+# Test MongoDB connectivity for changed clusters only
+echo "=== Connectivity Testing (Changed Components Only) ==="
+if [[ -v CHANGED_COMPONENTS[postgres] ]] || [[ -v CHANGED_COMPONENTS[gateway] ]] || [[ -v CHANGED_COMPONENTS[sidecar] ]]; then
+    echo "Testing MongoDB connectivity for clusters with component changes..."
+    for cluster in $(kubectl get clusters.postgresql.cnpg.io -A -o jsonpath='{.items[*].metadata.name}'); do
+        namespace=$(kubectl get clusters.postgresql.cnpg.io $cluster -A -o jsonpath='{.items[0].metadata.namespace}')
+        service_name="${cluster}-rw"
+        
+        # Test basic connectivity
+        kubectl run rollback-test-$cluster --rm -i --tty --timeout=30s --image=mongo:7 -- \
+            mongosh "mongodb://$service_name.$namespace.svc.cluster.local:27017/test" --eval "
+            db.rollback_test.insertOne({test: 'rollback_validation', timestamp: new Date()});
+            print('Rollback connectivity test passed for cluster: $cluster');
+            " 2>/dev/null || echo "❌ Connectivity test failed for cluster: $cluster"
+    done
+    
+    # Verify component versions match target hashes
+    echo "Verifying component version consistency..."
+    kubectl get pods -l cnpg.io/cluster --all-namespaces -o custom-columns=\
+    "NAMESPACE:.metadata.namespace,NAME:.metadata.name,GATEWAY:.spec.containers[?(@.name=='documentdb-gateway')].image,DOCUMENTDB:.spec.containers[?(@.name=='postgres')].image"
+else
+    echo "⏭️  Skipping connectivity tests - no database component changes detected"
+fi
+
+# Step 7: Rollback Summary and Cleanup
+echo "=== Rollback Summary ==="
+echo "Rollback completed: Revision $CURRENT_REVISION → $PREVIOUS_REVISION"
+echo "Components processed:"
+for component in "${!CHANGED_COMPONENTS[@]}"; do
+    echo "  ✅ $component: ${CHANGED_COMPONENTS[$component]} (ROLLED BACK)"
+done
+for component in "${!UNCHANGED_COMPONENTS[@]}"; do
+    echo "  ⏭️  $component: ${UNCHANGED_COMPONENTS[$component]} (SKIPPED - unchanged)"
+done
+
+# Store rollback record for future reference
+kubectl create configmap documentdb-rollback-r${CURRENT_REVISION}-to-r${PREVIOUS_REVISION} -n documentdb-system \
+    --from-literal=rollback-timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --from-literal=source-revision="$CURRENT_REVISION" \
+    --from-literal=target-revision="$PREVIOUS_REVISION" \
+    --from-literal=changed-components="$(IFS=,; echo "${!CHANGED_COMPONENTS[*]}")" \
+    --from-literal=unchanged-components="$(IFS=,; echo "${!UNCHANGED_COMPONENTS[*]}")" \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+echo "✅ Unified rollback with change detection completed successfully"
+```
+
+echo "=== Rollback Complete ==="
+echo "All components have been rolled back to revision $PREVIOUS_REVISION"
+```
+
+##### Manual Component Rollback (Emergency)
+
+**If automatic rollback fails, manual rollback in proper order:**
+
+```bash
+# Emergency Manual Rollback Procedure
+
+# Step 1: Manual Helm rollback
+helm rollback documentdb-operator $PREVIOUS_REVISION -n documentdb-system
+
+# Step 2: If Helm rollback fails, manual operator rollback
+kubectl patch deployment documentdb-operator -n documentdb-system -p \
+  '{"spec":{"template":{"spec":{"containers":[{"name":"documentdb-operator","image":"ghcr.io/microsoft/documentdb-operator:v1.2.3"}]}}}}'
+
+# Step 3: Manual CNPG operator rollback (if needed)
+kubectl patch deployment cnpg-controller-manager -n cnpg-system -p \
+  '{"spec":{"template":{"spec":{"containers":[{"name":"manager","image":"ghcr.io/cloudnative-pg/cloudnative-pg:1.24.0"}]}}}}'
+
+# Step 4: Manual sidecar injector rollback
+kubectl patch deployment sidecar-injector -n cnpg-system -p \
+  '{"spec":{"template":{"spec":{"containers":[{"name":"sidecar-injector","image":"ghcr.io/microsoft/documentdb-sidecar-injector:v1.2.3"}]}}}}'
+
+# Step 5: Force rolling restart of all CNPG clusters
+for cluster in $(kubectl get clusters.postgresql.cnpg.io -A -o jsonpath='{.items[*].metadata.name}'); do
+  namespace=$(kubectl get clusters.postgresql.cnpg.io $cluster -A -o jsonpath='{.items[0].metadata.namespace}')
+  kubectl delete pods -l cnpg.io/cluster=$cluster -n $namespace
+done
+```
+
+##### Change Detection Best Practices
+
+**Hash-Based Component Tracking:**
+
+1. **Automatic Hash Generation**: Component hashes are automatically generated during each Helm deployment and stored in ConfigMaps for tracking
+2. **Cross-Revision Comparison**: Before any rollback/upgrade, hashes are compared to identify which components actually changed
+3. **Selective Operations**: Only changed components undergo rollback/restart operations, reducing disruption and time
+4. **Change Tracking**: All rollback operations record which components changed and which were skipped for audit purposes
+
+**Benefits of Change Detection:**
+- **Reduced Downtime**: Skip unnecessary restarts for unchanged components
+- **Faster Rollbacks**: Only roll back components that actually changed
+- **Better Observability**: Clear visibility into what changed between versions
+- **Safer Operations**: Avoid touching stable, unchanged components
+
+**Change Detection Configuration:**
+
+```bash
+# Enable change detection by default in your rollback scripts
+export ENABLE_CHANGE_DETECTION=true
+
+# Force rollback of all components (bypass change detection)
+export FORCE_FULL_ROLLBACK=false
+
+# Retention policy for component hash ConfigMaps (keep last 10 revisions)
+export HASH_RETENTION_COUNT=10
+```
+
+**Hash Storage and Cleanup:**
+
+```bash
+# Cleanup old component hash ConfigMaps (run periodically)
+#!/bin/bash
+RETENTION_COUNT=${HASH_RETENTION_COUNT:-10}
+
+# Keep only the last N revisions of component hashes
+kubectl get configmap -n documentdb-system -o name | \
+  grep "documentdb-component-hashes-r" | \
+  sort -V | \
+  head -n -$RETENTION_COUNT | \
+  xargs -r kubectl delete -n documentdb-system
+```
+
+##### Rollback Validation Checklist
+
+**Post-Rollback Verification (with Change Detection):**
+- [ ] Change detection correctly identified modified components
+- [ ] Only changed components were rolled back (verify in rollback summary)
+- [ ] Unchanged components maintained their existing versions/state
+- [ ] All operator deployments are healthy and running target versions
+- [ ] CNPG clusters are in Ready state with target DocumentDB/Gateway images  
+- [ ] MongoDB connectivity is working across all clusters
+- [ ] No errors in operator or cluster logs
+- [ ] Component versions are consistent with target revision
+- [ ] Helm history shows successful rollback to target revision
+- [ ] Component hash ConfigMaps updated with rollback information
+
+**Rollback Recovery Time Objectives:**
+- **Operator Rollback**: 2-5 minutes (Helm rollback)
+- **Cluster Image Rollback**: 5-15 minutes (rolling restart of all clusters)
+- **Total Rollback Time**: 10-20 minutes (depending on cluster count)
+
+##### Rollback Prevention
+
+**Best Practices to Minimize Rollback Need:**
+1. **Staging Validation**: Always test unified upgrades in staging first
+2. **Progressive Rollout**: Upgrade non-production environments first
+3. **Backup Strategy**: Ensure recent backups before major upgrades
+4. **Monitoring**: Set up alerts for upgrade issues to enable quick rollback
+5. **Blue-Green**: Use blue-green deployments for high-risk upgrades
+
+## Legacy Component Upgrade Strategies (Deprecated)
+
+**Note**: The following individual component upgrade strategies are **deprecated** with the introduction of unified versioning. They are preserved for reference only.
+
+<details>
+<summary>Click to expand legacy individual component upgrade strategies</summary>
+
+### 2. Sidecar Injector Upgrade Strategy (DEPRECATED)
 
 **CRD Versioning Strategy:**
 ```yaml
@@ -493,7 +1073,7 @@ kubectl delete cluster test-new-injection
 - **Single Replica Clusters**: Brief connection interruption possible during pod restart (consider scaling up temporarily)
 - **Monitoring**: Monitor application health during pod recreation process
 
-#### D. Validation and Troubleshooting
+#### D. Validation
 
 **Post-Upgrade Validation:**
 ```bash
@@ -534,40 +1114,6 @@ done
 kubectl delete cluster validate-injection
 ```
 
-**Troubleshooting Common Issues:**
-
-1. **Injector webhook not responding:**
-```bash
-# Check injector pod status
-kubectl get pods -l app=sidecar-injector -n cnpg-system
-
-# Check webhook configuration
-kubectl describe mutatingwebhookconfiguration documentdb-sidecar-injector
-
-# Verify TLS certificates
-kubectl get secret sidecar-injector-certs -n cnpg-system -o yaml
-```
-
-2. **Pod recreation failed:**
-```bash
-# Check CNPG cluster status
-kubectl get clusters.postgresql.cnpg.io -A -o wide
-
-# Check pod events for recreation issues
-kubectl describe pods -l cnpg.io/cluster
-
-# Manual pod deletion if annotation-based restart failed
-kubectl delete pods -l cnpg.io/cluster=<cluster-name> -n <namespace>
-```
-
-3. **Injection not applied to recreated pods:**
-```bash
-# Verify injector is targeting correct pods
-kubectl get mutatingwebhookconfiguration documentdb-sidecar-injector -o jsonpath='{.webhooks[0].namespaceSelector}'
-
-# Check if pods have required labels/annotations for injection
-kubectl describe pods -l cnpg.io/cluster | grep -E "(Labels|Annotations)"
-```
 
 **Rollback Strategy:**
 ```bash
@@ -1088,7 +1634,7 @@ PostgreSQL is **stateful** and contains all persistent application data. This re
 
 #### B. PostgreSQL Upgrade Categories
 
-##### Minor Version Upgrades (e.g., 14.2 → 14.3)
+##### Minor Version Upgrades (e.g., 16.2 → 16.3)
 **Risk Level**: Low to Medium
 **Strategy**: In-place upgrade with rolling restart
 
@@ -1098,7 +1644,7 @@ spec:
   postgresql:
     parameters:
       shared_preload_libraries: "documentdb_extension"
-    image: "mcr.microsoft.com/documentdb/postgres:14.3-ext-1.1"
+    image: "mcr.microsoft.com/documentdb/documentdb:16.3-ext-1.1"
 ```
 
 **Process:**
@@ -1107,7 +1653,7 @@ spec:
 3. CNPG performs rolling restart
 4. Validate data integrity post-upgrade
 
-##### Major Version Upgrades (e.g., 14.x → 15.x)
+##### Major Version Upgrades (e.g., 16.x → 17.x)
 **Risk Level**: High
 **Strategy**: pg_upgrade or dump/restore with extended downtime
 
@@ -1132,14 +1678,14 @@ kubectl exec -it test-cluster-1 -- psql -c "SELECT documentdb_extension_version(
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 spec:
-  imageName: "mcr.microsoft.com/documentdb/postgres:14.3-ext-1.1"
+  imageName: "mcr.microsoft.com/documentdb/documentdb:16.3-ext-1.1"
   # CNPG will handle the upgrade process
 ```
 
 ##### Strategy 2: Blue-Green Migration (Major Versions and High-Risk Upgrades)
 
 **When to Use Blue-Green for PostgreSQL:**
-- **Major PostgreSQL versions** (e.g., 14.x → 15.x)
+- **Major PostgreSQL versions** (e.g., 16.x → 17.x)
 - **Breaking changes** in DocumentDB extension
 - **High-risk schema migrations**
 - **Production environments** requiring zero-downtime upgrades
@@ -1168,7 +1714,7 @@ spec:
   # Same configuration as blue cluster, but with new PostgreSQL version
   nodeCount: 1
   instancesPerNode: 1
-  postgresqlImage: "mcr.microsoft.com/documentdb/postgres:15.2-ext-1.2"  # New version
+  postgresqlImage: "mcr.microsoft.com/documentdb/documentdb:17.2-ext-1.2"  # New version
   documentDBImage: "mcr.microsoft.com/documentdb/gateway:v2.1.0"
   resource:
     pvcSize: "15Gi"  # Equal or larger storage size
@@ -1333,7 +1879,7 @@ kind: DocumentDB
 metadata:
   name: documentdb-v2
 spec:
-  postgresqlImage: "mcr.microsoft.com/documentdb/postgres:14.x-ext-2.0"
+  postgresqlImage: "mcr.microsoft.com/documentdb/documentdb:16.x-ext-2.0"
   # New extension version
 EOF
 
@@ -1363,26 +1909,37 @@ EOF
 
 ## Upgrade Orchestration
 
-### 1. Upgrade Order (Recommended)
+### 1. Upgrade Order (Simplified with Unified Versioning)
+
+**Single Atomic Upgrade**: All components upgrade together through DocumentDB operator version upgrade.
 
 ```mermaid
 graph TD
-    A[CNPG Operator] --> B[DocumentDB Operator]
-    B --> C[Sidecar Injector]
-    C --> D[Gateway Image]
-    D --> E[PostgreSQL + Extension]
+    A[DocumentDB Operator v1.3.0] --> B[All Components v1.3.0]
+    B --> C[Gateway: v1.3.0]
+    B --> D[PostgreSQL: 16.3-v1.3.0] 
+    B --> E[Sidecar Injector: v1.3.0]
+    B --> F[CNPG: v0.26.0]
 ```
 
-### 2. Compatibility Matrix
+### 2. Unified Versioning Matrix
 
-| Component | Version | Gateway | PostgreSQL | CNPG | Operator | Notes |
-|-----------|---------|---------|------------|------|----------|-------|
-| Gateway | v2.1.0 | ✓ | 14.x | 0.24.x | v1.2.0 | Stateless |
-| PostgreSQL | 14.2 | v2.1.0+ | ✓ | 0.24.x | v1.2.0 | Stateful |
-| CNPG | 0.24.0 | v2.1.0+ | 14.x+ | ✓ | v1.2.0 | Locked to operator version |
-| Operator | v1.2.0 | v2.1.0+ | 14.x+ | 0.24.x | ✓ | Controls CNPG version |
+**With unified versioning, all components are aligned to a single DocumentDB operator version:**
 
-**Important**: CNPG version is locked to the DocumentDB operator version. Customers upgrade CNPG only through DocumentDB operator upgrades.
+| DocumentDB Release | Operator | Gateway | PostgreSQL | Extension | Sidecar Injector | CNPG | Release Type |
+|-------------------|----------|---------|------------|-----------|------------------|------|--------------|
+| **v1.2.3** | v1.2.3 | v1.2.3 | 16.2-v1.2.3 | v1.2.3 | v1.2.3 | v0.24.0 | Current |
+| **v1.2.4** | v1.2.4 | v1.2.4 | 16.2-v1.2.4 | v1.2.4 | v1.2.4 | v0.24.0 | Patch |
+| **v1.3.0** | v1.3.0 | v1.3.0 | 16.3-v1.3.0 | v1.3.0 | v1.3.0 | v0.26.0 | Minor |
+| **v2.0.0** | v2.0.0 | v2.0.0 | 17.1-v2.0.0 | v2.0.0 | v2.0.0 | v0.28.0 | Major |
+
+**Benefits:**
+- ✅ **Simplified Operations**: Single version to track
+- ✅ **Guaranteed Compatibility**: All components tested together
+- ✅ **Atomic Upgrades**: All-or-nothing upgrade approach
+- ✅ **Consistent Rollbacks**: Single version rollback
+
+**Important**: Component versions are no longer independently managed. All upgrades go through DocumentDB operator releases.
 
 ### 3. Pre-Upgrade Validation
 
@@ -1490,11 +2047,66 @@ kubectl exec -it documentdb-cluster-1 -- psql documentdb < backup.sql
 
 ## Conclusion
 
-The DocumentDB Kubernetes operator upgrade strategy must account for multiple interdependent components while ensuring minimal downtime and data integrity. The recommended approach prioritizes safety through staged rollouts, comprehensive testing, and robust rollback procedures.
+The DocumentDB Kubernetes operator uses a **unified versioning strategy** that significantly simplifies upgrade operations while ensuring component compatibility and system reliability.
 
-Key success factors:
-- Proper component versioning and compatibility matrix
-- Comprehensive testing at each stage
-- Clear documentation and communication
-- Automated validation and rollback procedures
+## Key Benefits of Unified Versioning
+
+### 1. Operational Excellence
+- **Single Version Management**: Track one version (DocumentDB operator) instead of managing 5+ component versions
+- **Atomic Upgrades**: All components upgrade together, eliminating partial upgrade states
+- **Simplified Rollbacks**: Single-command rollback affects all components consistently
+- **Reduced Complexity**: No component version compatibility matrix to manage
+
+### 2. Quality Assurance  
+- **End-to-End Testing**: All components tested together as a complete system
+- **Guaranteed Compatibility**: No integration issues between mismatched component versions
+- **Predictable Behavior**: System behavior is deterministic across environments
+
+### 3. Customer Experience
+- **Clear Release Communication**: Single version number covers all component updates
+- **Simplified Documentation**: One upgrade guide instead of multiple component guides
+- **Easier Support**: Support teams only need to track DocumentDB operator version
+
+## Implementation Strategy
+
+### Immediate Benefits
+1. **Simplified Operations**: 
+   ```bash
+   # Before (multiple components to track):
+   # operator:v1.2.3, gateway:v2.1.0, postgres:16.2-ext-1.1, injector:v1.0.5, cnpg:v0.24.0
+   
+   # After (unified versioning):
+   helm upgrade documentdb-operator ./chart --version v1.3.0
+   # All components automatically aligned to v1.3.0
+   ```
+
+2. **Reduced Risk**: Eliminates component version mismatches and integration failures
+
+3. **Faster Releases**: Single CI/CD pipeline builds and tests all components together
+
+### Migration Path
+- **New Deployments**: Start with unified versioning from day one
+- **Existing Deployments**: Migrate to unified versioning at next major release
+- **Legacy Support**: Maintain backward compatibility during transition period
+
+## Success Factors
+
+With unified versioning, the key success factors become:
+
+### 1. Release Engineering
+- **Synchronized Builds**: All component images built and tagged together
+- **Comprehensive Testing**: Full system testing for every release
+- **Clear Versioning**: Semantic versioning applied to entire system
+
+### 2. Operations
+- **Single Upgrade Command**: `helm upgrade` handles all components
+- **Comprehensive Monitoring**: Monitor all components during upgrade
+- **Atomic Rollbacks**: `helm rollback` reverts entire system
+
+### 3. Documentation
+- **Unified Release Notes**: Single document covering all component changes
+- **Clear Upgrade Paths**: Simple version-to-version upgrade documentation
+- **Centralized Support**: Single version for troubleshooting
+
+The unified versioning approach transforms DocumentDB operator upgrades from a complex multi-component orchestration into a simple, reliable, single-command operation while maintaining the highest standards for data safety and system reliability.
 

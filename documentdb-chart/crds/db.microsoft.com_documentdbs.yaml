@@ -19,7 +19,7 @@ spec:
       jsonPath: .status.status
       name: Status
       type: string
-    - description: MongoDB Connection String
+    - description: DocumentDB Connection String
       jsonPath: .status.connectionString
       name: Connection String
       type: string

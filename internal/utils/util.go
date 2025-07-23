@@ -46,6 +46,7 @@ func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, namespace 
 			Selector: map[string]string{
 				LABEL_APP:          documentdb.Name,
 				LABEL_REPLICA_TYPE: "primary", // Service forwards traffic to primary replicas
+				LABEL_ROLE:         "primary",
 			},
 			Ports: []corev1.ServicePort{
 				{Name: "gateway", Protocol: corev1.ProtocolTCP, Port: GetPortFor(GATEWAY_PORT), TargetPort: intstr.FromInt(int(GetPortFor(GATEWAY_PORT)))},

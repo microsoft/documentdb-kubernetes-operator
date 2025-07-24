@@ -7,9 +7,6 @@ on:
         description: 'Helm chart version'
         required: false
         default: '0.0.1'
-  push:
-    branches:
-      - main
 
 env:
   CHART_NAME: documentdb-chart

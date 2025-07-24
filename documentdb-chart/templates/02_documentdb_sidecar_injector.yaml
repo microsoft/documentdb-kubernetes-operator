@@ -7,7 +7,7 @@ metadata:
     cnpg.io/pluginServerSecret: sidecarinjector-server-tls
   labels:
     app: sidecar-injector
-    cnpg.io/pluginName: cnpg-i-sidecar-injector.cloudnative-pg.io
+    cnpg.io/pluginName: cnpg-i-sidecar-injector.documentdb.io
   name: sidecar-injector
   namespace: cnpg-system
 spec:

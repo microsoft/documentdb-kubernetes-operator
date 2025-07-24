@@ -18,6 +18,11 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 	if sidecarPluginName == "" {
 		sidecarPluginName = util.DEFAULT_SIDECAR_INJECTOR_PLUGIN
 	}
+
+	// Get the gateway image for this DocumentDB instance
+	gatewayImage := util.GetGatewayImageForDocumentDB(&documentdb)
+	log.Info("Creating CNPG cluster with gateway image", "gatewayImage", gatewayImage, "documentdbName", documentdb.Name, "specGatewayImage", documentdb.Spec.GatewayImage)
+
 	return &cnpgv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      req.Name,
@@ -35,6 +40,9 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 				Plugins: []cnpgv1.PluginConfiguration{
 					{
 						Name: sidecarPluginName,
+						Parameters: map[string]string{
+							"gatewayImage": gatewayImage,
+						},
 					},
 				},
 				PostgresUID: 105,

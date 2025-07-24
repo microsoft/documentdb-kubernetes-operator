@@ -13,14 +13,16 @@ import (
 )
 
 const (
-	labelsParameter     = "labels"
-	annotationParameter = "annotations"
+	labelsParameter       = "labels"
+	annotationParameter   = "annotations"
+	gatewayImageParameter = "gatewayImage"
 )
 
 // Configuration represents the plugin configuration parameters
 type Configuration struct {
-	Labels      map[string]string
-	Annotations map[string]string
+	Labels       map[string]string
+	Annotations  map[string]string
+	GatewayImage string
 }
 
 // FromParameters builds a plugin configuration from the configuration parameters
@@ -49,9 +51,13 @@ func FromParameters(
 		}
 	}
 
+	// Parse gateway image parameter
+	gatewayImage := helper.Parameters[gatewayImageParameter]
+
 	configuration := &Configuration{
-		Labels:      labels,
-		Annotations: annotations,
+		Labels:       labels,
+		Annotations:  annotations,
+		GatewayImage: gatewayImage,
 	}
 
 	configuration.applyDefaults()
@@ -89,6 +95,10 @@ func (config *Configuration) applyDefaults() {
 			"plugin-metadata": "default",
 		}
 	}
+	// Set default gateway image if not specified
+	if config.GatewayImage == "" {
+		config.GatewayImage = "ghcr.io/microsoft/documentdb/documentdb-local:16"
+	}
 }
 
 // ToParameters serialize the configuration to a map of plugin parameters
@@ -104,6 +114,7 @@ func (config *Configuration) ToParameters() (map[string]string, error) {
 	}
 	result[labelsParameter] = string(serializedLabels)
 	result[annotationParameter] = string(serializedAnnotations)
+	result[gatewayImageParameter] = config.GatewayImage
 
 	return result, nil
 }

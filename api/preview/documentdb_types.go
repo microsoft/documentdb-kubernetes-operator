@@ -25,6 +25,10 @@ type DocumentDBSpec struct {
 	// DocumentDBImage is the container image to use for DocumentDB.
 	DocumentDBImage string `json:"documentDBImage"`
 
+	// GatewayImage is the container image to use for the DocumentDB Gateway sidecar.
+	// If not specified, defaults to a version that matches the DocumentDB operator version.
+	GatewayImage string `json:"gatewayImage,omitempty"`
+
 	// ClusterReplication configures cross-cluster replication for DocumentDB.
 	ClusterReplication *ClusterReplication `json:"clusterReplication,omitempty"`
 

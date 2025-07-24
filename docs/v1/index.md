@@ -347,6 +347,24 @@ documentdb-service-documentdb-preview   LoadBalancer   10.0.228.243   52.149.56.
 
 > If you are using the Python program to connect to DocumentDB, make sure to update the script's `host` variable with the external IP of your `documentdb-service-documentdb-preview` LoadBalancer service. Additionally, ensure that you update the default `password` in the script or, preferably, use environment variables to securely manage sensitive information like passwords.
 
+## Configuration and Advanced Topics
+
+Now that you have a basic DocumentDB cluster running, you may want to explore advanced configuration options and operational guides:
+
+### Sidecar Injector Plugin Configuration
+
+The DocumentDB operator uses a sidecar injector plugin to automatically inject the DocumentDB Gateway container into PostgreSQL pods. This plugin supports multiple configuration parameters including:
+
+- **Gateway Image Configuration**: Customize which DocumentDB Gateway container image is used
+- **Pod Labels and Annotations**: Add custom metadata to injected pods
+
+For detailed information on configuring the sidecar injector plugin, see: [Sidecar Injector Plugin Configuration](../sidecar-injector-plugin-configuration.md)
+
+
+### Multi-Cloud Deployment
+
+The DocumentDB operator supports deployment across multiple cloud environments and Kubernetes distributions. For guidance on multi-cloud deployments, see: [Multi-Cloud Deployment Guide](../multi-cloud-deployment-guide.md)
+
 ### Delete the DocumentDB cluster and other resources
 
 ```sh

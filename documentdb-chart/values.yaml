@@ -7,11 +7,11 @@ serviceAccount:
   name: "documentdb-operator"
 image:
   documentdbk8soperator:
-    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-k8s-operator
+    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/operator
     pullPolicy: Always
     tag: preview
   sidecarinjector:
-    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-sidecar-injector
+    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/sidecar
     pullPolicy: Always
     tag: preview
 cloudnative-pg:

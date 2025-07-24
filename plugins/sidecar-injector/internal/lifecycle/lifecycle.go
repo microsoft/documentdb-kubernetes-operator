@@ -7,12 +7,12 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"log"
 
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/common"
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/decoder"
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/object"
 	"github.com/cloudnative-pg/cnpg-i/pkg/lifecycle"
-	"github.com/cloudnative-pg/machinery/pkg/log"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/pointer"
 
@@ -87,15 +87,39 @@ func (impl Implementation) reconcileMetadata(
 		return nil, err
 	}
 
-	logger := log.FromContext(ctx).WithName("cnpg_i_example_lifecyle")
+	// Initialize standard logger for debugging
+	log.SetPrefix("[DocumentDB Sidecar Injector] ")
+
+	// Debug: Log the full cluster definition to see what plugins are configured
+	log.Printf("Cluster plugins configuration: %+v", cluster.Spec.Plugins)
+
 	helper := common.NewPlugin(
 		*cluster,
 		metadata.PluginName,
 	)
 
+	// Debug logging for plugin parameters and metadata
+	log.Printf("Plugin name being used: %s", metadata.PluginName)
+	log.Printf("Plugin parameters received: %v, cluster: %s/%s",
+		helper.Parameters, cluster.Namespace, cluster.Name)
+
+	// Debug: Check if our plugin is found in the cluster's plugin list
+	for i, plugin := range cluster.Spec.Plugins {
+		log.Printf("Plugin[%d]: Name=%s, Enabled=%t, Parameters=%v",
+			i, plugin.Name, plugin.Enabled, plugin.Parameters)
+	}
+
 	configuration, valErrs := config.FromParameters(helper)
 	if len(valErrs) > 0 {
 		return nil, valErrs[0]
+	}
+
+	// Log the gateway image being used
+	gatewayImageParam := helper.Parameters["gatewayImage"]
+	if gatewayImageParam == "" {
+		log.Printf("Using default gateway image: %s (no gatewayImage parameter provided)", configuration.GatewayImage)
+	} else {
+		log.Printf("Using configured gateway image: %s (parameter value: %s)", configuration.GatewayImage, gatewayImageParam)
 	}
 
 	pod, err := decoder.DecodePodJSON(request.GetObjectDefinition())
@@ -115,7 +139,7 @@ func (impl Implementation) reconcileMetadata(
 
 	// Add USERNAME and PASSWORD environment variables from secret
 	// TODO: Make this configurable and expose it in the configuration
-	logger.Info("Adding USERNAME and PASSWORD environment variables from secret")
+	log.Printf("Adding USERNAME and PASSWORD environment variables from secret")
 	envVars = append(envVars,
 		corev1.EnvVar{
 			Name: "USERNAME",
@@ -141,10 +165,10 @@ func (impl Implementation) reconcileMetadata(
 		},
 	)
 
-	// Initialize the sidecar container
+	// Initialize the sidecar container with configurable gateway image
 	sidecar := &corev1.Container{
 		Name:            "documentdb-gateway",
-		Image:           "ghcr.io/microsoft/documentdb/documentdb-local:16",
+		Image:           configuration.GatewayImage,
 		ImagePullPolicy: corev1.PullAlways,
 		Ports: []corev1.ContainerPort{
 			{
@@ -185,7 +209,7 @@ func (impl Implementation) reconcileMetadata(
 		return nil, err
 	}
 
-	logger.Debug("generated patch", "content", string(patch), "configuration", configuration)
+	log.Printf("Generated patch: %s", string(patch))
 
 	return &lifecycle.OperatorLifecycleResponse{
 		JsonPatch: patch,

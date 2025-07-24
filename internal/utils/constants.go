@@ -13,6 +13,7 @@ const (
 	ENABLE_SCALING_CONTROLLER_ENV = "ENABLE_SCALING_CONTROLLER"
 
 	DEFAULT_DOCUMENTDB_IMAGE = "ghcr.io/microsoft/documentdb/documentdb-local:16"
+	DEFAULT_GATEWAY_IMAGE    = "ghcr.io/microsoft/documentdb/documentdb-local:16"
 
 	LABEL_APP                      = "app"
 	LABEL_REPLICA_TYPE             = "replica_type"
@@ -24,7 +25,7 @@ const (
 
 	DOCUMENTDB_SERVICE_PREFIX = "documentdb-service-"
 
-	DEFAULT_SIDECAR_INJECTOR_PLUGIN = "cnpg-i-sidecar-injector.cloudnative-pg.io"
+	DEFAULT_SIDECAR_INJECTOR_PLUGIN = "cnpg-i-sidecar-injector.documentdb.io"
 
 	CNPG_DEFAULT_STOP_DELAY = 30
 )

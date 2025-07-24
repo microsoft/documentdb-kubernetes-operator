@@ -13,6 +13,6 @@ image:
   sidecarinjector:
     repository: ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-sidecar-injector
     pullPolicy: Always
-    tag: "001"
+    tag: preview
 cloudnative-pg:
   namespaceOverride: cnpg-system

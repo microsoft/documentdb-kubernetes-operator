@@ -20,7 +20,6 @@ permissions:
 
 env:
   DEFAULT_MANIFEST_TAG: 'test'
-  IMAGE_NAME: documentdb-k8s-operator
   IMAGE_TAG: ${{ github.run_id }}-$(date +'%Y-%m-%d')
 
 jobs:
@@ -29,6 +28,13 @@ jobs:
     strategy:
       matrix:
         arch: [amd64, arm64]
+        image:
+          - name: operator
+            dockerfile: Dockerfile
+            context: .
+          - name: sidecar
+            dockerfile: plugins/sidecar-injector/Dockerfile
+            context: plugins/sidecar-injector/
         include:
           - arch: amd64
             base_arch: AMD64
@@ -47,39 +53,41 @@ jobs:
         TAG=${{ env.IMAGE_TAG }}-${{ matrix.arch }}
         docker build \
           --build-arg ARCH=${{ matrix.base_arch }} \
-          -t ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG \
-          -f Dockerfile .
-        docker push ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:$TAG
+          -t ghcr.io/${{ github.repository }}/${{ matrix.image.name }}:$TAG \
+          -f ${{ matrix.image.dockerfile }} ${{ matrix.image.context }}
+        docker push ghcr.io/${{ github.repository }}/${{ matrix.image.name }}:$TAG
 
   create-manifest:
     name: Create, Push, Sign & Verify Manifest
+    strategy:
+      matrix:
+        image: [operator, sidecar]
     runs-on: ubuntu-22.04
     needs: build-and-push
+    env:
+      MANIFEST_TAG: ${{ github.event.inputs.manifest_tag || 'test' }}
     steps:
     - name: Login to GHCR
       run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-    - name: Set Default Values
-      run: |
-        echo "MANIFEST_TAG=${{ github.event.inputs.manifest_tag || env.DEFAULT_MANIFEST_TAG }}" >> $GITHUB_ENV
     - name: Create and Push Manifest
       run: |
-        docker manifest create ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.MANIFEST_TAG }} \
-          --amend ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-amd64 \
-          --amend ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}-arm64
-        docker manifest push ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.MANIFEST_TAG }}
+        docker manifest create ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ env.MANIFEST_TAG }} \
+          --amend ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ env.IMAGE_TAG }}-amd64 \
+          --amend ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ env.IMAGE_TAG }}-arm64
+        docker manifest push ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ env.MANIFEST_TAG }}
     - name: Install cosign
       uses: sigstore/cosign-installer@main
     - name: Sign manifest (keyless)
       run: |
-        DIGEST=$(docker buildx imagetools inspect ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.MANIFEST_TAG }} \
+        DIGEST=$(docker buildx imagetools inspect ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ env.MANIFEST_TAG }} \
           | awk '/^Digest:/ { print $2 }')
         echo "Signing manifest-list@${DIGEST}"
-        cosign sign ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}@${DIGEST} -y
+        cosign sign ghcr.io/${{ github.repository }}/${{ matrix.image }}@${DIGEST} -y
     - name: Verify manifest signature (keyless)
       run: |
-        DIGEST=$(docker buildx imagetools inspect ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}:${{ env.MANIFEST_TAG }} \
+        DIGEST=$(docker buildx imagetools inspect ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ env.MANIFEST_TAG }} \
           | awk '/^Digest:/ { print $2 }')
         cosign verify \
           --certificate-identity-regexp "https://github.com/${{ github.repository }}/.github/workflows/build_images.yml@refs/heads/${{ github.ref_name }}" \
           --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-          ghcr.io/${{ github.repository }}/${{ env.IMAGE_NAME }}@${DIGEST}
+          ghcr.io/${{ github.repository }}/${{ matrix.image }}@${DIGEST}

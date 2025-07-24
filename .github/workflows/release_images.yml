@@ -8,24 +8,20 @@ on:
         required: true
         default: 'test'
       target_tag:
-        description: 'Target tag to apply (default: latest)'
+        description: 'Target tag to apply (default: preview)'
         required: false
-        default: 'latest'
-      repo_name:
-        description: 'Repository name for the container image'
-        required: false
-        default: 'documentdb-k8s-operator'
+        default: 'preview'
 
 permissions:
   contents: read
   packages: write
 
-env:
-  REPO_NAME: ${{ github.event.inputs.repo_name }}
-
 jobs:
   copy-and-push-manifest:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: [operator, sidecar]
     steps:
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -36,5 +32,5 @@ jobs:
           TARGET_TAG: ${{ github.event.inputs.target_tag }}
         run: |
           docker buildx imagetools create \
-            -t ghcr.io/${{ github.repository }}/${{ env.REPO_NAME }}:${{ env.TARGET_TAG }} \
-            ghcr.io/${{ github.repository }}/${{ env.REPO_NAME }}:${{ env.SOURCE_TAG }}
+            -t ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ env.TARGET_TAG }} \
+            ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ env.SOURCE_TAG }}

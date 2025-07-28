@@ -1,4 +1,4 @@
-name: RELEASE - Promote Images and Publish Helm Chart
+name: RELEASE - Promote Candidate Images and Publish Helm Chart
 
 on:
   workflow_dispatch:

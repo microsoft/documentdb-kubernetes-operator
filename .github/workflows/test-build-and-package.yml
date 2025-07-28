@@ -1,0 +1,304 @@
+name: Build and Package for Tests
+
+on:
+  workflow_call:
+    inputs:
+      image_tag_prefix:
+        description: 'Prefix for image tag'
+        required: false
+        default: 'build'
+        type: string
+      chart_version_prefix:
+        description: 'Prefix for chart version'
+        required: false
+        default: '0.1.0'
+        type: string
+    outputs:
+      image_tag:
+        description: 'Built image tag'
+        value: ${{ jobs.consolidate-images.outputs.image_tag }}
+      chart_version:
+        description: 'Built chart version'
+        value: ${{ jobs.create-helm-chart.outputs.chart_version }}
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_TAG: ${{ inputs.image_tag_prefix }}-${{ github.run_id }}
+  CHART_NAME: documentdb-chart
+  CHART_VERSION: ${{ inputs.chart_version_prefix }}-${{ github.run_id }}
+
+jobs:
+  build-operator:
+    name: Build Operator Images
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            base_arch: AMD64
+            runner: ubuntu-22.04
+          - arch: arm64
+            base_arch: ARM64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build operator Docker image for ${{ matrix.arch }}
+      run: |
+        echo "Building operator Docker image for ${{ matrix.arch }} architecture..."
+        docker buildx build \
+          --platform linux/${{ matrix.arch }} \
+          --build-arg ARCH=${{ matrix.base_arch }} \
+          --tag ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/operator:${{ env.IMAGE_TAG }}-${{ matrix.arch }} \
+          --load \
+          -f Dockerfile .
+        
+        echo "✓ Operator Docker image built successfully for ${{ matrix.arch }}"
+
+    - name: Save operator Docker image as artifact
+      run: |
+        echo "Saving operator ${{ matrix.arch }} Docker image as tar file..."
+        docker save ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/operator:${{ env.IMAGE_TAG }}-${{ matrix.arch }} > operator-${{ matrix.arch }}-image.tar
+        echo "✓ Operator ${{ matrix.arch }} Docker image saved to tar file"
+
+    - name: Upload operator Docker image artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-docker-operator-${{ matrix.arch }}
+        path: operator-${{ matrix.arch }}-image.tar
+        retention-days: 1
+
+  build-sidecar:
+    name: Build Sidecar Images
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            base_arch: AMD64
+            runner: ubuntu-22.04
+          - arch: arm64
+            base_arch: ARM64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build sidecar Docker image for ${{ matrix.arch }}
+      run: |
+        echo "Building sidecar Docker image for ${{ matrix.arch }} architecture..."
+        docker buildx build \
+          --platform linux/${{ matrix.arch }} \
+          --build-arg ARCH=${{ matrix.base_arch }} \
+          --tag ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/sidecar:${{ env.IMAGE_TAG }}-${{ matrix.arch }} \
+          --load \
+          -f plugins/sidecar-injector/Dockerfile plugins/sidecar-injector/
+        
+        echo "✓ Sidecar Docker image built successfully for ${{ matrix.arch }}"
+
+    - name: Save sidecar Docker image as artifact
+      run: |
+        echo "Saving sidecar ${{ matrix.arch }} Docker image as tar file..."
+        docker save ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/sidecar:${{ env.IMAGE_TAG }}-${{ matrix.arch }} > sidecar-${{ matrix.arch }}-image.tar
+        echo "✓ Sidecar ${{ matrix.arch }} Docker image saved to tar file"
+
+    - name: Upload sidecar Docker image artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-docker-sidecar-${{ matrix.arch }}
+        path: sidecar-${{ matrix.arch }}-image.tar
+        retention-days: 1
+
+  consolidate-images:
+    name: Consolidate Platform Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [build-operator, build-sidecar]
+    outputs:
+      image_tag: ${{ env.IMAGE_TAG }}
+    steps:
+    - name: Download all image artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: 'build-docker-*'
+        path: ./artifacts
+
+    - name: Load and consolidate all Docker images
+      run: |
+        echo "Loading all Docker images from artifacts..."
+        
+        # List available artifacts first
+        echo "Available artifact directories:"
+        ls -la ./artifacts/
+        
+        # Load operator images
+        echo "Loading operator AMD64 image..."
+        if [ -f ./artifacts/build-docker-operator-amd64/operator-amd64-image.tar ]; then
+          docker load < ./artifacts/build-docker-operator-amd64/operator-amd64-image.tar
+          echo "✓ Operator AMD64 image loaded"
+        else
+          echo "❌ Operator AMD64 image file not found"
+          ls -la ./artifacts/build-docker-operator-amd64/ || echo "Directory not found"
+          exit 1
+        fi
+        
+        echo "Loading operator ARM64 image..."
+        if [ -f ./artifacts/build-docker-operator-arm64/operator-arm64-image.tar ]; then
+          docker load < ./artifacts/build-docker-operator-arm64/operator-arm64-image.tar
+          echo "✓ Operator ARM64 image loaded"
+        else
+          echo "❌ Operator ARM64 image file not found"
+          ls -la ./artifacts/build-docker-operator-arm64/ || echo "Directory not found"
+          exit 1
+        fi
+        
+        # Load sidecar images
+        echo "Loading sidecar AMD64 image..."
+        if [ -f ./artifacts/build-docker-sidecar-amd64/sidecar-amd64-image.tar ]; then
+          docker load < ./artifacts/build-docker-sidecar-amd64/sidecar-amd64-image.tar
+          echo "✓ Sidecar AMD64 image loaded"
+        else
+          echo "❌ Sidecar AMD64 image file not found"
+          ls -la ./artifacts/build-docker-sidecar-amd64/ || echo "Directory not found"
+          exit 1
+        fi
+        
+        echo "Loading sidecar ARM64 image..."
+        if [ -f ./artifacts/build-docker-sidecar-arm64/sidecar-arm64-image.tar ]; then
+          docker load < ./artifacts/build-docker-sidecar-arm64/sidecar-arm64-image.tar
+          echo "✓ Sidecar ARM64 image loaded"
+        else
+          echo "❌ Sidecar ARM64 image file not found"
+          ls -la ./artifacts/build-docker-sidecar-arm64/ || echo "Directory not found"
+          exit 1
+        fi
+        
+        echo "✓ All Docker images loaded successfully"
+        echo "Loaded images:"
+        docker images | grep documentdb-kubernetes-operator | sort
+
+    - name: Save platform-specific images as artifacts
+      run: |
+        echo "Saving platform-specific images as artifacts..."
+        
+        # Save all 4 platform-specific images
+        docker save \
+          ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/operator:${{ env.IMAGE_TAG }}-amd64 \
+          ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/operator:${{ env.IMAGE_TAG }}-arm64 \
+          ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/sidecar:${{ env.IMAGE_TAG }}-amd64 \
+          ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/sidecar:${{ env.IMAGE_TAG }}-arm64 \
+          > platform-specific-images.tar
+        
+        echo "✓ Platform-specific images saved as artifacts"
+
+    - name: Upload platform-specific Docker images
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-platform-images
+        path: platform-specific-images.tar
+        retention-days: 1
+
+  create-helm-chart:
+    name: Create Platform-Specific Helm Charts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [consolidate-images]
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    outputs:
+      chart_version: ${{ env.CHART_VERSION }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Helm
+      uses: azure/setup-helm@v4
+
+    - name: Update Helm chart with platform-specific image references
+      run: |
+        # Create platform-specific chart directory
+        cp -r documentdb-chart documentdb-chart-${{ matrix.arch }}
+        
+        # Update the operator image tag and repository in values.yaml for this platform
+        sed -i '/documentdbk8soperator:/,/tag:/ s|tag:.*|tag: \"${{ env.IMAGE_TAG }}-${{ matrix.arch }}\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
+        sed -i '/documentdbk8soperator:/,/repository:/ s|repository:.*|repository: \"ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/operator\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
+        
+        # Update the sidecar image tag and repository in values.yaml for this platform
+        sed -i '/sidecarinjector:/,/tag:/ s|tag:.*|tag: \"${{ env.IMAGE_TAG }}-${{ matrix.arch }}\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
+        sed -i '/sidecarinjector:/,/repository:/ s|repository:.*|repository: \"ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/sidecar\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
+        
+        # Update Chart.yaml version and name for this platform
+        sed -i "s|^version:.*|version: ${{ env.CHART_VERSION }}|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
+        sed -i "s|^name:.*|name: documentdb-chart-${{ matrix.arch }}|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
+        
+        echo "Updated Chart.yaml for ${{ matrix.arch }}:"
+        cat documentdb-chart-${{ matrix.arch }}/Chart.yaml
+        
+        echo "Updated values.yaml for ${{ matrix.arch }} (with platform-specific image references):"
+        cat documentdb-chart-${{ matrix.arch }}/values.yaml
+
+    - name: Package platform-specific Helm chart
+      run: |
+        # Clean up any existing Chart.lock files
+        rm -f documentdb-chart-${{ matrix.arch }}/Chart.lock
+        
+        echo "Running helm dependency update for documentdb-chart-${{ matrix.arch }}..."
+        helm dependency update documentdb-chart-${{ matrix.arch }}
+        
+        echo "Validating chart..."
+        helm lint documentdb-chart-${{ matrix.arch }}
+        
+        echo "Packaging chart with version ${{ env.CHART_VERSION }} for ${{ matrix.arch }}..."
+        helm package documentdb-chart-${{ matrix.arch }} --version ${{ env.CHART_VERSION }}
+        
+        echo "Generated chart package for ${{ matrix.arch }}:"
+        ls -la *.tgz
+
+    - name: Upload platform-specific Helm chart artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-helm-chart-${{ matrix.arch }}
+        path: "*.tgz"
+        retention-days: 1
+
+  summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [consolidate-images, create-helm-chart]
+    steps:
+    - name: Generate Build Summary
+      run: |
+        echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Configuration:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image Tag Prefix**: ${{ inputs.image_tag_prefix }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Chart Version Prefix**: ${{ inputs.chart_version_prefix }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Mode**: Platform-specific artifacts with architecture suffixes" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        echo "### Built Artifacts:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Operator Images**: Platform-specific (AMD64 + ARM64) with suffix tags" >> $GITHUB_STEP_SUMMARY
+        echo "- **Sidecar Images**: Platform-specific (AMD64 + ARM64) with suffix tags" >> $GITHUB_STEP_SUMMARY
+        echo "- **Helm Charts**: Platform-specific charts for AMD64 and ARM64" >> $GITHUB_STEP_SUMMARY
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Job Results:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Operator**: ${{ needs.build-operator.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Sidecar**: ${{ needs.build-sidecar.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Consolidate Images**: ${{ needs.consolidate-images.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Create Charts**: ${{ needs.create-helm-chart.result }}" >> $GITHUB_STEP_SUMMARY

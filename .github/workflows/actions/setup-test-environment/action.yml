@@ -1,0 +1,570 @@
+name: 'Setup Test Environment'
+description: 'Complete test environment setup including images, charts, cluster, cert-manager, operator, and DocumentDB deployment'
+inputs:
+  test-type:
+    description: 'Type of test: integration or e2e'
+    required: true
+  architecture:
+    description: 'Target architecture (amd64 or arm64)'
+    required: true
+  runner:
+    description: 'Runner type for the architecture'
+    required: true
+  test-scenario-name:
+    description: 'Name of the test scenario'
+    required: true
+  node-count:
+    description: 'Number of DocumentDB nodes'
+    required: false
+    default: '1'
+  instances-per-node:
+    description: 'Number of instances per node'
+    required: false
+    default: '1'
+  # Environment configuration
+  cert-manager-namespace:
+    description: 'Namespace for cert-manager'
+    required: true
+  operator-namespace:
+    description: 'Namespace for DocumentDB operator'
+    required: true
+  db-namespace:
+    description: 'Namespace for DocumentDB cluster'
+    required: true
+  db-cluster-name:
+    description: 'Name of the DocumentDB cluster'
+    required: true
+  db-username:
+    description: 'DocumentDB username'
+    required: true
+  db-password:
+    description: 'DocumentDB password'
+    required: true
+  db-port:
+    description: 'DocumentDB port'
+    required: true
+  # Build configuration
+  image-tag:
+    description: 'Docker image tag to use'
+    required: true
+  chart-version:
+    description: 'Helm chart version to use'
+    required: true
+  # GitHub configuration
+  github-token:
+    description: 'GitHub token for accessing packages'
+    required: true
+  repository-owner:
+    description: 'GitHub repository owner'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate runner architecture
+      shell: bash
+      run: |
+        echo "Setting up ${{ inputs.test-type }} test environment on ${{ inputs.architecture }} architecture..."
+        echo "Runner: ${{ inputs.runner }}"
+        echo "Expected architecture: ${{ inputs.architecture }}"
+        echo "Actual system architecture: $(uname -m)"
+        
+        # Verify the runner architecture matches expectations
+        EXPECTED_ARCH="${{ inputs.architecture }}"
+        ACTUAL_ARCH=$(uname -m)
+        
+        case $ACTUAL_ARCH in
+          "x86_64") NORMALIZED_ARCH="amd64" ;;
+          "aarch64") NORMALIZED_ARCH="arm64" ;;
+          *) NORMALIZED_ARCH="unknown" ;;
+        esac
+        
+        if [[ "$EXPECTED_ARCH" != "$NORMALIZED_ARCH" ]]; then
+          echo "❌ Architecture mismatch! Expected: $EXPECTED_ARCH, Got: $NORMALIZED_ARCH"
+          exit 1
+        fi
+        
+        echo "✅ Architecture validation passed: $EXPECTED_ARCH"
+
+    - name: Download and load Docker images
+      shell: bash
+      run: |
+        echo "Loading platform-specific Docker images from artifacts for ${{ inputs.architecture }}..."
+        cd ./artifacts
+        
+        # Load the platform-specific images for the current architecture
+        if [ -f build-platform-images/platform-specific-images.tar ]; then
+          echo "Loading all platform-specific Docker images..."
+          docker load < build-platform-images/platform-specific-images.tar
+          echo "✓ Platform-specific Docker images loaded successfully"
+        else
+          echo "❌ Platform-specific Docker images artifact not found"
+          ls -la build-platform-images/ || echo "Directory not found"
+          echo "Available artifact directories:"
+          ls -la . || echo "No artifacts directory"
+          exit 1
+        fi
+        
+        # Verify the correct architecture images are available
+        echo "Available Docker images:"
+        docker images | grep documentdb-kubernetes-operator
+        
+        # Verify that the architecture-specific images exist
+        ARCH="${{ inputs.architecture }}"
+        OPERATOR_IMAGE="ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/operator:${{ inputs.image-tag }}-${{ inputs.architecture }}"
+        SIDECAR_IMAGE="ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/sidecar:${{ inputs.image-tag }}-${{ inputs.architecture }}"
+        
+        echo "Checking for required images for $ARCH architecture:"
+        echo "  Operator: $OPERATOR_IMAGE"
+        echo "  Sidecar: $SIDECAR_IMAGE"
+        
+        if ! docker images --format "table {{.Repository}}:{{.Tag}}" | grep -q "$OPERATOR_IMAGE"; then
+          echo "❌ Required operator image not found: $OPERATOR_IMAGE"
+          exit 1
+        fi
+        
+        if ! docker images --format "table {{.Repository}}:{{.Tag}}" | grep -q "$SIDECAR_IMAGE"; then
+          echo "❌ Required sidecar image not found: $SIDECAR_IMAGE"
+          exit 1
+        fi
+        
+        echo "✓ All required Docker images for $ARCH architecture are available"
+
+    - name: Install system dependencies
+      shell: bash
+      run: |
+        echo "Installing system dependencies for ${{ inputs.test-type }} test on ${{ inputs.architecture }}..."
+        sudo apt-get update
+        sudo apt-get install -y jq curl netcat-openbsd
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'latest'
+
+    - name: Install MongoDB Shell (mongosh)
+      shell: bash
+      run: |
+        echo "Installing mongosh for ${{ inputs.architecture }} architecture..."
+        
+        # Install mongosh using the official installation method
+        curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+        
+        if [[ "${{ inputs.architecture }}" == "arm64" ]]; then
+          echo "deb [ arch=arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        else
+          echo "deb [ arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+        fi
+        
+        sudo apt-get update
+        sudo apt-get install -y mongodb-mongosh
+        mongosh --version
+        echo "✓ mongosh installed successfully for ${{ inputs.architecture }}"
+
+    - name: Create kind cluster
+      uses: helm/kind-action@v1.8.0
+      with:
+        cluster_name: documentdb-${{ inputs.test-type }}-${{ inputs.architecture }}-${{ inputs.test-scenario-name }}
+
+    - name: Load Docker images into kind cluster
+      shell: bash
+      run: |
+        echo "Loading Docker images into kind cluster..."
+        
+        CLUSTER_NAME="documentdb-${{ inputs.test-type }}-${{ inputs.architecture }}-${{ inputs.test-scenario-name }}"
+        OPERATOR_IMAGE="ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/operator:${{ inputs.image-tag }}-${{ inputs.architecture }}"
+        SIDECAR_IMAGE="ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/sidecar:${{ inputs.image-tag }}-${{ inputs.architecture }}"
+        
+        # Load the operator image into kind cluster
+        kind load docker-image "$OPERATOR_IMAGE" --name "$CLUSTER_NAME"
+        
+        # Load the sidecar image into kind cluster  
+        kind load docker-image "$SIDECAR_IMAGE" --name "$CLUSTER_NAME"
+        
+        echo "✓ All Docker images loaded into kind cluster successfully"
+
+    - name: Wait for cluster to be ready
+      shell: bash
+      run: |
+        echo "Waiting for ${{ inputs.architecture }} cluster to be ready..."
+        kubectl cluster-info
+        kubectl wait --for=condition=Ready nodes --all --timeout=300s
+        
+        # Verify node architecture
+        echo "Node architecture verification:"
+        kubectl get nodes -o jsonpath='{.items[*].status.nodeInfo.architecture}'
+        echo ""
+        
+        # Check cluster resources
+        echo "Checking cluster resources on ${{ inputs.architecture }}..."
+        
+        # Check node resources
+        echo "Node information:"
+        kubectl get nodes -o wide
+        
+        # Check current pod resource usage
+        echo "Current pods in cluster:"
+        kubectl get pods --all-namespaces
+        
+        # Check system pods status
+        echo "System pods status:"
+        kubectl get pods -n kube-system
+        
+        echo "✓ Cluster resource check completed for ${{ inputs.architecture }}"
+
+    - name: Install cert-manager
+      shell: bash
+      run: |
+        echo "Installing cert-manager on ${{ inputs.architecture }}..."
+        
+        # Add Helm repository with retry logic
+        echo "Adding jetstack Helm repository..."
+        for i in {1..3}; do
+          if helm repo add jetstack https://charts.jetstack.io; then
+            echo "✓ Helm repository added successfully"
+            break
+          else
+            echo "⚠️ Failed to add Helm repository (attempt $i/3)"
+            sleep 10
+          fi
+        done
+        
+        # Update Helm repositories with retry logic
+        echo "Updating Helm repositories..."
+        for i in {1..3}; do
+          if helm repo update; then
+            echo "✓ Helm repositories updated successfully"
+            break
+          else
+            echo "⚠️ Failed to update Helm repositories (attempt $i/3)"
+            sleep 10
+          fi
+        done
+        
+        # Check if cert-manager is already installed
+        if helm list -n ${{ inputs.cert-manager-namespace }} 2>/dev/null | grep -q cert-manager; then
+          echo "cert-manager is already installed, skipping installation"
+          echo "CERT_MANAGER_READY=true" >> $GITHUB_ENV
+        else
+          echo "Installing cert-manager using default registry..."
+          
+          # Install cert-manager with default images (quay.io)
+          helm install cert-manager jetstack/cert-manager \
+            --namespace ${{ inputs.cert-manager-namespace }} \
+            --create-namespace \
+            --version v1.15.3 \
+            --set installCRDs=true \
+            --wait --timeout=5m
+          
+          # Verify installation step by step
+          echo "Verifying cert-manager installation..."
+          
+          # Check if namespace was created
+          kubectl get namespace ${{ inputs.cert-manager-namespace }}
+          
+          # Check if CRDs were installed
+          echo "Checking cert-manager CRDs..."
+          kubectl get crd | grep cert-manager || echo "No cert-manager CRDs found yet"
+          
+          # Check pods status with details
+          echo "Checking cert-manager pods status..."
+          kubectl get pods -n ${{ inputs.cert-manager-namespace }} -o wide
+          
+          # Check for any failed pods and show logs if needed
+          failed_pods=$(kubectl get pods -n ${{ inputs.cert-manager-namespace }} --field-selector=status.phase!=Running --no-headers 2>/dev/null | awk '{print $1}' || echo "")
+          if [ ! -z "$failed_pods" ]; then
+            echo "⚠️ Found failed/pending pods, checking logs..."
+            for pod in $failed_pods; do
+              echo "Logs for pod $pod:"
+              kubectl logs $pod -n ${{ inputs.cert-manager-namespace }} --tail=10 || echo "No logs available for $pod"
+              echo "Events for pod $pod:"
+              kubectl describe pod $pod -n ${{ inputs.cert-manager-namespace }} | grep -A 10 Events: || echo "No events for $pod"
+            done
+          fi
+          
+          # Wait for pods to be ready with explicit timeout and better error handling
+          echo "Waiting for cert-manager pods to be ready..."
+          if kubectl wait --for=condition=Ready pods --all -n ${{ inputs.cert-manager-namespace }} --timeout=180s; then
+            echo "✓ cert-manager installation completed successfully on ${{ inputs.architecture }}"
+            echo "CERT_MANAGER_READY=true" >> $GITHUB_ENV
+          else
+            echo "❌ cert-manager pods failed to become ready, will use manual certificates"
+            kubectl get pods -n ${{ inputs.cert-manager-namespace }}
+            kubectl describe pods -n ${{ inputs.cert-manager-namespace }}
+            echo "CERT_MANAGER_READY=false" >> $GITHUB_ENV
+          fi
+        fi
+
+    - name: Install DocumentDB Operator
+      shell: bash
+      run: |
+        echo "Installing DocumentDB Operator on ${{ inputs.architecture }} using chart version: ${{ inputs.chart-version }}"
+        echo "Installing from platform-specific local Helm chart..."
+        
+        # Extract and prepare platform-specific local chart - match e2e test pattern
+        CHART_ARTIFACT_DIR="./artifacts/build-helm-chart-${{ inputs.architecture }}"
+        EXPECTED_CHART_FILE="$CHART_ARTIFACT_DIR/documentdb-chart-${{ inputs.architecture }}-${{ inputs.chart-version }}.tgz"
+        
+        if [ -f "$EXPECTED_CHART_FILE" ]; then
+          echo "Found platform-specific chart file: $EXPECTED_CHART_FILE"
+          tar -xzf "$EXPECTED_CHART_FILE"
+          
+          # If cert-manager is not ready, we need to modify the chart to skip cert-manager resources
+          if [[ "$CERT_MANAGER_READY" != "true" ]]; then
+            echo "Modifying chart to skip cert-manager Certificate resources..."
+            
+            # Create a temporary values file to disable cert-manager resources
+            cat > /tmp/values-override.yaml <<EOF
+        certManager:
+          enabled: false
+        EOF
+            
+            # Remove cert-manager Certificate resources from the sidecar injector template
+            sed -i '/^apiVersion: cert-manager\.io\/v1$/,/^---$/d' ./documentdb-chart-${{ inputs.architecture }}/templates/02_documentdb_sidecar_injector.yaml
+            
+            echo "✓ Chart modified to skip cert-manager resources"
+          fi
+          
+          # Install the operator using the platform-specific local chart
+          if [[ "$CERT_MANAGER_READY" == "true" ]]; then
+            helm install documentdb-operator ./documentdb-chart-${{ inputs.architecture }} \
+              --namespace ${{ inputs.operator-namespace }} \
+              --create-namespace \
+              --wait --timeout=15m
+          else
+            helm install documentdb-operator ./documentdb-chart-${{ inputs.architecture }} \
+              --namespace ${{ inputs.operator-namespace }} \
+              --create-namespace \
+              --values /tmp/values-override.yaml \
+              --wait --timeout=15m
+          fi
+        else
+          echo "❌ Platform-specific Helm chart artifact not found: $EXPECTED_CHART_FILE"
+          echo "Available files in chart artifact directory:"
+          ls -la "$CHART_ARTIFACT_DIR/" || echo "Chart artifact directory not found"
+          echo "Available artifact directories:"
+          ls -la ./artifacts/ || echo "No artifacts directory found"
+          exit 1
+        fi
+        
+        # Verify operator installation
+        echo "Verifying DocumentDB operator installation..."
+        kubectl wait --for=condition=Available deployment/documentdb-operator -n ${{ inputs.operator-namespace }} --timeout=300s
+        
+        # Verify that our newly built images are being used
+        echo "Verifying operator deployment uses our newly built images on ${{ inputs.architecture }}..."
+        echo "Operator image:"
+        kubectl get deployment documentdb-operator -n ${{ inputs.operator-namespace }} -o jsonpath='{.spec.template.spec.containers[0].image}'
+        echo ""
+        echo "Sidecar injector image (if present):"
+        kubectl get deployment documentdb-operator -n ${{ inputs.operator-namespace }} -o jsonpath='{.spec.template.spec.containers[1].image}' || echo "No sidecar container found"
+        echo ""
+        
+        # Additional verification - check that operator is actually running
+        echo "Checking operator pod status..."
+        kubectl get pods -n ${{ inputs.operator-namespace }} -l app.kubernetes.io/name=documentdb-operator
+        
+        # Verify operator logs for any immediate issues
+        echo "Checking operator logs for any startup issues..."
+        kubectl logs -n ${{ inputs.operator-namespace }} deployment/documentdb-operator --tail=20 || echo "Could not retrieve operator logs"
+        
+        # Check for CRDs installation
+        echo "Verifying DocumentDB CRDs are installed..."
+        kubectl get crd documentdbs.db.microsoft.com || echo "DocumentDB CRD not found"
+        
+        echo "✓ DocumentDB Operator installation completed on ${{ inputs.architecture }}"
+
+    - name: Create DocumentDB credentials secret
+      shell: bash
+      run: |
+        echo "Creating DocumentDB credentials secret for ${{ inputs.architecture }}..."
+        
+        # Create the namespace first
+        kubectl create namespace ${{ inputs.db-namespace }} --dry-run=client -o yaml | kubectl apply -f -
+        
+        # Create the credentials secret as required by the sidecar injector plugin
+        # Based on the documentation: the plugin requires a secret named 'documentdb-credentials'
+        # with 'username' and 'password' keys
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: documentdb-credentials
+          namespace: ${{ inputs.db-namespace }}
+        type: Opaque
+        stringData:
+          username: ${{ inputs.db-username }}
+          password: ${{ inputs.db-password }}
+        EOF
+        
+        echo "✓ DocumentDB credentials secret created successfully"
+
+    - name: Deploy DocumentDB cluster
+      shell: bash
+      run: |
+        echo "Deploying DocumentDB cluster on ${{ inputs.architecture }} architecture..."
+        echo "Configuration: ${{ inputs.test-scenario-name }} (${{ inputs.node-count }} nodes, ${{ inputs.instances-per-node }} instances per node)"
+        
+        # Create DocumentDB resource
+        cat <<EOF | kubectl apply -f -
+        apiVersion: db.microsoft.com/preview
+        kind: DocumentDB
+        metadata:
+          name: ${{ inputs.db-cluster-name }}
+          namespace: ${{ inputs.db-namespace }}
+        spec:
+          nodeCount: ${{ inputs.node-count }}
+          instancesPerNode: ${{ inputs.instances-per-node }}
+          documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+          resource:
+            pvcSize: 5Gi
+          exposeViaService:
+            serviceType: ClusterIP
+        EOF
+        
+        echo "DocumentDB resource created on ${{ inputs.architecture }}, waiting for cluster to be ready..."
+        
+        # Initial wait for operator to process the resource
+        echo "Allowing time for operator to process the DocumentDB resource..."
+        sleep 30
+        
+        # Enhanced cluster readiness check with timeout
+        timeout 600 bash -c '
+        expected_pods=${{ inputs.node-count }}
+        start_time=$(date +%s)
+        
+        while true; do
+          current_time=$(date +%s)
+          elapsed=$((current_time - start_time))
+          
+          echo "=== Cluster Status Check (${elapsed}s elapsed) ==="
+          
+          # Check if DocumentDB resource exists and get its status
+          echo "DocumentDB resource status:"
+          kubectl get documentdb ${{ inputs.db-cluster-name }} -n ${{ inputs.db-namespace }} -o yaml 2>/dev/null | grep -A 10 "status:" || echo "No status available yet"
+          echo ""
+          
+          # Check for any pods in the namespace
+          echo "Checking for DocumentDB pods..."
+          kubectl get pods -n ${{ inputs.db-namespace }} -o wide || echo "No pods found yet"
+          echo ""
+          
+          # Count pods with the cluster label
+          pod_count=$(kubectl get pods -n ${{ inputs.db-namespace }} -l cnpg.io/cluster=${{ inputs.db-cluster-name }} --no-headers 2>/dev/null | wc -l)
+          echo "Found $pod_count pods with cluster label cnpg.io/cluster=${{ inputs.db-cluster-name }}"
+          
+          if [[ "$pod_count" -eq "0" ]]; then
+            echo "No DocumentDB pods found yet, waiting..."
+            
+            # Check if there are any errors in the operator logs
+            echo "Checking operator logs for any issues..."
+            kubectl logs -n ${{ inputs.operator-namespace }} deployment/documentdb-operator --tail=10 2>/dev/null | grep -i error || echo "No recent errors found"
+            
+            sleep 15
+            continue
+          fi
+          
+          # Check pod readiness using enhanced criteria
+          echo "Checking pod readiness for $pod_count pods..."
+          
+          # Count ready pods using comprehensive readiness check
+          ready=$(kubectl get pods -n ${{ inputs.db-namespace }} -l cnpg.io/cluster=${{ inputs.db-cluster-name }} -o json 2>/dev/null | \
+                  jq ".items[] | select(.status.phase == \"Running\" and ([.status.containerStatuses[] | .ready] | all))" 2>/dev/null | \
+                  jq -s "length" 2>/dev/null || echo "0")
+          
+          echo "Ready pods: $ready/$expected_pods"
+          
+          # Additional readiness verification
+          if [[ "$ready" -eq "$expected_pods" ]]; then
+            echo "All pods appear ready, performing additional verification..."
+            
+            # Verify pods have stable IPs and are truly ready
+            stable_count=0
+            for pod in $(kubectl get pods -n ${{ inputs.db-namespace }} -l cnpg.io/cluster=${{ inputs.db-cluster-name }} -o jsonpath="{.items[*].metadata.name}" 2>/dev/null); do
+              # Check if pod has IP and is ready
+              pod_ip=$(kubectl get pod $pod -n ${{ inputs.db-namespace }} -o jsonpath="{.status.podIP}" 2>/dev/null)
+              pod_ready=$(kubectl get pod $pod -n ${{ inputs.db-namespace }} -o jsonpath="{.status.conditions[?(@.type==\"Ready\")].status}" 2>/dev/null)
+              
+              if [[ -n "$pod_ip" && "$pod_ready" == "True" ]]; then
+                echo "Pod $pod is ready with IP: $pod_ip"
+                ((stable_count++))
+              else
+                echo "Pod $pod is not fully ready (IP: $pod_ip, Ready: $pod_ready)"
+              fi
+            done
+            
+            if [[ "$stable_count" -eq "$expected_pods" ]]; then
+              echo "✓ DocumentDB cluster is fully ready and stable!"
+              echo "=== Final Cluster State ==="
+              kubectl get pods -n ${{ inputs.db-namespace }} -o wide
+              kubectl get documentdb ${{ inputs.db-cluster-name }} -n ${{ inputs.db-namespace }} -o yaml | grep -A 20 "status:" || echo "No detailed status available"
+              break
+            else
+              echo "Only $stable_count/$expected_pods pods are fully stable, waiting..."
+            fi
+          else
+            echo "Waiting for pods to be ready... ($ready/$expected_pods pods ready)"
+          fi
+          
+          echo "Waiting 15 seconds before next check..."
+          sleep 15
+        done
+        ' || {
+          echo "❌ Timeout waiting for DocumentDB cluster to be ready on ${{ inputs.architecture }}"
+          
+          echo "=== Final Diagnostic Information ==="
+          echo "DocumentDB resource status:"
+          kubectl get documentdb ${{ inputs.db-cluster-name }} -n ${{ inputs.db-namespace }} -o yaml || echo "Failed to get DocumentDB resource"
+          
+          echo "Pod status:"
+          kubectl get pods -n ${{ inputs.db-namespace }} -o wide || echo "Failed to get pods"
+          
+          echo "Pod descriptions:"
+          kubectl describe pods -n ${{ inputs.db-namespace }} -l cnpg.io/cluster=${{ inputs.db-cluster-name }} || echo "Failed to describe pods"
+          
+          echo "Recent events:"
+          kubectl get events -n ${{ inputs.db-namespace }} --sort-by=.lastTimestamp --field-selector involvedObject.kind=Pod | tail -10 || echo "Failed to get events"
+          
+          echo "Operator logs:"
+          kubectl logs -n ${{ inputs.operator-namespace }} deployment/documentdb-operator --tail=50 || echo "Failed to get operator logs"
+          
+          exit 1
+        }
+        
+        echo "✓ DocumentDB cluster deployment completed successfully on ${{ inputs.architecture }}"
+
+    - name: Environment setup summary
+      shell: bash
+      run: |
+        echo "🎯 ${{ inputs.test-type }} test environment setup completed successfully!"
+        echo ""
+        echo "=== Environment Configuration ==="
+        echo "Test Type: ${{ inputs.test-type }}"
+        echo "Architecture: ${{ inputs.architecture }}"
+        echo "Scenario: ${{ inputs.test-scenario-name }}"
+        echo "Cluster: documentdb-${{ inputs.test-type }}-${{ inputs.architecture }}-${{ inputs.test-scenario-name }}"
+        echo ""
+        echo "=== DocumentDB Configuration ==="
+        echo "Cluster name: ${{ inputs.db-cluster-name }}"
+        echo "Namespace: ${{ inputs.db-namespace }}"
+        echo "Node count: ${{ inputs.node-count }}"
+        echo "Instances per node: ${{ inputs.instances-per-node }}"
+        echo "Port: ${{ inputs.db-port }}"
+        echo ""
+        echo "=== Infrastructure Status ==="
+        echo "Nodes:"
+        kubectl get nodes
+        echo ""
+        echo "cert-manager pods:"
+        kubectl get pods -n ${{ inputs.cert-manager-namespace }}
+        echo ""
+        echo "DocumentDB operator pods:"
+        kubectl get pods -n ${{ inputs.operator-namespace }}
+        echo ""
+        echo "DocumentDB cluster pods:"
+        kubectl get pods -n ${{ inputs.db-namespace }} -o wide
+        echo ""
+        echo "Available CRDs:"
+        kubectl get crd | grep -E "(documentdb|cert-manager)" || echo "No relevant CRDs found"
+        echo ""
+        echo "✅ Environment is ready for ${{ inputs.test-type }} testing!"

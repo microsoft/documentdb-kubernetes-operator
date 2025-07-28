@@ -21,6 +21,7 @@ permissions:
   contents: read
   packages: write
   actions: read
+  id-token: write
 
 jobs:
   # Optional test jobs - run both E2E and integration tests in parallel if enabled

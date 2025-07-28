@@ -202,10 +202,11 @@ runs:
       with:
         cluster_name: documentdb-${{ inputs.test-type }}-${{ inputs.architecture }}-${{ inputs.test-scenario-name }}
 
-    - name: Load Docker images into kind cluster
+    - name: Load Docker images into kind cluster (local build)
+      if: inputs.use-external-images == 'false'
       shell: bash
       run: |
-        echo "Loading Docker images into kind cluster..."
+        echo "Loading local Docker images into kind cluster..."
         
         CLUSTER_NAME="documentdb-${{ inputs.test-type }}-${{ inputs.architecture }}-${{ inputs.test-scenario-name }}"
         OPERATOR_IMAGE="ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/operator:${{ inputs.image-tag }}-${{ inputs.architecture }}"
@@ -217,7 +218,31 @@ runs:
         # Load the sidecar image into kind cluster  
         kind load docker-image "$SIDECAR_IMAGE" --name "$CLUSTER_NAME"
         
-        echo "✓ All Docker images loaded into kind cluster successfully"
+        echo "✓ All local Docker images loaded into kind cluster successfully"
+
+    - name: Pre-pull external images for kind cluster (external images)
+      if: inputs.use-external-images == 'true'
+      shell: bash
+      run: |
+        echo "Pre-pulling external Docker images for kind cluster..."
+        
+        # For external images, we use manifest-based names (no architecture suffix)
+        OPERATOR_IMAGE="ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/operator:${{ inputs.image-tag }}"
+        SIDECAR_IMAGE="ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/sidecar:${{ inputs.image-tag }}"
+        
+        echo "Pre-pulling operator image: $OPERATOR_IMAGE"
+        docker pull "$OPERATOR_IMAGE"
+        
+        echo "Pre-pulling sidecar image: $SIDECAR_IMAGE"
+        docker pull "$SIDECAR_IMAGE"
+        
+        # Load the pulled images into kind cluster
+        CLUSTER_NAME="documentdb-${{ inputs.test-type }}-${{ inputs.architecture }}-${{ inputs.test-scenario-name }}"
+        
+        kind load docker-image "$OPERATOR_IMAGE" --name "$CLUSTER_NAME"
+        kind load docker-image "$SIDECAR_IMAGE" --name "$CLUSTER_NAME"
+        
+        echo "✓ All external Docker images pre-pulled and loaded into kind cluster successfully"
 
     - name: Wait for cluster to be ready
       shell: bash

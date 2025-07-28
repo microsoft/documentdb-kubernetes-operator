@@ -1,10 +1,10 @@
-name: Release Gateway
+name: Release Gateway Images and Helm Chart
 
 on:
   workflow_dispatch:
     inputs:
-      source_tag:
-        description: 'Tag in your repo to copy (default: test)'
+      image_tag:
+        description: 'Image tag to release (both operator and sidecar images use the same tag)'
         required: true
         default: 'test'
       target_tag:
@@ -18,6 +18,7 @@ permissions:
 
 jobs:
   copy-and-push-manifest:
+    name: Release Images
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -28,9 +29,78 @@ jobs:
 
       - name: Retag existing manifest
         env:
-          SOURCE_TAG: ${{ github.event.inputs.source_tag }}
+          SOURCE_TAG: ${{ github.event.inputs.image_tag }}
           TARGET_TAG: ${{ github.event.inputs.target_tag }}
         run: |
+          echo "Releasing ${{ matrix.image }} image from tag $SOURCE_TAG to $TARGET_TAG"
           docker buildx imagetools create \
             -t ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ env.TARGET_TAG }} \
             ghcr.io/${{ github.repository }}/${{ matrix.image }}:${{ env.SOURCE_TAG }}
+
+  publish-helm-chart:
+    name: Publish Helm Chart
+    runs-on: ubuntu-latest
+    needs: copy-and-push-manifest
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    env:
+      CHART_NAME: documentdb-chart
+      GHCR_REPO: ghcr.io/${{ github.repository }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Update values.yaml with target tag
+        if: ${{ github.event.inputs.target_tag != 'preview' }}
+        run: |
+          echo "Updating values.yaml with target tag: ${{ github.event.inputs.target_tag }}"
+          sed -i 's/tag: preview/tag: ${{ github.event.inputs.target_tag }}/g' documentdb-chart/values.yaml
+          echo "Updated values.yaml content:"
+          cat documentdb-chart/values.yaml
+
+      - name: Set chart version
+        run: |
+          if [[ "${{ github.event.inputs.target_tag }}" == "preview" ]]; then
+            echo "CHART_VERSION=0.0.1" >> $GITHUB_ENV
+            echo "Using default chart version: 0.0.1"
+          else
+            echo "CHART_VERSION=0.0.1-${{ github.event.inputs.target_tag }}" >> $GITHUB_ENV
+            echo "Using custom chart version: 0.0.1-${{ github.event.inputs.target_tag }}"
+          fi
+
+      - name: Package Helm chart
+        run: |
+          echo "Packaging Helm chart with version: $CHART_VERSION"
+          helm dependency update documentdb-chart
+          helm package $CHART_NAME --version $CHART_VERSION
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+
+      - name: Push Helm chart to GHCR
+        run: |
+          echo "Pushing Helm chart to GHCR with version: $CHART_VERSION"
+          helm push /home/runner/work/documentdb-kubernetes-operator/documentdb-kubernetes-operator/documentdb-operator-${CHART_VERSION}.tgz oci://${GHCR_REPO}
+
+      - name: Helm release summary
+        run: |
+          echo "## Helm Chart Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Chart Name**: \`$CHART_NAME\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Chart Version**: \`$CHART_VERSION\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: \`${{ github.event.inputs.target_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry**: \`$GHCR_REPO\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ github.event.inputs.target_tag }}" == "preview" ]]; then
+            echo "**Note**: Used default preview configuration (values.yaml unchanged)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Note**: Updated values.yaml to use tag \`${{ github.event.inputs.target_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  

@@ -442,38 +442,63 @@ runs:
       run: |
         echo "Installing DocumentDB Operator on ${{ inputs.architecture }} using external images with tag: ${{ inputs.image-tag }}"
         
-        # Use the chart from the repository and override image tags
-        cd documentdb-chart
+        # Create a chart with external image references
+        echo "Building Helm chart with external image references..."
         
-        # Create values override for external images
-        cat > /tmp/external-values.yaml <<EOF
-        image:
-          documentdbk8soperator:
-            repository: ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/operator
-            tag: "${{ inputs.image-tag }}"
-          sidecarinjector:
-            repository: ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/sidecar
-            tag: "${{ inputs.image-tag }}"
-        EOF
+        # Create platform-specific chart directory
+        cp -r documentdb-chart documentdb-chart-external
+        
+        # Update the operator image tag and repository in values.yaml for external images
+        sed -i '/documentdbk8soperator:/,/tag:/ s|tag:.*|tag: \"${{ inputs.image-tag }}\"|' documentdb-chart-external/values.yaml
+        sed -i '/documentdbk8soperator:/,/repository:/ s|repository:.*|repository: \"ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/operator\"|' documentdb-chart-external/values.yaml
+        
+        # Update the sidecar image tag and repository in values.yaml for external images
+        sed -i '/sidecarinjector:/,/tag:/ s|tag:.*|tag: \"${{ inputs.image-tag }}\"|' documentdb-chart-external/values.yaml
+        sed -i '/sidecarinjector:/,/repository:/ s|repository:.*|repository: \"ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/sidecar\"|' documentdb-chart-external/values.yaml
+        
+        # Update Chart.yaml version and name for external usage
+        sed -i "s|^version:.*|version: ${{ inputs.chart-version }}|g" documentdb-chart-external/Chart.yaml
+        sed -i "s|^name:.*|name: documentdb-chart-external|g" documentdb-chart-external/Chart.yaml
+        
+        echo "Updated Chart.yaml for external images:"
+        cat documentdb-chart-external/Chart.yaml
+        
+        echo "Updated values.yaml for external images:"
+        cat documentdb-chart-external/values.yaml
+        
+        # Build chart dependencies
+        echo "Building chart dependencies..."
+        helm dependency update documentdb-chart-external
         
         # If cert-manager is not ready, we need to disable cert-manager resources
         if [[ "$CERT_MANAGER_READY" != "true" ]]; then
-          echo "Adding cert-manager disable to values override..."
-          cat >> /tmp/external-values.yaml <<EOF
+          echo "Modifying chart to skip cert-manager Certificate resources..."
+          
+          # Create a temporary values file to disable cert-manager resources
+          cat > /tmp/values-override.yaml <<EOF
         certManager:
           enabled: false
         EOF
+          
+          # Remove cert-manager Certificate resources from the sidecar injector template
+          sed -i '/^apiVersion: cert-manager\.io\/v1$/,/^---$/d' ./documentdb-chart-external/templates/02_documentdb_sidecar_injector.yaml
+          
+          echo "✓ Chart modified to skip cert-manager resources"
         fi
         
-        echo "Using external values override:"
-        cat /tmp/external-values.yaml
-        
-        # Install the operator using external images
-        helm install documentdb-operator . \
-          --namespace ${{ inputs.operator-namespace }} \
-          --create-namespace \
-          --values /tmp/external-values.yaml \
-          --wait --timeout=15m
+        # Install the operator using the external chart
+        if [[ "$CERT_MANAGER_READY" == "true" ]]; then
+          helm install documentdb-operator ./documentdb-chart-external \
+            --namespace ${{ inputs.operator-namespace }} \
+            --create-namespace \
+            --wait --timeout=15m
+        else
+          helm install documentdb-operator ./documentdb-chart-external \
+            --namespace ${{ inputs.operator-namespace }} \
+            --create-namespace \
+            --values /tmp/values-override.yaml \
+            --wait --timeout=15m
+        fi
         
         # Verify operator installation
         echo "Verifying DocumentDB operator installation..."

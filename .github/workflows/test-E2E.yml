@@ -27,10 +27,15 @@ on:
           - quick
           - integration
           - full
+      image_tag:
+        description: 'Optional: Use existing image tag instead of building locally'
+        required: false
+        type: string
 
 permissions:
   contents: read
   actions: read
+  packages: read
 
 env:
   CERT_MANAGER_NS: cert-manager
@@ -42,9 +47,10 @@ env:
   DB_PORT: 10260
 
 jobs:
-  # Use the reusable build workflow
+  # Conditional build workflow - only run if image_tag is not provided
   build:
     name: Build Images and Charts
+    if: inputs.image_tag == ''
     uses: ./.github/workflows/test-build-and-package.yml
     with:
       image_tag_prefix: 'e2e-test'
@@ -55,7 +61,8 @@ jobs:
     name: Run E2E Tests
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
-    needs: build
+    needs: [build]
+    if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped')
     
     strategy:
       matrix:
@@ -72,15 +79,17 @@ jobs:
             instances_per_node: 1
     
     env:
-      # Use outputs from the build workflow with base image tag (architecture will be added by the action)
-      IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
-      CHART_VERSION: ${{ needs.build.outputs.chart_version }}
+      # Use either provided image tag or build outputs
+      IMAGE_TAG: ${{ inputs.image_tag || needs.build.outputs.image_tag }}
+      CHART_VERSION: ${{ inputs.image_tag && '0.1.0-external' || needs.build.outputs.chart_version }}
+      USE_EXTERNAL_IMAGES: ${{ inputs.image_tag && 'true' || 'false' }}
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Download artifacts
+    - name: Download artifacts (local build)
+      if: env.USE_EXTERNAL_IMAGES == 'false'
       uses: actions/download-artifact@v4
       with:
         pattern: 'build-*'
@@ -109,6 +118,7 @@ jobs:
         db-port: ${{ env.DB_PORT }}
         image-tag: ${{ env.IMAGE_TAG }}
         chart-version: ${{ env.CHART_VERSION }}
+        use-external-images: ${{ env.USE_EXTERNAL_IMAGES }}
         github-token: ${{ secrets.GITHUB_TOKEN }}
         repository-owner: ${{ github.repository_owner }}
 
@@ -234,6 +244,7 @@ jobs:
         echo "- **Node Count**: ${{ matrix.node_count }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Image Tag**: ${{ env.IMAGE_TAG }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Chart Version**: ${{ env.CHART_VERSION }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Using External Images**: ${{ env.USE_EXTERNAL_IMAGES }}" >> $GITHUB_STEP_SUMMARY
         
         if [[ "${{ job.status }}" == "success" ]]; then
           echo "- **Status**: ✅ PASSED" >> $GITHUB_STEP_SUMMARY
@@ -251,6 +262,11 @@ jobs:
       run: |
         echo "## E2E Test Results Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Test Configuration:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Step**: ${{ inputs.image_tag && 'Skipped (using external images)' || 'Executed' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **External Images**: ${{ inputs.image_tag && 'true' || 'false' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image Tag**: ${{ inputs.image_tag || 'Built from source' }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Parallel Architecture Testing:" >> $GITHUB_STEP_SUMMARY
         echo "- **AMD64**: Tested in parallel on ubuntu-latest" >> $GITHUB_STEP_SUMMARY
         echo "- **ARM64**: Tested in parallel on ubuntu-22.04-arm" >> $GITHUB_STEP_SUMMARY
@@ -263,7 +279,7 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         
         # Overall status
-        if [[ "${{ needs.build.result }}" == "success" && "${{ needs.e2e-test.result }}" == "success" ]]; then
+        if [[ "${{ needs.e2e-test.result }}" == "success" ]]; then
           echo "### Overall Status: ✅ ALL TESTS PASSED" >> $GITHUB_STEP_SUMMARY
           echo "Both AMD64 and ARM64 architectures tested successfully in parallel!" >> $GITHUB_STEP_SUMMARY
         else

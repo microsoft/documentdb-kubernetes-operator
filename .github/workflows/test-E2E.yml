@@ -1,0 +1,272 @@
+name: "[TEST] E2E - DocumentDB with mongosh"
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      documentdb_version:
+        description: 'DocumentDB image version to test'
+        required: false
+        default: '16'
+      node_count:
+        description: 'Number of DocumentDB nodes'
+        required: false
+        default: '1'
+      test_level:
+        description: 'Test level to run'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - quick
+          - integration
+          - full
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CERT_MANAGER_NS: cert-manager
+  OPERATOR_NS: documentdb-operator
+  DB_NS: documentdb-e2e-test
+  DB_NAME: documentdb-e2e
+  DB_USERNAME: k8s_secret_user
+  DB_PASSWORD: K8sSecret100
+  DB_PORT: 10260
+
+jobs:
+  # Use the reusable build workflow
+  build:
+    name: Build Images and Charts
+    uses: ./.github/workflows/test-build-and-package.yml
+    with:
+      image_tag_prefix: 'e2e-test'
+      chart_version_prefix: '0.1.0'
+    secrets: inherit
+
+  e2e-test:
+    name: Run E2E Tests
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    needs: build
+    
+    strategy:
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-22.04
+            test_scenario_name: "single-node"
+            node_count: 1
+            instances_per_node: 1
+          - architecture: arm64
+            runner: ubuntu-22.04-arm
+            test_scenario_name: "single-node"
+            node_count: 1
+            instances_per_node: 1
+    
+    env:
+      # Use outputs from the build workflow with base image tag (architecture will be added by the action)
+      IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
+      CHART_VERSION: ${{ needs.build.outputs.chart_version }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: 'build-*'
+        path: ./artifacts
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Setup test environment
+      uses: ./.github/actions/setup-test-environment
+      with:
+        test-type: 'e2e'
+        architecture: ${{ matrix.architecture }}
+        runner: ${{ matrix.runner }}
+        test-scenario-name: ${{ matrix.test_scenario_name }}
+        node-count: '${{ matrix.node_count }}'
+        instances-per-node: '${{ matrix.instances_per_node }}'
+        cert-manager-namespace: ${{ env.CERT_MANAGER_NS }}
+        operator-namespace: ${{ env.OPERATOR_NS }}
+        db-namespace: ${{ env.DB_NS }}
+        db-cluster-name: ${{ env.DB_NAME }}
+        db-username: ${{ env.DB_USERNAME }}
+        db-password: ${{ env.DB_PASSWORD }}
+        db-port: ${{ env.DB_PORT }}
+        image-tag: ${{ env.IMAGE_TAG }}
+        chart-version: ${{ env.CHART_VERSION }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        repository-owner: ${{ github.repository_owner }}
+
+    - name: Setup port forwarding for comprehensive tests
+      uses: ./.github/actions/setup-port-forwarding
+      with:
+        namespace: ${{ env.DB_NS }}
+        cluster-name: ${{ env.DB_NAME }}
+        port: ${{ env.DB_PORT }}
+        architecture: ${{ matrix.architecture }}
+        test-type: 'comprehensive'
+
+    - name: Execute comprehensive mongosh tests
+      run: |
+        echo "Running comprehensive mongosh validation tests on ${{ matrix.architecture }}..."
+        
+        # Run comprehensive tests with validation using external script
+        if mongosh 127.0.0.1:$DB_PORT \
+          -u $DB_USERNAME \
+          -p $DB_PASSWORD \
+          --authenticationMechanism SCRAM-SHA-256 \
+          --tls \
+          --tlsAllowInvalidCertificates \
+          --file scripts/test-scripts/comprehensive_mongosh_tests.js; then
+          echo "✓ Comprehensive mongosh tests completed successfully on ${{ matrix.architecture }}"
+        else
+          echo "❌ Comprehensive mongosh tests failed on ${{ matrix.architecture }}"
+          exit 1
+        fi
+
+    - name: Cleanup comprehensive test port forwarding
+      if: always()
+      run: |
+        # Stop port-forward if it exists
+        if [ -f /tmp/pf_pid ]; then
+          PF_PID=$(cat /tmp/pf_pid)
+          kill $PF_PID 2>/dev/null || true
+          rm -f /tmp/pf_pid
+        fi
+        
+        # Clean up output log
+        rm -f /tmp/pf_output.log
+        
+        # Clean up output log
+        rm -f /tmp/pf_output.log
+
+    - name: Setup port forwarding for performance tests
+      uses: ./.github/actions/setup-port-forwarding
+      with:
+        namespace: ${{ env.DB_NS }}
+        cluster-name: ${{ env.DB_NAME }}
+        port: ${{ env.DB_PORT }}
+        architecture: ${{ matrix.architecture }}
+        test-type: 'performance'
+
+    - name: Execute performance tests
+      run: |
+        echo "Running performance validation tests on ${{ matrix.architecture }}..."
+        
+        # Run performance tests using external script
+        if mongosh 127.0.0.1:$DB_PORT \
+          -u $DB_USERNAME \
+          -p $DB_PASSWORD \
+          --authenticationMechanism SCRAM-SHA-256 \
+          --tls \
+          --tlsAllowInvalidCertificates \
+          --file scripts/test-scripts/performance_test.js; then
+          echo "✓ Performance tests completed successfully on ${{ matrix.architecture }}"
+        else
+          echo "❌ Performance tests failed on ${{ matrix.architecture }}"
+          exit 1
+        fi
+
+    - name: Cleanup performance testing
+      if: always()
+      run: |
+        # Stop performance test port-forward
+        if [ -f /tmp/perf_pf_pid ]; then
+          PF_PID=$(cat /tmp/perf_pf_pid)
+          kill $PF_PID 2>/dev/null || true
+          rm -f /tmp/perf_pf_pid
+        fi
+        
+        # Clean up output log
+        rm -f /tmp/perf_pf_output.log
+        
+        # Clean up output log
+        rm -f /tmp/perf_pf_output.log
+
+    - name: Test cluster health and monitoring
+      run: |
+        echo "Testing cluster health and monitoring on ${{ matrix.architecture }}..."
+        
+        # Check DocumentDB resource status
+        kubectl get documentdb $DB_NAME -n $DB_NS -o yaml
+        
+        # Check pod resources and health
+        kubectl top pods -n $DB_NS --containers || echo "Metrics server not available"
+        
+        # Check logs for any errors
+        kubectl logs -n $DB_NS -l cnpg.io/cluster=$DB_NAME --tail=50
+        
+        # Check events
+        kubectl get events -n $DB_NS --sort-by='.lastTimestamp'
+
+    - name: Collect comprehensive logs on failure
+      if: failure()
+      uses: ./.github/actions/collect-logs
+      with:
+        architecture: ${{ matrix.architecture }}
+        operator-namespace: ${{ env.OPERATOR_NS }}
+        db-namespace: ${{ env.DB_NS }}
+        db-name: ${{ env.DB_NAME }}
+
+    - name: Test completion summary
+      if: always()
+      run: |
+        echo "## E2E Test Summary for ${{ matrix.architecture }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "- **Architecture**: ${{ matrix.architecture }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Runner**: ${{ matrix.runner }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Test Scenario**: ${{ matrix.test_scenario_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Node Count**: ${{ matrix.node_count }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image Tag**: ${{ env.IMAGE_TAG }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Chart Version**: ${{ env.CHART_VERSION }}" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "${{ job.status }}" == "success" ]]; then
+          echo "- **Status**: ✅ PASSED" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **Status**: ❌ FAILED" >> $GITHUB_STEP_SUMMARY
+        fi
+
+  test-summary:
+    name: E2E Test Summary
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [build, e2e-test]
+    steps:
+    - name: Generate overall test summary
+      run: |
+        echo "## E2E Test Results Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Parallel Architecture Testing:" >> $GITHUB_STEP_SUMMARY
+        echo "- **AMD64**: Tested in parallel on ubuntu-latest" >> $GITHUB_STEP_SUMMARY
+        echo "- **ARM64**: Tested in parallel on ubuntu-22.04-arm" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "Both architectures run simultaneously for faster feedback!" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Job Results:" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build**: ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **E2E Tests**: ${{ needs.e2e-test.result }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Overall status
+        if [[ "${{ needs.build.result }}" == "success" && "${{ needs.e2e-test.result }}" == "success" ]]; then
+          echo "### Overall Status: ✅ ALL TESTS PASSED" >> $GITHUB_STEP_SUMMARY
+          echo "Both AMD64 and ARM64 architectures tested successfully in parallel!" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "### Overall Status: ❌ SOME TESTS FAILED" >> $GITHUB_STEP_SUMMARY
+          echo "Check individual job results above for details." >> $GITHUB_STEP_SUMMARY
+        fi

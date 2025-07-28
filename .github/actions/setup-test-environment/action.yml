@@ -54,8 +54,6 @@ inputs:
     description: 'Whether to use external images instead of loading from artifacts'
     required: false
     default: 'false'
-    description: 'Helm chart version to use'
-    required: true
   # GitHub configuration
   github-token:
     description: 'GitHub token for accessing packages'

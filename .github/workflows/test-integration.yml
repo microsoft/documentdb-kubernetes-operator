@@ -11,6 +11,12 @@ on:
         description: 'Optional: Use existing image tag instead of building locally'
         required: false
         type: string
+  workflow_call:
+    inputs:
+      image_tag:
+        description: 'Optional: Use existing image tag instead of building locally'
+        required: false
+        type: string
 
 permissions:
   packages: write

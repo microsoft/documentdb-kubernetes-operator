@@ -31,6 +31,27 @@ on:
         description: 'Optional: Use existing image tag instead of building locally'
         required: false
         type: string
+  workflow_call:
+    inputs:
+      image_tag:
+        description: 'Optional: Use existing image tag instead of building locally'
+        required: false
+        type: string
+      documentdb_version:
+        description: 'DocumentDB image version to test'
+        required: false
+        default: '16'
+        type: string
+      node_count:
+        description: 'Number of DocumentDB nodes'
+        required: false
+        default: '1'
+        type: string
+      test_level:
+        description: 'Test level to run'
+        required: false
+        default: 'full'
+        type: string
 
 permissions:
   contents: read

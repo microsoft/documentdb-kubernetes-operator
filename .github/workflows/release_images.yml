@@ -47,7 +47,7 @@ jobs:
       packages: write
     env:
       CHART_NAME: documentdb-chart
-      GHCR_REPO: ghcr.io/${{ github.repository }}
+      GHCR_REPO: ghcr.io/${{ github.repository_owner }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -75,7 +75,6 @@ jobs:
 
       - name: Package Helm chart
         run: |
-          echo "Packaging Helm chart with version: $CHART_VERSION"
           helm dependency update documentdb-chart
           helm package $CHART_NAME --version $CHART_VERSION
 
@@ -85,7 +84,6 @@ jobs:
 
       - name: Push Helm chart to GHCR
         run: |
-          echo "Pushing Helm chart to GHCR with version: $CHART_VERSION"
           helm push /home/runner/work/documentdb-kubernetes-operator/documentdb-kubernetes-operator/documentdb-operator-${CHART_VERSION}.tgz oci://${GHCR_REPO}
 
       - name: Helm release summary

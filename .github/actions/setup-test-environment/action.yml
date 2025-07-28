@@ -50,6 +50,10 @@ inputs:
   chart-version:
     description: 'Helm chart version to use'
     required: true
+  use-external-images:
+    description: 'Whether to use external images instead of loading from artifacts'
+    required: false
+    default: 'false'
   # GitHub configuration
   github-token:
     description: 'GitHub token for accessing packages'
@@ -86,7 +90,8 @@ runs:
         
         echo "✅ Architecture validation passed: $EXPECTED_ARCH"
 
-    - name: Download and load Docker images
+    - name: Download and load Docker images (local build)
+      if: inputs.use-external-images == 'false'
       shell: bash
       run: |
         echo "Loading platform-specific Docker images from artifacts for ${{ inputs.architecture }}..."
@@ -130,6 +135,37 @@ runs:
         
         echo "✓ All required Docker images for $ARCH architecture are available"
 
+    - name: Verify external Docker images (external images)
+      if: inputs.use-external-images == 'true'
+      shell: bash
+      run: |
+        echo "Using external Docker images with tag: ${{ inputs.image-tag }}"
+        
+        # Login to GHCR to access external images
+        echo "${{ inputs.github-token }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+        
+        # For external images, we expect manifest-based images (not architecture-specific)
+        OPERATOR_IMAGE="ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/operator:${{ inputs.image-tag }}"
+        SIDECAR_IMAGE="ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/sidecar:${{ inputs.image-tag }}"
+        
+        echo "Verifying external images exist:"
+        echo "  Operator: $OPERATOR_IMAGE"
+        echo "  Sidecar: $SIDECAR_IMAGE"
+        
+        # Verify images exist in registry
+        if ! docker manifest inspect "$OPERATOR_IMAGE" > /dev/null 2>&1; then
+          echo "❌ External operator image not found: $OPERATOR_IMAGE"
+          exit 1
+        fi
+        
+        if ! docker manifest inspect "$SIDECAR_IMAGE" > /dev/null 2>&1; then
+          echo "❌ External sidecar image not found: $SIDECAR_IMAGE"
+          exit 1
+        fi
+        
+        echo "✓ All required external Docker images are accessible"
+        echo "Note: Images will be pulled by Kubernetes when needed"
+
     - name: Install system dependencies
       shell: bash
       run: |
@@ -166,10 +202,11 @@ runs:
       with:
         cluster_name: documentdb-${{ inputs.test-type }}-${{ inputs.architecture }}-${{ inputs.test-scenario-name }}
 
-    - name: Load Docker images into kind cluster
+    - name: Load Docker images into kind cluster (local build)
+      if: inputs.use-external-images == 'false'
       shell: bash
       run: |
-        echo "Loading Docker images into kind cluster..."
+        echo "Loading local Docker images into kind cluster..."
         
         CLUSTER_NAME="documentdb-${{ inputs.test-type }}-${{ inputs.architecture }}-${{ inputs.test-scenario-name }}"
         OPERATOR_IMAGE="ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/operator:${{ inputs.image-tag }}-${{ inputs.architecture }}"
@@ -181,7 +218,31 @@ runs:
         # Load the sidecar image into kind cluster  
         kind load docker-image "$SIDECAR_IMAGE" --name "$CLUSTER_NAME"
         
-        echo "✓ All Docker images loaded into kind cluster successfully"
+        echo "✓ All local Docker images loaded into kind cluster successfully"
+
+    - name: Pre-pull external images for kind cluster (external images)
+      if: inputs.use-external-images == 'true'
+      shell: bash
+      run: |
+        echo "Pre-pulling external Docker images for kind cluster..."
+        
+        # For external images, we use manifest-based names (no architecture suffix)
+        OPERATOR_IMAGE="ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/operator:${{ inputs.image-tag }}"
+        SIDECAR_IMAGE="ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/sidecar:${{ inputs.image-tag }}"
+        
+        echo "Pre-pulling operator image: $OPERATOR_IMAGE"
+        docker pull "$OPERATOR_IMAGE"
+        
+        echo "Pre-pulling sidecar image: $SIDECAR_IMAGE"
+        docker pull "$SIDECAR_IMAGE"
+        
+        # Load the pulled images into kind cluster
+        CLUSTER_NAME="documentdb-${{ inputs.test-type }}-${{ inputs.architecture }}-${{ inputs.test-scenario-name }}"
+        
+        kind load docker-image "$OPERATOR_IMAGE" --name "$CLUSTER_NAME"
+        kind load docker-image "$SIDECAR_IMAGE" --name "$CLUSTER_NAME"
+        
+        echo "✓ All external Docker images pre-pulled and loaded into kind cluster successfully"
 
     - name: Wait for cluster to be ready
       shell: bash
@@ -295,10 +356,11 @@ runs:
           fi
         fi
 
-    - name: Install DocumentDB Operator
+    - name: Install DocumentDB Operator (local chart)
+      if: inputs.use-external-images == 'false'
       shell: bash
       run: |
-        echo "Installing DocumentDB Operator on ${{ inputs.architecture }} using chart version: ${{ inputs.chart-version }}"
+        echo "Installing DocumentDB Operator on ${{ inputs.architecture }} using local chart version: ${{ inputs.chart-version }}"
         echo "Installing from platform-specific local Helm chart..."
         
         # Extract and prepare platform-specific local chart - match e2e test pattern
@@ -353,6 +415,97 @@ runs:
         
         # Verify that our newly built images are being used
         echo "Verifying operator deployment uses our newly built images on ${{ inputs.architecture }}..."
+        echo "Operator image:"
+        kubectl get deployment documentdb-operator -n ${{ inputs.operator-namespace }} -o jsonpath='{.spec.template.spec.containers[0].image}'
+        echo ""
+        echo "Sidecar injector image (if present):"
+        kubectl get deployment documentdb-operator -n ${{ inputs.operator-namespace }} -o jsonpath='{.spec.template.spec.containers[1].image}' || echo "No sidecar container found"
+        echo ""
+
+        # Additional verification - check that operator is actually running
+        echo "Checking operator pod status..."
+        kubectl get pods -n ${{ inputs.operator-namespace }} -l app.kubernetes.io/name=documentdb-operator
+        
+        # Verify operator logs for any immediate issues
+        echo "Checking operator logs for any startup issues..."
+        kubectl logs -n ${{ inputs.operator-namespace }} deployment/documentdb-operator --tail=20 || echo "Could not retrieve operator logs"
+        
+        # Check for CRDs installation
+        echo "Verifying DocumentDB CRDs are installed..."
+        kubectl get crd documentdbs.db.microsoft.com || echo "DocumentDB CRD not found"
+        
+        echo "✓ DocumentDB Operator installation completed on ${{ inputs.architecture }}"
+
+    - name: Install DocumentDB Operator (external images)
+      if: inputs.use-external-images == 'true'
+      shell: bash
+      run: |
+        echo "Installing DocumentDB Operator on ${{ inputs.architecture }} using external images with tag: ${{ inputs.image-tag }}"
+        
+        # Create a chart with external image references
+        echo "Building Helm chart with external image references..."
+        
+        # Create platform-specific chart directory
+        cp -r documentdb-chart documentdb-chart-external
+        
+        # Update the operator image tag and repository in values.yaml for external images
+        sed -i '/documentdbk8soperator:/,/tag:/ s|tag:.*|tag: \"${{ inputs.image-tag }}\"|' documentdb-chart-external/values.yaml
+        sed -i '/documentdbk8soperator:/,/repository:/ s|repository:.*|repository: \"ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/operator\"|' documentdb-chart-external/values.yaml
+        
+        # Update the sidecar image tag and repository in values.yaml for external images
+        sed -i '/sidecarinjector:/,/tag:/ s|tag:.*|tag: \"${{ inputs.image-tag }}\"|' documentdb-chart-external/values.yaml
+        sed -i '/sidecarinjector:/,/repository:/ s|repository:.*|repository: \"ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/sidecar\"|' documentdb-chart-external/values.yaml
+        
+        # Update Chart.yaml version and name for external usage
+        sed -i "s|^version:.*|version: ${{ inputs.chart-version }}|g" documentdb-chart-external/Chart.yaml
+        sed -i "s|^name:.*|name: documentdb-chart-external|g" documentdb-chart-external/Chart.yaml
+        
+        echo "Updated Chart.yaml for external images:"
+        cat documentdb-chart-external/Chart.yaml
+        
+        echo "Updated values.yaml for external images:"
+        cat documentdb-chart-external/values.yaml
+        
+        # Build chart dependencies
+        echo "Building chart dependencies..."
+        helm dependency update documentdb-chart-external
+        
+        # If cert-manager is not ready, we need to disable cert-manager resources
+        if [[ "$CERT_MANAGER_READY" != "true" ]]; then
+          echo "Modifying chart to skip cert-manager Certificate resources..."
+          
+          # Create a temporary values file to disable cert-manager resources
+          cat > /tmp/values-override.yaml <<EOF
+        certManager:
+          enabled: false
+        EOF
+          
+          # Remove cert-manager Certificate resources from the sidecar injector template
+          sed -i '/^apiVersion: cert-manager\.io\/v1$/,/^---$/d' ./documentdb-chart-external/templates/02_documentdb_sidecar_injector.yaml
+          
+          echo "✓ Chart modified to skip cert-manager resources"
+        fi
+        
+        # Install the operator using the external chart
+        if [[ "$CERT_MANAGER_READY" == "true" ]]; then
+          helm install documentdb-operator ./documentdb-chart-external \
+            --namespace ${{ inputs.operator-namespace }} \
+            --create-namespace \
+            --wait --timeout=15m
+        else
+          helm install documentdb-operator ./documentdb-chart-external \
+            --namespace ${{ inputs.operator-namespace }} \
+            --create-namespace \
+            --values /tmp/values-override.yaml \
+            --wait --timeout=15m
+        fi
+        
+        # Verify operator installation
+        echo "Verifying DocumentDB operator installation..."
+        kubectl wait --for=condition=Available deployment/documentdb-operator -n ${{ inputs.operator-namespace }} --timeout=300s
+        
+        # Verify that the external images are being used
+        echo "Verifying operator deployment uses external images with tag ${{ inputs.image-tag }}..."
         echo "Operator image:"
         kubectl get deployment documentdb-operator -n ${{ inputs.operator-namespace }} -o jsonpath='{.spec.template.spec.containers[0].image}'
         echo ""

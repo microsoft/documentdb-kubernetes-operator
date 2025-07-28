@@ -1,4 +1,4 @@
-name: Image - Build and Push to GHCR (Native AMD64 and ARM64)
+name: RELEASE - Build Candidate Images
 
 on:
   workflow_dispatch:

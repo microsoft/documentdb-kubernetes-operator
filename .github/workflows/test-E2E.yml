@@ -1,4 +1,4 @@
-name: "[TEST] E2E - DocumentDB with mongosh"
+name: TEST - E2E Test with mongosh
 
 on:
   push:

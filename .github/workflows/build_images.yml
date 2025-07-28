@@ -1,4 +1,4 @@
-name: Build Candidate Images
+name: RELEASE - Build Candidate Images
 
 on:
   workflow_dispatch:

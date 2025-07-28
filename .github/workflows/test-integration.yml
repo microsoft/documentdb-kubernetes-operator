@@ -1,4 +1,4 @@
-name: "[TEST] Integration - DocumentDB with python"
+name: TEST - Integration with python
 
 on:
   push:

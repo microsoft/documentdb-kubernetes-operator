@@ -1,4 +1,4 @@
-name: Release Gateway Images and Helm Chart
+name: RELEASE - Promote Images and Publish Helm Chart
 
 on:
   workflow_dispatch:

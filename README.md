@@ -27,6 +27,76 @@ For comprehensive documentation, installation guides, configuration options, and
 
 - [Installation Guide](https://microsoft.github.io/documentdb-kubernetes-operator/v1/quick-start)
 
+## 🔗 Connecting to DocumentDB
+
+### Using Connection String from DocumentDB Status
+
+The operator automatically generates a ready-to-use connection string that includes kubectl commands to extract credentials from the secret. This is the most convenient way to connect to your DocumentDB instance.
+
+First, check the DocumentDB status to get the connection string:
+
+```sh
+kubectl get documentdb documentdb-preview -n documentdb-preview-ns
+```
+
+Output:
+```text
+NAME                 STATUS                     CONNECTION STRING
+documentdb-preview   Cluster in healthy state   mongodb://$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.password}' | base64 -d)@172.179.136.174:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0
+```
+
+Copy the connection string from the **CONNECTION STRING** column in the output above and use it directly with mongosh:
+
+```sh
+mongosh "mongodb://$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.password}' | base64 -d)@172.179.136.174:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0"
+```
+
+This approach automatically:
+- Extracts the username and password from the Kubernetes secret
+- Uses the correct service IP address
+- Includes all necessary authentication and TLS parameters
+- Works with any namespace where your DocumentDB instance is deployed
+
+#### Using mongosh Client Pod in Cluster
+
+For convenient access from within the Kubernetes cluster, you can deploy a mongosh client pod. This approach is particularly useful for testing, debugging, and situations where port forwarding is not feasible.
+
+Deploy the mongosh client:
+
+```sh
+kubectl apply -f scripts/deployment-examples/mongosh-client.yaml
+```
+
+Wait for the pod to be ready:
+
+```sh
+kubectl get pods -n documentdb-preview-ns
+```
+
+Exec into the mongosh client container:
+
+```sh
+kubectl exec -it deployment/mongosh-client -n documentdb-preview-ns -- bash
+```
+
+First, get the connection string from the DocumentDB status:
+
+```sh
+kubectl get documentdb documentdb-preview -n documentdb-preview-ns
+```
+
+Then copy the connection string from the **CONNECTION STRING** column and use it with mongosh:
+
+```sh
+mongosh "mongodb://$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.password}' | base64 -d)@172.179.136.174:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0"
+```
+
+The mongosh client deployment includes MongoDB shell, kubectl, proper RBAC permissions, and direct cluster network access to DocumentDB.
+
+### Using Port Forwarding
+
+If you prefer to use port forwarding, you can connect as follows:
+
 ```sh
 kubectl port-forward pod/documentdb-preview-1 10260:10260 -n documentdb-preview-ns
 ```
@@ -37,7 +107,9 @@ Connect using [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/). Us
 mongosh 127.0.0.1:10260 -u k8s_secret_user -p K8sSecret100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates
 ```
 
-Execute the following commands to create a database and a collection, and insert some documents:
+## 💾 Working with Data
+
+Once connected to DocumentDB using either method above, execute the following commands to create a database and a collection, and insert some documents:
 
 ```sh
 use testdb

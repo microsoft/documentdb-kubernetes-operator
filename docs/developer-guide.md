@@ -35,6 +35,10 @@ The easiest way to get started with development is using the provided DevContain
 
 3. **Verify the setup:**
    ```bash
+   # Quick verification of all tools and configuration
+   .devcontainer/verify-environment.sh
+   
+   # Or check individual tools:
    # Check Go installation
    go version
    
@@ -386,6 +390,11 @@ kubectl port-forward pod/<documentdb-pod> 10260:10260 -n <namespace>
    ```
 
 ### Getting Help
+
+- **Verify your environment setup:**
+  ```bash
+  .devcontainer/verify-environment.sh
+  ```
 
 - **View available make targets:**
   ```bash

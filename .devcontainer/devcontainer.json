@@ -1,0 +1,59 @@
+{
+	"name": "DocumentDB Kubernetes Operator Dev",
+	"image": "mcr.microsoft.com/devcontainers/go:1.23-bookworm",
+	
+	"features": {
+		"ghcr.io/devcontainers/features/docker-in-docker:2": {
+			"dockerDashComposeVersion": "v2"
+		},
+		"ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {
+			"version": "latest",
+			"helm": "latest",
+			"minikube": "none"
+		},
+		"ghcr.io/rio/features/kind:1": {}
+	},
+
+	"postCreateCommand": ".devcontainer/setup.sh",
+
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"golang.go",
+				"ms-vscode.vscode-yaml",
+				"redhat.vscode-kubernetes-tools",
+				"ms-kubernetes-tools.vscode-kubernetes-tools",
+				"ms-vscode.makefile-tools",
+				"github.copilot",
+				"github.copilot-chat"
+			],
+			"settings": {
+				"go.toolsManagement.checkForUpdates": "local",
+				"go.useLanguageServer": true,
+				"go.gopath": "/go",
+				"go.goroot": "/usr/local/go",
+				"go.formatTool": "goimports",
+				"go.lintTool": "golangci-lint",
+				"go.testFlags": ["-v"],
+				"files.eol": "\n",
+				"editor.tabSize": 4,
+				"editor.insertSpaces": false,
+				"yaml.schemas": {
+					"kubernetes": "*.yaml"
+				}
+			}
+		}
+	},
+
+	"forwardPorts": [8080, 9443],
+
+	"containerEnv": {
+		"KUBECONFIG": "/home/vscode/.kube/config"
+	},
+
+	"mounts": [
+		"source=documentdb-operator-go-modules,target=/go/pkg,type=volume"
+	],
+
+	"remoteUser": "vscode"
+}

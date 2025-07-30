@@ -1,0 +1,35 @@
+# kind cluster configuration for DocumentDB Kubernetes Operator development
+# This configuration creates a cluster optimized for local development
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: documentdb-dev
+nodes:
+- role: control-plane
+  # Map container port 80 to host port 8080 (for LoadBalancer services)
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "ingress-ready=true"
+  extraPortMappings:
+  # LoadBalancer services port mapping
+  - containerPort: 80
+    hostPort: 8080
+    protocol: TCP
+  # HTTPS port mapping
+  - containerPort: 443
+    hostPort: 8443
+    protocol: TCP
+  # DocumentDB default port (for LoadBalancer testing)
+  - containerPort: 30000
+    hostPort: 10260
+    protocol: TCP
+# Additional worker node (optional, for multi-node testing)
+- role: worker
+networking:
+  # Disable default CNI to allow for custom networking setup if needed
+  disableDefaultCNI: false
+  # Set custom pod and service subnets if needed
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"

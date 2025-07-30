@@ -172,12 +172,48 @@ documentdb-service-documentdb-preview   LoadBalancer   10.0.228.243   52.149.56.
 
 ### Delete the DocumentDB cluster and other resources
 
-### Development Setup
+## 🛠️ Development
+
+For developers who want to contribute to or extend the DocumentDB Kubernetes Operator, we provide a comprehensive development environment setup.
+
+### Quick Start with DevContainer
+
+The easiest way to get started with development is using our DevContainer configuration:
+
+1. **Prerequisites**: [VS Code](https://code.visualstudio.com/) with [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) and [Docker](https://www.docker.com/products/docker-desktop)
+
+2. **Get started**:
+   ```bash
+   git clone https://github.com/microsoft/documentdb-kubernetes-operator.git
+   cd documentdb-kubernetes-operator
+   # Open in VS Code and select "Reopen in Container" when prompted
+   ```
+
+3. **Start developing**:
+   ```bash
+   # Create a local kind cluster
+   kind create cluster
+   
+   # Build the operator
+   make build
+   
+   # Run tests
+   make test
+   
+   # Deploy to your local cluster
+   make deploy
+   ```
+
+### Manual Development Setup
+
+If you prefer a manual setup:
 
 ```bash
 # Clone the repository
 git clone https://github.com/microsoft/documentdb-kubernetes-operator.git
 cd documentdb-kubernetes-operator
+
+# Install prerequisites: Go 1.23+, Docker, kubectl, kind, Helm
 
 # Build the operator
 make build
@@ -188,6 +224,8 @@ make test
 # Deploy to your cluster
 make deploy
 ```
+
+📚 **For comprehensive development workflows, local cluster setup, testing strategies, and troubleshooting, see our [Developer Guide](docs/developer-guide.md).**
 
 ## 📄 License
 

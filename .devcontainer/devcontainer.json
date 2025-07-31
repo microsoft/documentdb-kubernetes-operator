@@ -11,7 +11,7 @@
 			"helm": "latest",
 			"minikube": "none"
 		},
-		"ghcr.io/rio/features/kind:1": {}
+		"ghcr.io/mpriscella/features/kind:1": {}
 	},
 
 	"postCreateCommand": ".devcontainer/setup.sh",

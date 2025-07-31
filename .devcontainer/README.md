@@ -81,6 +81,10 @@ make test-e2e
 ## Troubleshooting
 
 - **Container fails to start**: Check Docker is running and you have sufficient resources
+- **Setup script fails with exit code 1**: 
+  - Check the logs for specific error messages
+  - Try running `.devcontainer/setup.sh` manually inside the container
+  - Set `DEBUG=true` environment variable for detailed output: `DEBUG=true .devcontainer/setup.sh`
 - **Missing tools**: Run `.devcontainer/verify-environment.sh` to check what's missing
 - **Build failures**: Ensure Go modules are properly downloaded with `go mod download`
 - **Kind cluster issues**: Delete and recreate with `kind delete cluster && kind create cluster`

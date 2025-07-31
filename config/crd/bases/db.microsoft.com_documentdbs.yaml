@@ -87,6 +87,11 @@ spec:
                 required:
                 - serviceType
                 type: object
+              gatewayImage:
+                description: |-
+                  GatewayImage is the container image to use for the DocumentDB Gateway sidecar.
+                  If not specified, defaults to a version that matches the DocumentDB operator version.
+                type: string
               instancesPerNode:
                 description: InstancesPerNode is the number of DocumentDB instances
                   per node. Must be 1.

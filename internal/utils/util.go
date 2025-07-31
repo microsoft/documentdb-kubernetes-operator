@@ -261,3 +261,20 @@ func getDocumentDbUsername() string {
 	// For now, we return a default username.
 	return "default_user"
 }
+
+// GetGatewayImageForDocumentDB returns the gateway image for a DocumentDB instance.
+// If GatewayImage is specified in the spec, it uses that; otherwise it returns a default
+// based on the unified versioning strategy.
+func GetGatewayImageForDocumentDB(documentdb *dbpreview.DocumentDB) string {
+	if documentdb.Spec.GatewayImage != "" {
+		return documentdb.Spec.GatewayImage
+	}
+
+	// Use environment variable if set (for unified versioning)
+	if gatewayImage := os.Getenv("DOCUMENTDB_GATEWAY_IMAGE"); gatewayImage != "" {
+		return gatewayImage
+	}
+
+	// Fall back to default
+	return DEFAULT_GATEWAY_IMAGE
+}

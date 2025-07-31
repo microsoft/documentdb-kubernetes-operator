@@ -13,7 +13,9 @@ spec:
   nodeCount: 1
   instancesPerNode: 1
   documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+  gatewayImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   resource:
     pvcSize: 10Gi
   exposeViaService:
     serviceType: LoadBalancer
+  sidecarInjectorPluginName: cnpg-i-sidecar-injector.documentdb.io

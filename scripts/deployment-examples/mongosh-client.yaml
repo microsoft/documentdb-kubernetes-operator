@@ -1,0 +1,108 @@
+# MongoDB Shell Client Deployment for DocumentDB Testing
+#
+# Usage Commands:
+# 1. Deploy the mongosh client:
+#    kubectl apply -f scripts/deployment-examples/mongosh-client.yaml
+#
+# 2. Wait for the pod to be ready:
+#    kubectl get pods -n documentdb-preview-ns
+#
+# 3. Exec into the mongosh client container (use deployment name for simplicity):
+#    kubectl exec -it deployment/mongosh-client -n documentdb-preview-ns -- sh
+#    
+#    Or use the specific pod name:
+#    kubectl exec -it mongosh-client-5746cb4cc7-wbqp8 -n documentdb-preview-ns -- sh
+#
+# 4. Connect to DocumentDB using mongosh:
+#    mongosh "mongodb://$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.password}' | base64 -d)@172.179.136.174:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0"
+#
+#
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mongosh-client
+  namespace: documentdb-preview-ns
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: documentdb-preview-ns
+  name: mongosh-client
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+- apiGroups: ["db.microsoft.com"]
+  resources: ["documentdbs"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mongosh-client
+  namespace: documentdb-preview-ns
+subjects:
+- kind: ServiceAccount
+  name: mongosh-client
+  namespace: documentdb-preview-ns
+roleRef:
+  kind: Role
+  name: mongosh-client
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongosh-client
+  namespace: documentdb-preview-ns
+  labels:
+    app: mongosh-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongosh-client
+  template:
+    metadata:
+      labels:
+        app: mongosh-client
+    spec:
+      serviceAccountName: mongosh-client
+      initContainers:
+      - name: install-kubectl
+        image: curlimages/curl:latest
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          curl -LO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          cp kubectl /shared/kubectl
+        volumeMounts:
+        - name: shared-tools
+          mountPath: /shared
+      containers:
+      - name: mongosh-client
+        image: mongo:7.0
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          # Copy kubectl from shared volume
+          cp /shared/kubectl /usr/local/bin/kubectl
+          chmod +x /usr/local/bin/kubectl
+          # Keep container running
+          sleep infinity
+        volumeMounts:
+        - name: shared-tools
+          mountPath: /shared
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: shared-tools
+        emptyDir: {}
+      restartPolicy: Always

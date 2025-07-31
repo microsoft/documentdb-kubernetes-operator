@@ -251,15 +251,8 @@ func DeleteRoleBinding(ctx context.Context, c client.Client, name, namespace str
 
 // GenerateConnectionString returns a MongoDB connection string for the DocumentDB instance
 func GenerateConnectionString(documentdb *dbpreview.DocumentDB, serviceIp string) string {
-	documentDbUsername := getDocumentDbUsername()
-	return fmt.Sprintf("mongodb://%s:<password>%s:%d/?replicaSet=rs0", documentDbUsername, serviceIp, GetPortFor(GATEWAY_PORT))
-}
-
-func getDocumentDbUsername() string {
-
-	// TODO: Implement logic to retrieve the username from the DocumentDB instance or configuration
-	// For now, we return a default username.
-	return "default_user"
+	// TODO: Update the secret name once its configureable through DocumentDB Spec
+	return fmt.Sprintf("mongodb://$(kubectl get secret documentdb-credentials -n %s -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret documentdb-credentials -n %s -o jsonpath='{.data.password}' | base64 -d)@%s:%d/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0", documentdb.Namespace, documentdb.Namespace, serviceIp, GetPortFor(GATEWAY_PORT))
 }
 
 // GetGatewayImageForDocumentDB returns the gateway image for a DocumentDB instance.

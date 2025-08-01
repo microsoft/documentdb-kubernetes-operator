@@ -36,6 +36,9 @@ type DocumentDBSpec struct {
 	ExposeViaService ExposeViaService `json:"exposeViaService,omitempty"`
 
 	Timeouts Timeouts `json:"timeouts,omitempty"`
+
+	// Overrides default log level for the DocumentDB cluster.
+	LogLevel string `json:"logLevel,omitempty"`
 }
 
 type Resource struct {
@@ -71,6 +74,7 @@ type DocumentDBStatus struct {
 	// Status reflects the status field from the underlying CNPG Cluster.
 	Status           string `json:"status,omitempty"`
 	ConnectionString string `json:"connectionString,omitempty"`
+	FailingOver      bool   `json:"failingOver,omitempty"`
 }
 
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.status",description="CNPG Cluster Status"

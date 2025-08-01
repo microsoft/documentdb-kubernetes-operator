@@ -61,6 +61,7 @@ spec:
                   enableFleetForCrossCloud:
                     description: EnableFleetForCrossCloud determines whether to use
                       KubeFleet mechanics for the replication
+                    type: boolean
                   highAvailability:
                     description: Whether or not to have replicas on the primary cluster.
                     type: boolean
@@ -100,6 +101,9 @@ spec:
                 maximum: 1
                 minimum: 1
                 type: integer
+              logLevel:
+                description: Overrides default log level for the DocumentDB cluster.
+                type: string
               nodeCount:
                 description: NodeCount is the number of nodes in the DocumentDB cluster.
                   Must be 1.
@@ -139,6 +143,8 @@ spec:
             properties:
               connectionString:
                 type: string
+              failingOver:
+                type: boolean
               status:
                 description: Status reflects the status field from the underlying
                   CNPG Cluster.

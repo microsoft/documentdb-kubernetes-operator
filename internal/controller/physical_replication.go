@@ -55,6 +55,11 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 		if err != nil {
 			return err
 		}
+	} else if documentdb.Status.FailingOver && isPrimary {
+		err = r.StopWALReplica(ctx, documentdb, self)
+		if err != nil {
+			return err
+		}
 	}
 
 	// No more errors possible, so we can safely edit the spec
@@ -476,7 +481,7 @@ func (r *DocumentDBReconciler) CreateWALReplica(ctx context.Context, documentdb 
 				},
 				Resources: corev1.VolumeResourceRequirements{
 					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: resource.MustParse("1Gi"),
+						corev1.ResourceStorage: resource.MustParse("10Gi"),
 					},
 				},
 			},
@@ -560,4 +565,26 @@ func (r *DocumentDBReconciler) CreateWALReplica(ctx context.Context, documentdb 
 }
 func int64Ptr(i int64) *int64 {
 	return &i
+}
+
+func (r *DocumentDBReconciler) StopWALReplica(ctx context.Context, documentdb dbpreview.DocumentDB, self string) error {
+	walReplicaName := self + "-wal-replica"
+
+	// Check if the WAL replica pod already exists
+	existingPod := &corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Name: walReplicaName, Namespace: documentdb.Namespace}, existingPod)
+
+	if err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("failed to check for existing WAL replica pod: %w", err)
+	} else if err == nil {
+		// Pod exists, delete it
+		log.Log.Info("Deleting the WAL replica pod")
+
+		err = r.Delete(ctx, existingPod)
+		if err != nil {
+			return fmt.Errorf("failed to delete WAL replica pod: %w", err)
+		}
+	}
+
+	return nil
 }

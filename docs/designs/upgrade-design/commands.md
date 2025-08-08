@@ -50,7 +50,6 @@ EOF
 
 ### Phase 2: Developer Team Workflows
 
-**API Migration Commands:**
 ```bash
 # Check available DocumentDB API versions (Developer)
 kubectl api-versions | grep db.microsoft.com
@@ -63,13 +62,20 @@ kubectl get documentdb my-cluster -o jsonpath='{.apiVersion}'
 kubectl create backup my-cluster-pre-v2-migration --cluster my-cluster
 
 # Migrate cluster from API v1 to v2 (Developer)
-# Method 1: Using kubectl convert (if available)
+# Method 1: Update deployment file (Recommended - Standard Kubernetes Workflow)
+# Edit your existing DocumentDB deployment file:
+# Change: apiVersion: db.microsoft.com/v1
+# To:     apiVersion: db.microsoft.com/v2
+# Add any v2-specific configuration fields
+kubectl apply -f my-cluster-v2.yaml
+
+# Method 2: Using kubectl convert (if available)
 kubectl get documentdb my-cluster -o yaml > my-cluster-v1.yaml
 kubectl convert -f my-cluster-v1.yaml --output-version db.microsoft.com/v2 > my-cluster-v2.yaml
 # Edit my-cluster-v2.yaml to add v2-specific features
 kubectl apply -f my-cluster-v2.yaml
 
-# Method 2: Using patch for simple migrations (Developer)
+# Method 3: Using patch for simple migrations (Developer)
 kubectl patch documentdb my-cluster --type='merge' -p '{
   "apiVersion": "db.microsoft.com/v2",
   "spec": {
@@ -77,6 +83,43 @@ kubectl patch documentdb my-cluster --type='merge' -p '{
     "enhancedMonitoring": true
   }
 }'
+
+# Example: Deployment File Update (Method 1 - Recommended)
+# Original v1 deployment file:
+cat > my-cluster-v1.yaml << EOF
+apiVersion: db.microsoft.com/v1
+kind: DocumentDB
+metadata:
+  name: my-cluster
+  namespace: production
+spec:
+  nodeCount: 3
+  instancesPerNode: 1
+  resource:
+    pvcSize: 100Gi
+EOF
+
+# Updated v2 deployment file:
+cat > my-cluster-v2.yaml << EOF
+apiVersion: db.microsoft.com/v2
+kind: DocumentDB
+metadata:
+  name: my-cluster
+  namespace: production
+spec:
+  nodeCount: 3
+  instancesPerNode: 1
+  resource:
+    pvcSize: 100Gi
+  # v2-specific features
+  enhancedMonitoring: true
+  advancedFeatures:
+    - feature1
+    - feature2
+EOF
+
+# Deploy the updated configuration
+kubectl apply -f my-cluster-v2.yaml
 
 # Monitor API migration progress (Developer)
 kubectl get documentdb my-cluster -w
@@ -94,6 +137,11 @@ kubectl run test-connection --rm -i --image=mongo:7 -- \
 kubectl get documentdb my-cluster -o jsonpath='{.status.enhancedMonitoring}'
 
 # Rollback API version if needed (Developer)
+# Method 1: Update deployment file (Recommended)
+# Revert your deployment file back to v1 and redeploy
+kubectl apply -f my-cluster-v1.yaml
+
+# Method 2: Using kubectl patch
 kubectl patch documentdb my-cluster --type='merge' -p '{
   "apiVersion": "db.microsoft.com/v1",
   "spec": {
@@ -614,6 +662,8 @@ if [[ -v CHANGED_COMPONENTS[postgres] ]] || [[ -v CHANGED_COMPONENTS[gateway] ]]
         # Trigger rolling restart to revert to previous images
         kubectl annotate clusters.postgresql.cnpg.io $cluster -n $namespace \
             cnpg.io/reloadedAt="$(date -Iseconds)" \
+            rollback.documentdb.microsoft.com/version="$PREVIOUS_REVISION" \
+            rollback.documentdb.microsoft.com/reason="component-change-detected" \
             --overwrite
         
         # Wait for rollback to complete
@@ -657,6 +707,14 @@ if [[ -v CHANGED_COMPONENTS[postgres] ]] || [[ -v CHANGED_COMPONENTS[gateway] ]]
     echo "Testing MongoDB connectivity for clusters with component changes..."
     for cluster in $(kubectl get clusters.postgresql.cnpg.io -A -o jsonpath='{.items[*].metadata.name}'); do
         namespace=$(kubectl get clusters.postgresql.cnpg.io $cluster -A -o jsonpath='{.items[0].metadata.namespace}')
+        service_name="${cluster}-rw"
+        
+        # Test basic connectivity
+        kubectl run rollback-test-$cluster --rm -i --tty --timeout=30s --image=mongo:7 -- \
+            mongosh "mongodb://$service_name.$namespace.svc.cluster.local:27017/test" --eval "
+            db.rollback_test.insertOne({test: 'rollback_validation', timestamp: new Date()});
+            print('Rollback connectivity test passed for cluster: $cluster');
+            " 2>/dev/null || echo "❌ Connectivity test failed for cluster: $cluster"
     done
     
     # Verify component versions match target hashes
@@ -681,6 +739,10 @@ done
 # Store rollback record for future reference
 kubectl create configmap documentdb-rollback-r${CURRENT_REVISION}-to-r${PREVIOUS_REVISION} -n documentdb-system \
     --from-literal=rollback-timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --from-literal=source-revision="$CURRENT_REVISION" \
+    --from-literal=target-revision="$PREVIOUS_REVISION" \
+    --from-literal=changed-components="$(IFS=,; echo "${!CHANGED_COMPONENTS[*]}")" \
+    --from-literal=unchanged-components="$(IFS=,; echo "${!UNCHANGED_COMPONENTS[*]}")" \
     --dry-run=client -o yaml | kubectl apply -f -
 
 echo "✅ Unified rollback with change detection completed successfully"
@@ -738,8 +800,473 @@ export HASH_RETENTION_COUNT=10
 RETENTION_COUNT=${HASH_RETENTION_COUNT:-10}
 
 # Keep only the last N revisions of component hashes
-helm history documentdb-operator -n documentdb-system --max $RETENTION_COUNT -o json | \
-jq -r '.[].revision' | sort -n | head -n -$RETENTION_COUNT | while read revision; do
-  kubectl delete configmap documentdb-component-hashes-r$revision -n documentdb-system --ignore-not-found
+kubectl get configmap -n documentdb-system -o name | \
+  grep "documentdb-component-hashes-r" | \
+  sort -V | \
+  head -n -$RETENTION_COUNT | \
+  xargs -r kubectl delete -n documentdb-system
+```
+
+## Blue-Green Deployment Procedures
+
+**Blue-Green Deployment Overview:**
+
+For major PostgreSQL upgrades requiring blue-green deployment, the process involves:
+
+1. **Green Cluster Preparation**: Backup and baseline metrics collection
+2. **Blue Cluster Deployment**: Deploy new cluster with target DocumentDB version
+3. **Data Migration**: Migrate data from green to blue cluster (see separate backup/restore design)
+4. **Traffic Switching**: Update Kubernetes services to point to blue cluster
+5. **Validation**: Verify functionality and performance
+6. **Cleanup**: Remove green cluster after validation period
+
+**Key Components:**
+- **Service Management**: Kubernetes service updates for traffic switching
+- **Data Validation**: Database integrity and connectivity verification
+- **Rollback Capability**: Immediate rollback to green cluster if issues occur
+
+**Detailed Implementation:**
+Complete blue-green deployment procedures, including backup/restore automation, will be documented in the dedicated backup/restore design document.
+
+**Emergency Rollback:**
+```bash
+#!/bin/bash
+# blue-green-rollback.sh - Emergency rollback from blue to green
+
+echo "=== Emergency Blue-Green Rollback ==="
+echo "This will immediately switch traffic back to the green cluster"
+
+# Variables
+GREEN_CLUSTER_NAME="documentdb-production"
+BLUE_CLUSTER_NAME="documentdb-production-blue"
+NAMESPACE="production"
+
+# Restore green cluster service configuration
+if [ -f /tmp/green-service-backup.yaml ]; then
+    kubectl apply -f /tmp/green-service-backup.yaml
+    echo "✅ Green cluster service configuration restored"
+else
+    echo "❌ Green service backup not found. Manual rollback required:"
+    echo "kubectl patch service ${GREEN_CLUSTER_NAME}-rw -n $NAMESPACE -p '{\"spec\":{\"selector\":{\"cnpg.io/cluster\":\"$GREEN_CLUSTER_NAME\"}}}'"
+    echo "kubectl patch service ${GREEN_CLUSTER_NAME}-ro -n $NAMESPACE -p '{\"spec\":{\"selector\":{\"cnpg.io/cluster\":\"$GREEN_CLUSTER_NAME\"}}}'"
+fi
+
+# Verify rollback
+echo "Verifying rollback connectivity..."
+kubectl run rollback-test --rm -i --timeout=60s --image=mongo:7 -- \
+  mongosh "mongodb://${GREEN_CLUSTER_NAME}-rw.$NAMESPACE.svc.cluster.local:27017/test" --eval "
+  db.rollback_test.insertOne({test: 'rollback_validation', timestamp: new Date()});
+  print('Rollback connectivity test passed');
+  " 2>/dev/null
+
+echo "✅ Emergency rollback completed"
+```
+
+## CNPG Supervised HA Upgrade Procedures
+
+This section contains detailed command examples for CNPG-based high availability upgrade procedures supporting the local HA strategy outlined in the [upgrade design document](./upgrade-design-doc.md#phase-4-local-high-availability-ha-strategy).
+
+### CNPG HA Configuration Examples
+
+**3-Instance DocumentDB Cluster with HA Configuration:**
+
+```yaml
+# documentdb-ha-cluster.yaml
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: documentdb-cluster
+  namespace: production
+spec:
+  instances: 3  # 1 primary + 2 replicas
+  
+  # Controlled upgrade settings for zero-downtime
+  primaryUpdateStrategy: supervised    # Manual control over primary upgrade timing
+  primaryUpdateMethod: switchover      # Planned failover to replica during upgrades
+  
+  # Failover timing controls (RTO/RPO balance)
+  switchoverDelay: "30s"              # Graceful shutdown timeout for planned upgrades
+  failoverDelay: "0s"                 # Immediate failover for unexpected failures
+  
+  # PostgreSQL streaming replication configuration
+  postgresql:
+    parameters:
+      max_wal_senders: "10"           # Support multiple replicas
+      wal_level: "replica"            # Enable streaming replication
+      synchronous_commit: "on"        # Ensure replica consistency
+      synchronous_standby_names: "*" # Any replica can be synchronous
+      checkpoint_timeout: "5min"     # Checkpoint frequency
+      max_wal_size: "1GB"           # WAL size management
+      
+  # Resource allocation for HA workloads
+  resources:
+    requests:
+      memory: "2Gi"
+      cpu: "1"
+    limits:
+      memory: "4Gi"
+      cpu: "2"
+      
+  # Storage configuration
+  storage:
+    size: "100Gi"
+    storageClass: "fast-ssd"
+    
+  # DocumentDB sidecar injection (handled by sidecar injector)
+  metadata:
+    labels:
+      documentdb.microsoft.com/sidecar-inject: "true"
+      documentdb.microsoft.com/cluster-version: "v1.4.0"
+```
+
+**Apply HA Configuration:**
+```bash
+# Deploy HA-configured DocumentDB cluster
+kubectl apply -f documentdb-ha-cluster.yaml
+
+# Wait for cluster to be ready
+kubectl wait --for=condition=Ready cluster/documentdb-cluster -n production --timeout=600s
+
+# Verify cluster status
+kubectl cnpg status documentdb-cluster -n production
+```
+
+### CNPG Zero-Downtime Upgrade Sequence
+
+**Complete upgrade workflow with CNPG supervised mode:**
+
+#### Step 1: Pre-Upgrade Validation
+
+```bash
+# Verify cluster health and replica synchronization
+echo "=== Pre-Upgrade Validation ==="
+
+# Check overall cluster status
+kubectl cnpg status documentdb-cluster -n production
+
+# Verify cluster is in Ready phase
+CLUSTER_PHASE=$(kubectl get cluster documentdb-cluster -n production -o jsonpath='{.status.phase}')
+if [ "$CLUSTER_PHASE" != "Cluster in healthy state" ]; then
+    echo "❌ Cluster not in healthy state: $CLUSTER_PHASE"
+    echo "Aborting upgrade. Fix cluster issues first."
+    exit 1
+fi
+
+# Check replica lag (should be minimal for safe switchover)
+echo "Checking replica lag..."
+kubectl cnpg status documentdb-cluster -n production --verbose
+
+# Verify all instances are running
+kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production
+
+# Check current PostgreSQL version
+CURRENT_VERSION=$(kubectl get cluster documentdb-cluster -n production -o jsonpath='{.spec.imageName}')
+echo "Current cluster image: $CURRENT_VERSION"
+
+# Test connectivity before upgrade
+kubectl run pre-upgrade-test --rm -i --timeout=30s --image=mongo:7 -- \
+  mongosh "mongodb://documentdb-cluster-rw.production.svc.cluster.local:27017/test" --eval "
+  db.pre_upgrade_test.insertOne({test: 'connectivity_check', timestamp: new Date()});
+  print('Pre-upgrade connectivity test passed');
+  " 2>/dev/null
+
+echo "✅ Pre-upgrade validation completed"
+```
+
+#### Step 2: Enable Supervised Mode and Trigger Upgrade
+
+```bash
+# Enable supervised mode for controlled failover
+echo "=== Enabling Supervised Mode ==="
+
+kubectl patch cluster documentdb-cluster -n production --type='merge' -p '{
+  "spec": {
+    "primaryUpdateStrategy": "supervised"
+  }
+}'
+
+# Verify supervised mode is enabled
+STRATEGY=$(kubectl get cluster documentdb-cluster -n production -o jsonpath='{.spec.primaryUpdateStrategy}')
+echo "Primary update strategy: $STRATEGY"
+
+# Trigger rolling update (replicas upgrade automatically)
+echo "=== Triggering Rolling Update ==="
+
+TARGET_IMAGE="mcr.microsoft.com/documentdb/documentdb:16.3-v1.4.0"
+kubectl patch cluster documentdb-cluster -n production --type='merge' -p "{
+  \"spec\": {
+    \"imageName\": \"$TARGET_IMAGE\"
+  }
+}"
+
+echo "Upgrade initiated to target image: $TARGET_IMAGE"
+```
+
+#### Step 3: Monitor Replica Upgrades
+
+```bash
+# Monitor replica upgrades (wait for completion)
+echo "=== Monitoring Replica Upgrades ==="
+
+# Watch pods during upgrade
+echo "Watching pod changes during replica upgrade..."
+kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -w &
+WATCH_PID=$!
+
+# Monitor upgrade progress
+echo "Monitoring upgrade progress..."
+while true; do
+    # Check cluster status
+    STATUS=$(kubectl cnpg status documentdb-cluster -n production 2>/dev/null)
+    echo "Cluster status update:"
+    echo "$STATUS"
+    
+    # Check if primary is still the only non-upgraded instance
+    UPGRADED_REPLICAS=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -o jsonpath='{.items[?(@.spec.containers[0].image=="'$TARGET_IMAGE'")].metadata.name}' | wc -w)
+    TOTAL_INSTANCES=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production --no-headers | wc -l)
+    
+    echo "Upgraded instances: $UPGRADED_REPLICAS/$TOTAL_INSTANCES"
+    
+    # If 2 out of 3 instances upgraded (replicas), ready for switchover
+    if [ "$UPGRADED_REPLICAS" -eq 2 ]; then
+        echo "✅ Replica upgrades completed. Ready for switchover."
+        break
+    fi
+    
+    sleep 30
 done
+
+# Stop watching pods
+kill $WATCH_PID 2>/dev/null
+```
+
+#### Step 4: Manual Controlled Switchover
+
+```bash
+# Manual switchover when ready
+echo "=== Performing Controlled Switchover ==="
+
+# Get current primary
+CURRENT_PRIMARY=$(kubectl cnpg status documentdb-cluster -n production | grep "Primary" | awk '{print $2}')
+echo "Current primary: $CURRENT_PRIMARY"
+
+# Find most aligned replica (should be one of the upgraded replicas)
+echo "Finding most aligned replica..."
+kubectl cnpg status documentdb-cluster -n production --verbose
+
+# List available replicas with their status
+REPLICAS=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -o jsonpath='{.items[?(@.metadata.name!="'$CURRENT_PRIMARY'")].metadata.name}')
+echo "Available replicas: $REPLICAS"
+
+# Choose the first upgraded replica (you can customize this selection logic)
+TARGET_REPLICA=$(echo $REPLICAS | awk '{print $1}')
+echo "Selected target replica for promotion: $TARGET_REPLICA"
+
+# Perform switchover
+echo "Initiating switchover to $TARGET_REPLICA..."
+kubectl cnpg promote documentdb-cluster $TARGET_REPLICA -n production
+
+# Wait for switchover to complete
+echo "Waiting for switchover to complete..."
+sleep 30
+
+# Verify new primary
+NEW_PRIMARY=$(kubectl cnpg status documentdb-cluster -n production | grep "Primary" | awk '{print $2}')
+echo "New primary after switchover: $NEW_PRIMARY"
+
+if [ "$NEW_PRIMARY" = "$TARGET_REPLICA" ]; then
+    echo "✅ Switchover successful: $CURRENT_PRIMARY → $NEW_PRIMARY"
+else
+    echo "❌ Switchover may have failed. Expected: $TARGET_REPLICA, Got: $NEW_PRIMARY"
+fi
+```
+
+#### Step 5: Verify Upgrade Completion
+
+```bash
+# Verify new primary and complete upgrade
+echo "=== Verifying Upgrade Completion ==="
+
+# Check cluster status after switchover
+kubectl cnpg status documentdb-cluster -n production
+
+# Wait for former primary to complete upgrade
+echo "Waiting for all instances to complete upgrade..."
+while true; do
+    UPGRADED_COUNT=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -o jsonpath='{.items[?(@.spec.containers[0].image=="'$TARGET_IMAGE'")].metadata.name}' | wc -w)
+    TOTAL_COUNT=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production --no-headers | wc -l)
+    
+    echo "Upgrade progress: $UPGRADED_COUNT/$TOTAL_COUNT instances completed"
+    
+    if [ "$UPGRADED_COUNT" -eq "$TOTAL_COUNT" ]; then
+        echo "✅ All instances upgraded successfully"
+        break
+    fi
+    
+    sleep 30
+done
+
+# Verify all instances running target version
+echo "=== Final Version Verification ==="
+kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production \
+  -o custom-columns="NAME:.metadata.name,IMAGE:.spec.containers[0].image"
+
+# Test connectivity and performance after upgrade
+echo "=== Post-Upgrade Connectivity Test ==="
+kubectl run post-upgrade-test --rm -i --timeout=30s --image=mongo:7 -- \
+  mongosh "mongodb://documentdb-cluster-rw.production.svc.cluster.local:27017/test" --eval "
+  db.post_upgrade_test.insertOne({
+    test: 'upgrade_completion_check', 
+    timestamp: new Date(),
+    upgraded_to: '$TARGET_IMAGE'
+  });
+  print('Post-upgrade connectivity test passed');
+  " 2>/dev/null
+
+# Verify PostgreSQL is ready
+kubectl exec -it documentdb-cluster-1 -n production -- pg_isready
+
+echo "✅ CNPG supervised HA upgrade completed successfully"
+```
+
+### CNPG HA Upgrade Automation Script
+
+**Complete automated HA upgrade script:**
+
+```bash
+#!/bin/bash
+# cnpg-ha-upgrade.sh - Automated CNPG HA upgrade with safety checks
+
+set -e
+
+# Configuration
+CLUSTER_NAME="${1:-documentdb-cluster}"
+NAMESPACE="${2:-production}"
+TARGET_IMAGE="${3:-mcr.microsoft.com/documentdb/documentdb:16.3-v1.4.0}"
+
+echo "=== CNPG HA Upgrade Automation ==="
+echo "Cluster: $CLUSTER_NAME"
+echo "Namespace: $NAMESPACE"
+echo "Target Image: $TARGET_IMAGE"
+
+# Function: Wait for condition with timeout
+wait_for_condition() {
+    local condition="$1"
+    local timeout="${2:-600}"
+    local check_interval="${3:-30}"
+    local elapsed=0
+    
+    while [ $elapsed -lt $timeout ]; do
+        if eval "$condition"; then
+            return 0
+        fi
+        sleep $check_interval
+        elapsed=$((elapsed + check_interval))
+        echo "Waiting... ($elapsed/${timeout}s)"
+    done
+    
+    echo "❌ Timeout waiting for condition: $condition"
+    return 1
+}
+
+# Pre-upgrade validation
+echo "=== Step 1: Pre-Upgrade Validation ==="
+kubectl cnpg status $CLUSTER_NAME -n $NAMESPACE
+
+# Check cluster health
+CLUSTER_PHASE=$(kubectl get cluster $CLUSTER_NAME -n $NAMESPACE -o jsonpath='{.status.phase}')
+if [[ ! "$CLUSTER_PHASE" =~ "healthy" ]]; then
+    echo "❌ Cluster not healthy: $CLUSTER_PHASE"
+    exit 1
+fi
+
+# Enable supervised mode
+echo "=== Step 2: Enable Supervised Mode ==="
+kubectl patch cluster $CLUSTER_NAME -n $NAMESPACE --type='merge' -p '{
+  "spec": {
+    "primaryUpdateStrategy": "supervised"
+  }
+}'
+
+# Trigger upgrade
+echo "=== Step 3: Trigger Rolling Update ==="
+kubectl patch cluster $CLUSTER_NAME -n $NAMESPACE --type='merge' -p "{
+  \"spec\": {
+    \"imageName\": \"$TARGET_IMAGE\"
+  }
+}"
+
+# Wait for replica upgrades
+echo "=== Step 4: Wait for Replica Upgrades ==="
+wait_for_condition '[ $(kubectl get pods -l cnpg.io/cluster='$CLUSTER_NAME' -n '$NAMESPACE' -o jsonpath="{.items[?(@.spec.containers[0].image==\"'$TARGET_IMAGE'\")].metadata.name}" | wc -w) -eq 2 ]' 1200
+
+# Get current primary and select target replica
+CURRENT_PRIMARY=$(kubectl cnpg status $CLUSTER_NAME -n $NAMESPACE | grep "Primary" | awk '{print $2}')
+TARGET_REPLICA=$(kubectl get pods -l cnpg.io/cluster=$CLUSTER_NAME -n $NAMESPACE -o jsonpath='{.items[?(@.metadata.name!="'$CURRENT_PRIMARY'")].metadata.name}' | awk '{print $1}')
+
+echo "Current primary: $CURRENT_PRIMARY"
+echo "Target replica: $TARGET_REPLICA"
+
+# Perform switchover
+echo "=== Step 5: Perform Switchover ==="
+kubectl cnpg promote $CLUSTER_NAME $TARGET_REPLICA -n $NAMESPACE
+
+# Wait for all instances to be upgraded
+echo "=== Step 6: Wait for Upgrade Completion ==="
+wait_for_condition '[ $(kubectl get pods -l cnpg.io/cluster='$CLUSTER_NAME' -n '$NAMESPACE' -o jsonpath="{.items[?(@.spec.containers[0].image==\"'$TARGET_IMAGE'\")].metadata.name}" | wc -w) -eq 3 ]' 900
+
+# Final validation
+echo "=== Step 7: Final Validation ==="
+kubectl cnpg status $CLUSTER_NAME -n $NAMESPACE
+
+# Test connectivity
+kubectl run upgrade-validation-$RANDOM --rm -i --timeout=30s --image=mongo:7 -- \
+  mongosh "mongodb://${CLUSTER_NAME}-rw.${NAMESPACE}.svc.cluster.local:27017/test" --eval "
+  db.upgrade_validation.insertOne({
+    test: 'automated_upgrade_validation', 
+    timestamp: new Date(),
+    target_image: '$TARGET_IMAGE'
+  });
+  print('Automated upgrade validation passed');
+  " 2>/dev/null
+
+echo "✅ CNPG HA upgrade automation completed successfully"
+```
+
+### CNPG HA Troubleshooting Commands
+
+**Common troubleshooting scenarios during HA upgrades:**
+
+```bash
+# Check cluster events for upgrade issues
+kubectl get events -n production --field-selector involvedObject.name=documentdb-cluster --sort-by='.lastTimestamp'
+
+# Check CNPG operator logs
+kubectl logs -n cnpg-system deployment/cnpg-controller-manager -f
+
+# Check specific pod logs during upgrade
+kubectl logs documentdb-cluster-1 -n production -c postgres -f
+
+# Manual failover if automatic switchover fails
+kubectl cnpg promote documentdb-cluster documentdb-cluster-2 -n production --force
+
+# Reset to unsupervised mode if needed
+kubectl patch cluster documentdb-cluster -n production --type='merge' -p '{
+  "spec": {
+    "primaryUpdateStrategy": "unsupervised"
+  }
+}'
+
+# Manual pod restart if stuck
+kubectl delete pod documentdb-cluster-1 -n production
+
+# Check replica lag during troubleshooting
+kubectl cnpg status documentdb-cluster -n production --verbose
+
+# Emergency rollback to previous image
+kubectl patch cluster documentdb-cluster -n production --type='merge' -p '{
+  "spec": {
+    "imageName": "mcr.microsoft.com/documentdb/documentdb:16.2-v1.3.0"
+  }
+}'
 ```

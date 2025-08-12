@@ -347,7 +347,34 @@ This CNPG-based HA strategy ensures DocumentDB clusters achieve true zero-downti
 
 ## Multi-Node Upgrade Strategy (Future Enhancement)
 
-**Multi-Node Upgrade Considerations**: While this document focuses on single-node DocumentDB clusters with local HA (1 primary + 2 standby servers per node), future multi-node deployments will support geographic distribution where each node runs an independent DocumentDB cluster. Multi-node upgrades will require careful consideration of node upgrade sequencing based on geographic distribution and availability zones, traffic balancing across nodes, cross-node dependency analysis, and risk mitigation by upgrading non-critical nodes first. Additional complexity arises in multi-cloud scenarios involving cross-cloud networking, provider-specific maintenance windows, data sovereignty requirements, and coordinated monitoring across cloud providers. The orchestration challenges include synchronizing upgrades across geographically distributed clusters, maintaining global data consistency, handling partial upgrade failures across multiple nodes/clouds, and coordinating teams across different regions. This multi-node upgrade strategy will be covered in a separate design document when DocumentDB enables multi-node deployment scenarios, building upon the current single-node HA strategy as the foundation.
+**Multi-Node Upgrade Considerations**: While this document focuses on single-node DocumentDB clusters with local HA (1 primary + 2 standby servers per node), future multi-node deployments will support horizontal scaling using multiple PostgreSQL clusters managed by Citus.
+
+### Citus Integration for Multi-Node Architecture
+
+DocumentDB will leverage **Citus** (PostgreSQL extension for distributed SQL) to enable horizontal scaling through multi-node deployments. This integration requires enhancements to the CNPG operator to support Citus-specific cluster topologies.
+
+**Multi-Node Architecture with Citus**
+
+The Citus cluster architecture consists of a single coordinator node that manages distributed queries and metadata, along with multiple worker nodes that provide horizontal scaling capabilities. Each node maintains its own high availability configuration, with the coordinator node running 1 primary plus 2 standby servers managed by CNPG, and each worker node following the same HA pattern. For example, a deployment with 3 worker nodes would result in 9 total PostgreSQL instances (3 primaries and 6 standby servers). Citus MX handles intelligent query routing and distributed transaction coordination across all nodes, while the sharding strategy automatically distributes data across worker nodes based on document keys.
+
+**CNPG Integration Requirements**
+
+To support this architecture, CNPG will need several enhancements including cluster-level configuration support for Citus coordinator and worker node specifications, enhanced service discovery for inter-node communication, coordinated backup procedures across all Citus nodes, and orchestrated upgrades that maintain Citus cluster consistency throughout the process.
+
+**Upgrade Complexity Considerations**
+
+Multi-node upgrades introduce significant complexity that requires careful consideration of node upgrade sequencing based on availability zones, traffic balancing across worker nodes, cross-node dependency analysis, and risk mitigation strategies such as upgrading non-critical worker nodes before the coordinator node. The primary orchestration challenges include synchronizing upgrades across distributed worker nodes, maintaining data consistency during worker node upgrades, handling partial upgrade failures across multiple nodes, coordinating Citus metadata updates during upgrades, and ensuring Citus MX routing remains functional throughout the upgrade process.
+
+**Citus-Specific Upgrade Strategy**
+
+The upgrade strategy must account for several Citus-specific considerations. The sequencing strategy needs to determine whether to upgrade worker nodes first or the coordinator first, based on Citus version compatibility requirements. Metadata synchronization becomes critical to ensure Citus metadata consistency during rolling upgrades across nodes. Shard rebalancing must be coordinated during worker node upgrades to manage data redistribution effectively. Additionally, maintaining Citus MX routing functionality during node transitions and managing inter-node connectivity during upgrade phases are essential for seamless operations.
+
+
+This multi-node upgrade strategy will be covered in a separate design document when DocumentDB enables multi-node deployment scenarios, building upon the current single-node HA strategy as the foundation.
+
+## Multi-Region Upgrade Strategy (Future Enhancement)
+
+**Multi-Region Upgrade Considerations**: While multi-node deployments focus on horizontal scaling within a single location, future multi-region deployments will address geographic distribution challenges across different regions, clouds, or data centers using a primary-replica region architecture. Multi-region upgrades introduce additional complexity including cross-region network latency considerations, provider-specific maintenance windows, data sovereignty and compliance requirements, regional disaster recovery coordination, and potential split-brain scenarios during network partitions between regions. The orchestration strategy will need to account for replica-first upgrade sequencing (upgrading replica regions before the primary region), cross-region data consistency validation between primary and replica regions, region-specific rollback procedures, and coordinated monitoring across geographically distributed infrastructure. This multi-region upgrade strategy will be addressed in a dedicated design document when DocumentDB expands beyond single-region deployments.
 
 ## Upgrade Strategies
 

@@ -36,4 +36,7 @@ rules:
 - apiGroups: ["postgresql.cnpg.io"]
   resources: ["clusters", "publications", "subscriptions"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["cert-manager.io"]
+  resources: ["certificates", "certificates/status", "issuers", "clusterissuers"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
 

@@ -105,8 +105,11 @@ func (impl Implementation) reconcileMetadata(
 
 	// Debug: Check if our plugin is found in the cluster's plugin list
 	for i, plugin := range cluster.Spec.Plugins {
-		log.Printf("Plugin[%d]: Name=%s, Enabled=%t, Parameters=%v",
-			i, plugin.Name, plugin.Enabled, plugin.Parameters)
+		var enabledVal interface{} = nil
+		if plugin.Enabled != nil {
+			enabledVal = *plugin.Enabled
+		}
+		log.Printf("Plugin[%d]: Name=%s, Enabled=%v, Parameters=%v", i, plugin.Name, enabledVal, plugin.Parameters)
 	}
 
 	configuration, valErrs := config.FromParameters(helper)
@@ -180,6 +183,31 @@ func (impl Implementation) reconcileMetadata(
 			RunAsUser:  pointer.Int64(1000),
 			RunAsGroup: pointer.Int64(1000),
 		},
+	}
+
+	// If TLS secret parameter provided, mount it at /tls
+	if tlsSecret, ok := helper.Parameters["gatewayTLSSecret"]; ok && tlsSecret != "" {
+		// Append volume only if not already present
+		found := false
+		for _, v := range mutatedPod.Spec.Volumes {
+			if v.Name == "gateway-tls" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			mutatedPod.Spec.Volumes = append(mutatedPod.Spec.Volumes, corev1.Volume{
+				Name: "gateway-tls",
+				VolumeSource: corev1.VolumeSource{
+					Secret: &corev1.SecretVolumeSource{SecretName: tlsSecret},
+				},
+			})
+		}
+		// Add mount to sidecar container
+		sidecar.VolumeMounts = append(sidecar.VolumeMounts, corev1.VolumeMount{Name: "gateway-tls", MountPath: "/tls", ReadOnly: true})
+		// Provide env var for gateway if it supports custom cert path in future
+		sidecar.Env = append(sidecar.Env, corev1.EnvVar{Name: "TLS_CERT_DIR", Value: "/tls"})
+		log.Printf("Injected TLS secret volume for gateway: %s", tlsSecret)
 	}
 
 	// Check if the pod has the label replication_cluster_type=replica

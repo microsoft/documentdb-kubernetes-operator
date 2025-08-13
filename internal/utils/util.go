@@ -255,6 +255,11 @@ func GenerateConnectionString(documentdb *dbpreview.DocumentDB, serviceIp string
 	return fmt.Sprintf("mongodb://$(kubectl get secret documentdb-credentials -n %s -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret documentdb-credentials -n %s -o jsonpath='{.data.password}' | base64 -d)@%s:%d/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0", documentdb.Namespace, documentdb.Namespace, serviceIp, GetPortFor(GATEWAY_PORT))
 }
 
+// GenerateSecureConnectionString returns a MongoDB connection string without tlsAllowInvalidCertificates, assuming a trusted cert.
+func GenerateSecureConnectionString(documentdb *dbpreview.DocumentDB, serviceIp string) string {
+	return fmt.Sprintf("mongodb://$(kubectl get secret documentdb-credentials -n %s -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret documentdb-credentials -n %s -o jsonpath='{.data.password}' | base64 -d)@%s:%d/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&replicaSet=rs0", documentdb.Namespace, documentdb.Namespace, serviceIp, GetPortFor(GATEWAY_PORT))
+}
+
 // GetGatewayImageForDocumentDB returns the gateway image for a DocumentDB instance.
 // If GatewayImage is specified in the spec, it uses that; otherwise it returns a default
 // based on the unified versioning strategy.

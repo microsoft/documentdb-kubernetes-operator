@@ -7,12 +7,16 @@ serviceAccount:
   name: "documentdb-operator"
 image:
   documentdbk8soperator:
-    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/operator
+    # Updated to use ACR repository (operator image)
+    repository: guanzhoutest.azurecr.io/documentdb/operator
     pullPolicy: Always
-    tag: preview
+    # Tag overridden at install/upgrade time via --set image.documentdbk8soperator.tag=<TAG>
+    tag: dev-placeholder
   sidecarinjector:
-    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/sidecar
+    # Updated to use ACR repository (sidecar gateway injector image)
+    repository: guanzhoutest.azurecr.io/documentdb/sidecar
     pullPolicy: Always
-    tag: preview
+    # Tag overridden at install/upgrade time via --set image.sidecarinjector.tag=<TAG>
+    tag: dev-placeholder
 cloudnative-pg:
   namespaceOverride: cnpg-system

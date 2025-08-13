@@ -406,3 +406,5 @@ Chart.lock
 
 # Test output
 *.out
+
+EXAMPLE_k8s_cert_management/

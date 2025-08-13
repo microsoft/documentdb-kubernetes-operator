@@ -8,10 +8,13 @@ import (
 	"sync"
 	"time"
 
+	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
+	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -32,6 +35,95 @@ const (
 type DocumentDBReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+}
+
+// reconcileGatewayTLS handles self-signed TLS provisioning (SelfSigned mode) for the gateway.
+// Future: extend for CertManager and Provided modes.
+func (r *DocumentDBReconciler) reconcileGatewayTLS(ctx context.Context, ddb *dbpreview.DocumentDB) error {
+	if ddb.Spec.TLS == nil || ddb.Spec.TLS.Mode == "" || ddb.Spec.TLS.Mode == "Disabled" {
+		return nil
+	}
+	// Initialize status structure if missing
+	if ddb.Status.TLS == nil {
+		ddb.Status.TLS = &dbpreview.TLSStatus{Ready: false}
+		_ = r.Status().Update(ctx, ddb)
+	}
+
+	switch ddb.Spec.TLS.Mode {
+	case "SelfSigned":
+		return r.ensureSelfSignedCert(ctx, ddb)
+	case "Provided":
+		// Provided mode: just check secret existence later (not implemented yet)
+		return nil
+	case "CertManager":
+		// Will be implemented in next phase for external Issuer refs
+		return nil
+	default:
+		return nil
+	}
+}
+
+func (r *DocumentDBReconciler) ensureSelfSignedCert(ctx context.Context, ddb *dbpreview.DocumentDB) error {
+	namespace := ddb.Namespace
+	issuerName := ddb.Name + "-gateway-selfsigned"
+	certName := ddb.Name + "-gateway-cert"
+	// Determine secret name (reuse cert name)
+	secretName := certName + "-tls"
+
+	// Create Issuer if absent
+	issuer := &cmapi.Issuer{}
+	if err := r.Get(ctx, types.NamespacedName{Name: issuerName, Namespace: namespace}, issuer); err != nil {
+		issuer = &cmapi.Issuer{
+			ObjectMeta: metav1.ObjectMeta{Name: issuerName, Namespace: namespace},
+			Spec:       cmapi.IssuerSpec{IssuerConfig: cmapi.IssuerConfig{SelfSigned: &cmapi.SelfSignedIssuer{}}},
+		}
+		_ = r.Create(ctx, issuer)
+	}
+
+	// Build DNS names for service
+	serviceBase := util.DOCUMENTDB_SERVICE_PREFIX + ddb.Name
+	dnsNames := []string{
+		serviceBase,
+		serviceBase + "." + namespace,
+		serviceBase + "." + namespace + ".svc",
+	}
+
+	cert := &cmapi.Certificate{}
+	if err := r.Get(ctx, types.NamespacedName{Name: certName, Namespace: namespace}, cert); err != nil {
+		cert = &cmapi.Certificate{
+			ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: namespace},
+			Spec: cmapi.CertificateSpec{
+				SecretName:  secretName,
+				Duration:    &metav1.Duration{Duration: 90 * 24 * time.Hour},
+				RenewBefore: &metav1.Duration{Duration: 15 * 24 * time.Hour},
+				DNSNames:    dnsNames,
+				IssuerRef:   cmmeta.ObjectReference{Name: issuerName, Kind: "Issuer", Group: "cert-manager.io"},
+				Usages:      []cmapi.KeyUsage{cmapi.UsageServerAuth},
+			},
+		}
+		_ = r.Create(ctx, cert)
+		ddb.Status.TLS.SecretName = secretName
+		ddb.Status.TLS.Message = "Creating self-signed certificate"
+		_ = r.Status().Update(ctx, ddb)
+		return nil
+	}
+
+	// Evaluate readiness
+	for _, cond := range cert.Status.Conditions {
+		if cond.Type == cmapi.CertificateConditionReady && cond.Status == cmmeta.ConditionTrue {
+			if !ddb.Status.TLS.Ready {
+				ddb.Status.TLS.Ready = true
+				ddb.Status.TLS.SecretName = cert.Spec.SecretName
+				ddb.Status.TLS.Message = "Gateway TLS certificate ready"
+				_ = r.Status().Update(ctx, ddb)
+			}
+			return nil
+		}
+	}
+	ddb.Status.TLS.SecretName = cert.Spec.SecretName
+	ddb.Status.TLS.Message = "Waiting for gateway TLS certificate to become ready"
+	_ = r.Status().Update(ctx, ddb)
+	return nil
 }
 
 var reconcileMutex sync.Mutex
@@ -63,6 +155,11 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	var documentDbServiceIp string
+
+	// Phase 1 TLS (skeleton): evaluate desired TLS mode and initialize status if needed.
+	if err := r.reconcileGatewayTLS(ctx, documentdb); err != nil {
+		log.Error(err, "TLS reconciliation failed (non-fatal)")
+	}
 	// Only create/manage the service if ExposeViaService is configured
 	if documentdb.Spec.ExposeViaService.ServiceType != "" {
 		serviceType := corev1.ServiceTypeClusterIP
@@ -131,14 +228,53 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Update DocumentDB status with CNPG Cluster status and connection string
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: desiredCnpgCluster.Name, Namespace: req.Namespace}, currentCnpgCluster); err == nil {
-		if currentCnpgCluster.Status.Phase != "" {
-			documentdb.Status.Status = currentCnpgCluster.Status.Phase
-			if documentDbServiceIp != "" {
+		// Ensure plugin enabled and TLS secret parameter kept in sync once ready
+		if documentdb.Status.TLS != nil && documentdb.Status.TLS.Ready && documentdb.Status.TLS.SecretName != "" {
+			log.Info("Syncing TLS secret into CNPG Cluster plugin parameters", "secret", documentdb.Status.TLS.SecretName)
+			updated := false
+			for i := range currentCnpgCluster.Spec.Plugins {
+				p := &currentCnpgCluster.Spec.Plugins[i]
+				if p.Name == desiredCnpgCluster.Spec.Plugins[0].Name { // target our sidecar plugin
+					if p.Enabled == nil || !*p.Enabled {
+						trueVal := true
+						p.Enabled = &trueVal
+						updated = true
+						log.Info("Enabled sidecar plugin")
+					}
+					if p.Parameters == nil {
+						p.Parameters = map[string]string{}
+					}
+					currentVal := p.Parameters["gatewayTLSSecret"]
+					if currentVal != documentdb.Status.TLS.SecretName {
+						p.Parameters["gatewayTLSSecret"] = documentdb.Status.TLS.SecretName
+						updated = true
+						log.Info("Updated gatewayTLSSecret parameter", "old", currentVal, "new", documentdb.Status.TLS.SecretName)
+					}
+				}
+			}
+			if updated {
+				if currentCnpgCluster.Annotations == nil {
+					currentCnpgCluster.Annotations = map[string]string{}
+				}
+				currentCnpgCluster.Annotations["documentdb.microsoft.com/gateway-tls-rev"] = time.Now().Format(time.RFC3339Nano)
+				if err := r.Client.Update(ctx, currentCnpgCluster); err == nil {
+					log.Info("Patched CNPG Cluster with TLS settings; requeueing for pod update")
+					return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+				} else {
+					log.Error(err, "Failed to update CNPG Cluster with TLS settings")
+				}
+			}
+		}
+		// Update status connection string
+		if documentDbServiceIp != "" {
+			if documentdb.Status.TLS != nil && documentdb.Status.TLS.Ready {
+				documentdb.Status.ConnectionString = util.GenerateSecureConnectionString(documentdb, documentDbServiceIp)
+			} else {
 				documentdb.Status.ConnectionString = util.GenerateConnectionString(documentdb, documentDbServiceIp)
 			}
-			if err := r.Status().Update(ctx, documentdb); err != nil {
-				log.Error(err, "Failed to update DocumentDB status and connection string")
-			}
+		}
+		if err := r.Status().Update(ctx, documentdb); err != nil {
+			log.Error(err, "Failed to update DocumentDB status and connection string")
 		}
 	}
 

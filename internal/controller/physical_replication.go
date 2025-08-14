@@ -33,32 +33,40 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 		return nil
 	}
 
-	self, source, err := r.GetSelfAndSource(ctx, documentdb)
+	self, others, err := r.SplitSelfAndOthers(ctx, documentdb)
 	if err != nil {
 		return err
 	}
-	if self == source {
+	if len(others) == 0 {
 		return fmt.Errorf("Must have at least one remote cluster")
-	}
-
-	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
-		err = r.CreateServiceImportAndExport(ctx, source, self, documentdb)
-		if err != nil {
-			return err
-		}
 	}
 
 	isPrimary := documentdb.Spec.ClusterReplication.Primary == self
 
-	if documentdb.Spec.ClusterReplication.HighAvailability && isPrimary {
-		err = r.CreateWALReplica(ctx, documentdb, self)
+	source := documentdb.Spec.ClusterReplication.Primary
+	if isPrimary {
+		source = others[0]
+	}
+
+	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
+		err = r.CreateServiceImportAndExport(ctx, others, source, self, documentdb)
 		if err != nil {
 			return err
 		}
-	} else if documentdb.Status.FailingOver && isPrimary {
-		err = r.StopWALReplica(ctx, documentdb, self)
-		if err != nil {
-			return err
+	}
+
+	if documentdb.Spec.ClusterReplication.HighAvailability && isPrimary {
+		// If we are failing over, stop the WAL replica
+		if documentdb.Status.TargetPrimary == documentdb.Status.LocalPrimary {
+			err = r.CreateWALReplica(ctx, documentdb, self)
+			if err != nil {
+				return err
+			}
+		} else {
+			err = r.StopWALReplica(ctx, documentdb, self)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -84,8 +92,14 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 		cnpgCluster.Spec.PostgresConfiguration.Synchronous = &cnpgv1.SynchronousReplicaConfiguration{
 			Method:          cnpgv1.SynchronousReplicaConfigurationMethodAny,
 			Number:          3,
-			StandbyNamesPre: []string{source, "pg_receivewal"},
+			StandbyNamesPre: append(others, "pg_receivewal"), // If we use `others` again later this will be a problem
 			DataDurability:  cnpgv1.DataDurabilityLevelRequired,
+		}
+		trueVal := true
+		cnpgCluster.Spec.ReplicationSlots = &cnpgv1.ReplicationSlotsConfiguration{
+			SynchronizeReplicas: &cnpgv1.SynchronizeReplicasConfiguration{
+				Enabled: &trueVal,
+			},
 		}
 	}
 
@@ -97,7 +111,27 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 
 	sourceHost := source + "-rw." + documentdb.Namespace + ".svc"
 	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
-		sourceHost = documentdb.Namespace + "-" + source + "-rw.fleet-system.svc"
+		sourceHost = documentdb.Namespace + "-" + source + "-" + self + "-rw.fleet-system.svc"
+
+		// also need to create services for each of the other clusters
+		cnpgCluster.Spec.Managed = &cnpgv1.ManagedConfiguration{
+			Services: &cnpgv1.ManagedServices{
+				Additional: []cnpgv1.ManagedService{},
+			},
+		}
+		for _, other := range documentdb.Spec.ClusterReplication.ClusterList {
+			if other != self {
+				cnpgCluster.Spec.Managed.Services.Additional = append(cnpgCluster.Spec.Managed.Services.Additional,
+					cnpgv1.ManagedService{
+						SelectorType: cnpgv1.ServiceSelectorTypeRW,
+						ServiceTemplate: cnpgv1.ServiceTemplateSpec{
+							ObjectMeta: cnpgv1.Metadata{
+								Name: self + "-" + other + "-rw",
+							},
+						},
+					})
+			}
+		}
 	}
 	selfHost := documentdb.Name + "-rw." + documentdb.Namespace + ".svc"
 	cnpgCluster.Spec.ExternalClusters = []cnpgv1.ExternalCluster{
@@ -124,59 +158,69 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 	return nil
 }
 
-func (r *DocumentDBReconciler) GetSelfAndSource(ctx context.Context, documentdb dbpreview.DocumentDB) (string, string, error) {
-	clusterMapName := "cluster-name"
+func (r *DocumentDBReconciler) SplitSelfAndOthers(ctx context.Context, documentdb dbpreview.DocumentDB) (string, []string, error) {
 
 	self := documentdb.Name
+	var err error
 
 	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
-		clusterNameConfigMap := &corev1.ConfigMap{}
-		err := r.Get(ctx, types.NamespacedName{Name: clusterMapName, Namespace: "kube-system"}, clusterNameConfigMap)
+		self, err = r.GetSelfName(ctx)
 		if err != nil {
-			return "", "", err
-		}
-
-		self = clusterNameConfigMap.Data["name"]
-		if self == "" {
-			return "", "", fmt.Errorf("name key not found in kube-system:cluster-name configmap")
+			return "", nil, err
 		}
 	}
 
 	// Set the source to be the first cluster in the list that isn't self
-	source := documentdb.Spec.ClusterReplication.ClusterList[0]
+	others := []string{}
 	for _, c := range documentdb.Spec.ClusterReplication.ClusterList {
 		if c != self {
-			source = c
-			break
+			others = append(others, c)
 		}
 	}
-	return self, source, nil
+	return self, others, nil
 }
 
-func (r *DocumentDBReconciler) CreateServiceImportAndExport(ctx context.Context, source string, self string, documentdb dbpreview.DocumentDB) error {
+func (r *DocumentDBReconciler) GetSelfName(ctx context.Context) (string, error) {
+	clusterMapName := "cluster-name"
+	clusterNameConfigMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, types.NamespacedName{Name: clusterMapName, Namespace: "kube-system"}, clusterNameConfigMap)
+	if err != nil {
+		return "", err
+	}
 
-	selfServiceName := self + "-rw"
-	foundServiceExport := &fleetv1alpha1.ServiceExport{}
-	err := r.Get(ctx, types.NamespacedName{Name: selfServiceName, Namespace: documentdb.Namespace}, foundServiceExport)
-	if err != nil && errors.IsNotFound(err) {
-		log.Log.Info("Service Export not found. Creating a new Service Export")
+	self := clusterNameConfigMap.Data["name"]
+	if self == "" {
+		return "", fmt.Errorf("name key not found in kube-system:cluster-name configmap")
+	}
+	return self, nil
+}
 
-		// Service Export
-		ringServiceExport := &fleetv1alpha1.ServiceExport{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      selfServiceName,
-				Namespace: documentdb.Namespace,
-			},
-		}
-		err = r.Create(ctx, ringServiceExport)
-		if err != nil {
-			return err
+func (r *DocumentDBReconciler) CreateServiceImportAndExport(ctx context.Context, others []string, source, self string, documentdb dbpreview.DocumentDB) error {
+
+	for _, other := range others {
+		serviceName := self + "-" + other + "-rw"
+		foundServiceExport := &fleetv1alpha1.ServiceExport{}
+		err := r.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: documentdb.Namespace}, foundServiceExport)
+		if err != nil && errors.IsNotFound(err) {
+			log.Log.Info("Service Export not found. Creating a new Service Export for " + other)
+
+			// Service Export
+			ringServiceExport := &fleetv1alpha1.ServiceExport{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      serviceName,
+					Namespace: documentdb.Namespace,
+				},
+			}
+			err = r.Create(ctx, ringServiceExport)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
-	sourceServiceName := source + "-rw"
+	sourceServiceName := source + "-" + self + "-rw"
 	foundMCS := &fleetv1alpha1.MultiClusterService{}
-	err = r.Get(ctx, types.NamespacedName{Name: sourceServiceName, Namespace: documentdb.Namespace}, foundMCS)
+	err := r.Get(ctx, types.NamespacedName{Name: sourceServiceName, Namespace: documentdb.Namespace}, foundMCS)
 	if err != nil && errors.IsNotFound(err) {
 		log.Log.Info("Multi Cluster Service not found. Creating a new Multi Cluster Service")
 		// Multi Cluster Service

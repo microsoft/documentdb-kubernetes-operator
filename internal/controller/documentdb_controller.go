@@ -76,8 +76,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		// Define the Service for this DocumentDB instance
-		enabled := !documentdb.Status.FailingOver
-		ddbService := util.GetDocumentDBServiceDefinition(documentdb, req.Namespace, serviceType, enabled)
+		ddbService := util.GetDocumentDBServiceDefinition(documentdb, req.Namespace, serviceType)
 
 		// Check if the DocumentDB Service already exists for this instance
 		foundService, err := util.UpsertService(ctx, r.Client, ddbService)
@@ -149,10 +148,10 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// TODO make this only happen on primary cluster, for now just edit the primary cluster's spec
-	self, _, error := r.GetSelfAndSource(ctx, *documentdb)
-	if error != nil {
-		log.Error(error, "Failed to get self and source for DocumentDB")
-		return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+	self, err := r.GetSelfName(ctx)
+	if err != nil {
+		log.Error(err, "Failed to get self name for DocumentDB")
+		return ctrl.Result{RequeueAfter: RequeueAfterShort}, err
 	}
 	isPrimary := documentdb.Spec.ClusterReplication.Primary == self
 
@@ -160,33 +159,25 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if currentCnpgCluster.Status.Phase == "Cluster in healthy state" && isPrimary {
 		grantCommand := "GRANT documentdb_admin_role TO streaming_replica;"
 
-		if err := r.executeSQLCommand(ctx, documentdb.Name, req.Namespace, grantCommand, "grant-permissions"); err != nil {
+		if err := r.executeSQLCommand(ctx, documentdb.Name, req.Namespace, self, grantCommand, "grant-permissions"); err != nil {
 			log.Error(err, "Failed to grant permissions to streaming_replica")
 			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 		}
 	}
 
-	if isPrimary && documentdb.Status.FailingOver {
-		log.Info("Still failing over")
-		// Fenced above
-		if currentCnpgCluster.Status.TargetPrimary == "azure-cluster-1" {
+	if isPrimary && documentdb.Status.TargetPrimary != "" {
+		// If these are different, we need to initiate a failover
+		if documentdb.Status.TargetPrimary != currentCnpgCluster.Status.TargetPrimary {
 
-			// promote standby cluster to primary
-			if err = Promote(ctx, r.Client, currentCnpgCluster.Namespace, currentCnpgCluster.Name, "azure-cluster-2"); err != nil {
+			if err = Promote(ctx, r.Client, currentCnpgCluster.Namespace, currentCnpgCluster.Name, documentdb.Status.TargetPrimary); err != nil {
 				log.Error(err, "Failed to promote standby cluster to primary")
 				return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 			}
-		} else if currentCnpgCluster.Status.CurrentPrimary == "azure-cluster-2" {
-			// create replication slot in replica
-			log.Info("Creating wal_replication slot in new primary cluster")
-
-			if err := r.executeSQLCommand(ctx, documentdb.Name, req.Namespace, "SELECT pg_create_physical_replication_slot('wal_replica');", "replication"); err != nil {
-				log.Error(err, "Failed to create wal_replica replication slot")
-				return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
-			}
+		} else if documentdb.Status.TargetPrimary != documentdb.Status.LocalPrimary &&
+			documentdb.Status.TargetPrimary == currentCnpgCluster.Status.CurrentPrimary {
 
 			log.Info("Marking failover as complete")
-			documentdb.Status.FailingOver = false
+			documentdb.Status.LocalPrimary = currentCnpgCluster.Status.CurrentPrimary
 			if err := r.Status().Update(ctx, documentdb); err != nil {
 				log.Error(err, "Failed to update DocumentDB status")
 				return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
@@ -327,8 +318,9 @@ func Promote(ctx context.Context, cli client.Client,
 }
 
 // executeSQLCommand creates a pod to execute SQL commands against the azure-cluster-rw service
-func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdbName, namespace, sqlCommand, uniqueName string) error {
+func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdbName, namespace, self, sqlCommand, uniqueName string) error {
 	zero := int32(0)
+	host := self + "-rw"
 	sqlPod := &batchv1.Job{
 		ObjectMeta: ctrl.ObjectMeta{
 			Name:      fmt.Sprintf("%s-%s-sql-executor", documentdbName, uniqueName),
@@ -344,7 +336,7 @@ func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdb
 							Image: "postgres:15",
 							Command: []string{
 								"psql",
-								"-h", "azure-cluster-rw",
+								"-h", host,
 								"-U", "postgres",
 								"-d", "postgres",
 								"-c", sqlCommand,

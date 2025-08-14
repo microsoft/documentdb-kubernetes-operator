@@ -36,7 +36,9 @@ func DeleteService(ctx context.Context, c client.Client, serviceName, namespace 
 }
 
 // GetDocumentDBServiceDefinition returns the LoadBalancer Service definition for a given DocumentDB instance
-func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, namespace string, serviceType corev1.ServiceType, enabled bool) *corev1.Service {
+func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, namespace string, serviceType corev1.ServiceType) *corev1.Service {
+	// If no local HA, these two should be empty
+	enabled := documentdb.Status.TargetPrimary == documentdb.Status.LocalPrimary
 	selector := map[string]string{
 		"disabled": "true",
 	}

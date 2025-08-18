@@ -186,6 +186,8 @@ func (impl Implementation) reconcileMetadata(
 	}
 
 	// If TLS secret parameter provided, mount it at /tls
+	// Track whether TLS secret is configured to augment container args later
+	hasTLSSecret := false
 	if tlsSecret, ok := helper.Parameters["gatewayTLSSecret"]; ok && tlsSecret != "" {
 		// Append volume only if not already present
 		found := false
@@ -205,17 +207,31 @@ func (impl Implementation) reconcileMetadata(
 		}
 		// Add mount to sidecar container
 		sidecar.VolumeMounts = append(sidecar.VolumeMounts, corev1.VolumeMount{Name: "gateway-tls", MountPath: "/tls", ReadOnly: true})
-		// Provide env var for gateway if it supports custom cert path in future
-		sidecar.Env = append(sidecar.Env, corev1.EnvVar{Name: "TLS_CERT_DIR", Value: "/tls"})
+		// Provide env vars for gateway to load the mounted certificate and key
+		// Most gateway images respect CERT_PATH and KEY_FILE; keep TLS_CERT_DIR for backward-compat
+		sidecar.Env = append(sidecar.Env,
+			corev1.EnvVar{Name: "TLS_CERT_DIR", Value: "/tls"},
+			corev1.EnvVar{Name: "CERT_PATH", Value: "/tls/tls.crt"},
+			corev1.EnvVar{Name: "KEY_FILE", Value: "/tls/tls.key"},
+		)
+		// Mark that TLS secret is present so we can also pass explicit CLI args
+		hasTLSSecret = true
 		log.Printf("Injected TLS secret volume for gateway: %s", tlsSecret)
 	}
 
+	// Build base args and append TLS file args if a TLS secret is configured
+	args := []string{"--start-pg", "false", "--pg-port", "5432"}
 	// Check if the pod has the label replication_cluster_type=replica
 	if mutatedPod.Labels["replication_cluster_type"] == "replica" {
-		sidecar.Args = []string{"--create-user", "false", "--start-pg", "false", "--pg-port", "5432"}
+		args = append([]string{"--create-user", "false"}, args...)
 	} else {
-		sidecar.Args = []string{"--create-user", "true", "--start-pg", "false", "--pg-port", "5432"}
+		args = append([]string{"--create-user", "true"}, args...)
 	}
+	if hasTLSSecret {
+		// Pass cert and key via CLI args to align with emulator_entrypoint.sh interface
+		args = append(args, "--cert-path", "/tls/tls.crt", "--key-file", "/tls/tls.key")
+	}
+	sidecar.Args = args
 
 	// Inject the sidecar container
 	err = object.InjectPluginSidecar(mutatedPod, sidecar, false)

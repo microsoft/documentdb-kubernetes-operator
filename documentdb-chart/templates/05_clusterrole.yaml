@@ -37,6 +37,6 @@ rules:
   resources: ["clusters", "publications", "subscriptions"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 - apiGroups: ["cert-manager.io"]
-  resources: ["certificates", "certificates/status", "issuers", "clusterissuers"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
+  resources: ["certificates", "certificates/status", "certificates/finalizers", "issuers", "clusterissuers"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 

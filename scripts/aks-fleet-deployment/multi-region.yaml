@@ -32,11 +32,9 @@ spec:
   clusterReplication:
     highAvailability: true
     enableFleetForCrossCloud: true 
-    primary: member-eastus2-z2fyhq65f4ktg
+    primary: ${PRIMARY_CLUSTER}
     clusterList:
-      - member-eastus2-z2fyhq65f4ktg
-      - member-westus3-z2fyhq65f4ktg
-      - member-uksouth-z2fyhq65f4ktg
+${CLUSTER_LIST}
   exposeViaService:
     serviceType: LoadBalancer
   logLevel: info

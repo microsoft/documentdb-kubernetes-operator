@@ -5,7 +5,7 @@ This directory contains templates for deploying an AKS Fleet with member cluster
 ## Architecture
 
 - **Fleet Resource**: Deployed in East US 2 (management only)
-- **Member Clusters**: Deployed in West US 3, UK South, and East US 2
+- **Member Clusters**: Dynamically discovered and deployed across available regions
 - **Network**: Full mesh VNet peering between all member clusters
 - **VM Size**: Standard_D2ps_v6 (configurable)
 - **Node Count**: 1 node per cluster for cost optimization
@@ -20,7 +20,7 @@ This directory contains templates for deploying an AKS Fleet with member cluster
 - Contributor access to the subscription
 - kubelogin for Azure AD authentication: `az aks install-cli`
 - Helm 3.x installed
-- envsubst (usually part of gettext package)
+- jq for JSON processing: `brew install jq` (macOS) or `apt-get install jq` (Linux)
 
 ## Deployment
 
@@ -86,11 +86,20 @@ export DOCUMENTDB_PASSWORD="MySecureP@ssw0rd"
 ```
 
 This will:
-- Create a DocumentDB namespace
-- Deploy a primary DocumentDB instance in East US 2
-- Configure replicas in West US 3 and UK South
-- Set up cross-region replication
-- Provide connection information
+- **Dynamically discover** all member clusters in the resource group
+- **Create cluster identification ConfigMaps** on each cluster for tracking
+- **Select a primary cluster** (prefers eastus2, or uses first available)
+- **Deploy DocumentDB** with cross-region replication
+- **Configure replicas** in all other discovered regions
+- **Provide connection information** and failover commands
+
+### Key Features of Multi-Region Deployment
+
+- **Dynamic Cluster Discovery**: No hardcoded cluster names - automatically finds all member clusters
+- **Smart Primary Selection**: Automatically selects the best primary cluster
+- **Cluster Identification**: Creates ConfigMaps to identify each cluster with name and region
+- **Resource Management**: Handles existing resources with options to delete, update, or cancel
+- **Generated Failover Commands**: Provides ready-to-use commands for failover to any region
 
 ## Configuration
 
@@ -108,10 +117,15 @@ Edit `parameters.bicepparam` to customize:
 
 Edit `multi-region.yaml` to customize:
 - Database size and instances
-- Primary region selection
+- Primary region selection (handled dynamically by script)
 - Replication settings
 - Service exposure type
 - Log levels
+
+The template uses placeholders that are replaced at runtime:
+- `${DOCUMENTDB_PASSWORD}`: The database password
+- `${PRIMARY_CLUSTER}`: The selected primary cluster
+- `${CLUSTER_LIST}`: The list of all discovered clusters
 
 ### Network Configuration
 
@@ -126,6 +140,7 @@ The deployment scripts automatically set and export:
 - `FLEET_ID`: Full resource ID of the fleet
 - `IDENTITY`: Your Azure AD user ID
 - `DOCUMENTDB_PASSWORD`: Database password (when deploying DocumentDB)
+- `RESOURCE_GROUP`: Resource group name (default: german-aks-fleet-rg)
 
 ## kubectl Aliases
 
@@ -150,10 +165,10 @@ az fleet show --name aks-fleet-hub-fleet --resource-group german-aks-fleet-rg
 az fleet member list --fleet-name aks-fleet-hub-fleet --resource-group german-aks-fleet-rg
 
 # Check ClusterResourcePlacement status
-k-hub get clusterresourceplacement
+kubectl --context hub get clusterresourceplacement
 
 # View placement details
-k-hub describe clusterresourceplacement documentdb-crp
+kubectl --context hub describe clusterresourceplacement documentdb-crp
 ```
 
 ## DocumentDB Management
@@ -161,36 +176,51 @@ k-hub describe clusterresourceplacement documentdb-crp
 ### Check Deployment Status
 
 ```bash
+# Quick status across all clusters (auto-generated command)
+for c in member-eastus2-xxx member-uksouth-xxx member-westus3-xxx; do 
+  echo "=== $c ==="
+  kubectl --context $c get documentdb,pods -n documentdb-preview-ns 2>/dev/null || echo 'Not deployed yet'
+  echo
+done
+
 # Check operator status on all clusters
-for cluster in member-{westus3,uksouth,eastus2}-z2fyhq65f4ktg; do
+for cluster in $(az aks list -g german-aks-fleet-rg -o json | jq -r '.[] | select(.name|startswith("member-")) | .name'); do
   echo "=== $cluster ==="
   kubectl --context $cluster get deploy -n documentdb-operator
   kubectl --context $cluster get pods -n documentdb-operator
-done
-
-# Check DocumentDB instances
-for cluster in member-{westus3,uksouth,eastus2}-z2fyhq65f4ktg; do
-  echo "=== $cluster ==="
-  kubectl --context $cluster get documentdb -n documentdb-preview-ns
 done
 ```
 
 ### Connect to Database
 
 ```bash
-# Port forward to primary (East US 2)
-kubectl --context member-eastus2-z2fyhq65f4ktg port-forward \
-  -n documentdb-preview-ns svc/documentdb-preview 5432:5432
+# Port forward to primary (dynamically determined)
+kubectl --context <primary-cluster> port-forward \
+  -n documentdb-preview-ns svc/documentdb-preview 10260:10260
 
-# In another terminal, connect with psql
-psql postgresql://default_user:$DOCUMENTDB_PASSWORD@localhost:5432/documentdb
+# Get connection string (auto-displayed after deployment)
+kubectl --context <primary-cluster> get documentdb -n documentdb-preview-ns -A -o json | \
+  jq ".items[0].status.connectionString"
+```
+
+### Failover Operations
+
+The deployment script generates failover commands for each region:
+
+```bash
+# Example: Failover to westus3
+kubectl --context hub patch documentdb documentdb-preview -n documentdb-preview-ns \
+  --type='merge' -p '{"spec":{"clusterReplication":{"primary":"member-westus3-xxx"}}}'
 ```
 
 ### Monitor Replication
 
 ```bash
-# Watch all DocumentDB instances
-watch 'for c in member-{westus3,uksouth,eastus2}-z2fyhq65f4ktg; do \
+# Watch ClusterResourcePlacement status
+watch 'kubectl --context hub get clusterresourceplacement documentdb-crp -o wide'
+
+# Monitor all DocumentDB instances
+watch 'for c in $(az aks list -g german-aks-fleet-rg -o json | jq -r ".[] | select(.name|startswith(\"member-\")) | .name"); do \
   echo "=== $c ==="; \
   kubectl --context $c get documentdb,pods -n documentdb-preview-ns; \
   echo; \
@@ -216,7 +246,7 @@ Test connectivity between clusters:
 
 ```bash
 # Deploy a test pod in one cluster
-k-westus3 run test-pod --image=nicolaka/netshoot -it --rm -- /bin/bash
+kubectl --context member-westus3-xxx run test-pod --image=nicolaka/netshoot -it --rm -- /bin/bash
 
 # From within the pod, ping services in other clusters
 ```
@@ -259,15 +289,22 @@ If resources aren't propagating to member clusters:
 
 ```bash
 # Check ClusterResourcePlacement status
-k-hub get clusterresourceplacement documentdb-crp -o yaml
+kubectl --context hub get clusterresourceplacement documentdb-crp -o yaml
 
 # Check for placement conditions
-k-hub describe clusterresourceplacement documentdb-crp
+kubectl --context hub describe clusterresourceplacement documentdb-crp
 
 # Verify member clusters are joined
 az fleet member list --fleet-name aks-fleet-hub-fleet \
   --resource-group german-aks-fleet-rg -o table
 ```
+
+### Cluster List Formatting Issues
+
+If the cluster list in the YAML is not formatted correctly:
+1. Check that `jq` is installed: `which jq`
+2. Verify clusters are discovered: `az aks list -g german-aks-fleet-rg -o json | jq -r '.[] | select(.name|startswith("member-")) | .name'`
+3. Review the generated YAML preview shown during deployment
 
 ### Debugging
 
@@ -285,7 +322,7 @@ To delete all resources:
 
 ```bash
 # Delete DocumentDB resources first
-k-hub delete -f multi-region.yaml
+kubectl --context hub delete -f multi-region.yaml
 
 # Delete the entire resource group
 az group delete --name german-aks-fleet-rg --yes --no-wait
@@ -296,13 +333,24 @@ az group delete --name german-aks-fleet-rg --yes --no-wait
 - `deploy-fleet-bicep.sh`: Main fleet deployment script
 - `install-cert-manager.sh`: Installs cert-manager on all member clusters
 - `install-documentdb-operator.sh`: Deploys DocumentDB operator via Fleet
-- `deploy-multi-region.sh`: Deploys multi-region DocumentDB with replication
+- `deploy-multi-region.sh`: Deploys multi-region DocumentDB with dynamic cluster discovery
 - `main.bicep`: Bicep template for fleet and cluster deployment
 - `parameters.bicepparam`: Parameter file for Bicep deployment
-- `multi-region.yaml`: Multi-region DocumentDB configuration template
+- `multi-region.yaml`: Multi-region DocumentDB configuration template with placeholders
+
+## Key Improvements in Latest Version
+
+1. **Dynamic Cluster Discovery**: No hardcoded cluster names - automatically discovers all deployed clusters
+2. **Cluster Identification**: Creates ConfigMaps to track cluster identity and region
+3. **Smart Primary Selection**: Automatically selects optimal primary cluster
+4. **Resource Conflict Handling**: Detects existing resources and provides options
+5. **Generated Commands**: Produces ready-to-use failover and monitoring commands
+6. **Better Error Handling**: Improved validation and error messages
+7. **Connection String Display**: Shows actual DocumentDB connection string from status
 
 ## Additional Resources
 
 - [Azure AKS Fleet Documentation](https://learn.microsoft.com/en-us/azure/kubernetes-fleet/)
 - [AKS Authentication Guide](https://learn.microsoft.com/en-us/azure/aks/kubelogin-authentication)
 - [Fleet ClusterResourcePlacement API](https://learn.microsoft.com/en-us/azure/kubernetes-fleet/concepts-resource-propagation)
+- [DocumentDB Kubernetes Operator Documentation](../../README.md)

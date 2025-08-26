@@ -116,9 +116,8 @@ Clear separation: Kubernetes admins upgrade infrastructure, Database admins coor
 
 ## Upgrade Strategies
 
-DocumentDB uses a multi-version API approach where a single operator version supports multiple DocumentDB cluster versions simultaneously, enabling gradual migration without forcing upgrades.
-
 ### Three-Tier Responsibility Model
+Clear separation of platform, data, and application duties to enable parallel progress and safe staged upgrades.
 
 | Role | Primary Scope | Upgrade Ownership |
 |------|---------------|------------------|
@@ -127,6 +126,7 @@ DocumentDB uses a multi-version API approach where a single operator version sup
 | Application / Database Developer | App integration & validation | Phase 3 – Application validation |
 
 ### Multi-Version Support Architecture
+DocumentDB uses a multi-version API approach where a single operator version supports multiple DocumentDB cluster versions simultaneously, enabling gradual migration without forcing upgrades.
 
 - Operator v2: serves cluster API v1 + v2
 - Operator v3: serves v1 (deprecated) + v2 + v3
@@ -217,11 +217,42 @@ While all components upgrade together, each has specific characteristics:
 - **Risk Mitigation**: CNPG rolling updates maintain cluster availability; proven PostgreSQL HA mechanisms ensure data safety
 - **API Independence**: CNPG typically unchanged between DocumentDB API versions
 
-## Local High Availability (HA) Strategy
+## Local High Availability (HA) and Upgrade Strategy
 
 DocumentDB leverages CNPG's mature PostgreSQL HA capabilities to provide zero-downtime upgrades through controlled failover orchestration.
 
-#### Recommended HA Configuration
+### 1. CNPG in Brief (What It Is & How It Works)
+CloudNative‑PG (CNPG) is a Kubernetes operator that natively manages highly available PostgreSQL clusters. It watches a `Cluster` custom resource and directly creates / replaces Pods, PVCs, and Services to enforce the desired state.
+
+Core concepts:
+- One `Cluster` CR (Custom Resource) declares instance count, storage, replication & update strategy
+- Exactly one primary; remaining instances stream WAL as standbys (async or quorum synchronous)
+- Read/Write service (`-rw`) always targets the current primary; Read-Only service (`-ro`) load‑balances standbys
+- Reconciliation loop: detect spec drift → restart or promote to converge
+- Failover vs Switchover: unplanned automatic promotion vs planned controlled promotion
+- Supervised mode = human operator triggers the switchover; unsupervised = k8s operator may do it automatically
+- Rolling changes: standbys restarted first, then (after switchover) the old primary (full sequence detailed below)
+
+Why it matters for DocumentDB:
+- Gateway sidecar lives in every PostgreSQL pod → inherits CNPG’s ordered restart for continuity
+- Reuse existing Postgres HA features instead of building custom logic.
+- Clear observability (status, events, role labels) simplifies troubleshooting for teams new to CNPG
+
+#### How Local HA Enables Safe Upgrades
+Upgrades (image changes, parameter tweaks, API version bumps) rely directly on the HA mechanics:
+- Trigger: An operator or Helm chart change updates the CNPG Cluster spec (image / parameters). CNPG detects spec drift.
+- Ordering: CNPG restarts standbys first while primary keeps serving writes (maintains availability & avoids write leadership churn early).
+- Validation Window: Each restarted standby catches up WAL; if it fails readiness or replication falls behind, you can halt before touching the primary.
+- Switchover Decision (Supervised Mode): Promotion only happens when you explicitly run the promote command after verifying lag & health (controlled risk). In unsupervised mode CNPG can promote automatically once standbys are ready — faster, less manual control.
+- Primary Restart: After switchover the old primary (now a standby) is restarted; no client connection string changes because Services (-rw / -ro) stay constant.
+- Rollback Path: If a standby fails post‑upgrade you still have an unchanged primary + (potentially) another healthy standby; you can revert the spec/image and let CNPG reconcile back.
+
+
+Operational takeaway: Local HA isn’t separate from upgrade. It is the safety net and sequencing engine that turns a potentially disruptive restart into a controlled, reversible flow.
+
+### 2. Recommended HA Configuration
+
+![Single Node Document DB Cluster with local HA](documentdb-singlenode-localha.png)
 
 **3-Instance Cluster Topology:**
 - **Instance count**: 3 (1 primary + 2 standby servers) for optimal HA balance
@@ -230,16 +261,37 @@ DocumentDB leverages CNPG's mature PostgreSQL HA capabilities to provide zero-do
 - **Unplanned failover**: Handled automatically by CNPG (no custom delay fields required)
 - **PostgreSQL configuration**: Streaming replication with quorum synchronous replication (e.g., synchronous_standby_names='ANY 1 (*)', synchronous_commit=remote_write) to balance durability and availability
 
+Why 3 instead of 2:
+- With only 2 (1 primary + 1 standby) you must choose: synchronous (risk of write stalls if standby slow) or async (risk of small data loss on failover). Three lets you use quorum sync (ANY 1) for durability without stalling on a single standby issue.
+- Upgrades / switchover: in a 2-node layout, during restart of the lone standby you temporarily lose HA; with 3 you still have one healthy standby while the other is being cycled.
+- Failure tolerance: one standby can fail or be lagging and you still retain HA plus synchronous protection.
+- Operational flexibility: allows testing or promoting the most caught‑up standby while another is still catching up.
+- Simpler maintenance windows (patching, rebalancing storage) without dropping below 1 healthy standby.
+
+#### Internal CNPG vs External Gateway Services (Essentials)
+CNPG creates internal PostgreSQL Services:
+`<cluster>-rw` (primary 5432), `<cluster>-ro` (all pods 5432), `<cluster>-r` (replication internals).
+
+DocumentDB exposes Mongo protocol via separate gateway Services on port 10260, not by altering CNPG ones:
+`documentdb-gateway-rw` (primary), `documentdb-gateway-ro` (standbys).
+
+Use cases:
+- 5432 Services: admin, backups, metrics, internal automation.
+- 10260 gateway Services: external client traffic (Mongo wire protocol).
+
+Keep both layers for protocol separation, safer upgrades, security scoping, and to avoid CNPG reconciliation drift.
+
 **Configuration Examples**: See [CNPG HA Configuration Examples](./commands.md#cnpg-ha-configuration-examples) for complete YAML specifications.
 
-#### Zero-Downtime Upgrade Sequence
+
+### 3. Zero-Downtime Upgrade Sequence
 
 **CNPG Managed Rolling Update Process:**
 
 1. **Standby Server Upgrade Phase** (Automatic):
-   - CNPG upgrades standby instances first (highest serial number to lowest)
-   - Each standby server downloads new images and restarts with new configuration
-   - Primary continues serving traffic with full availability
+   - CNPG selects and cycles standby pods before touching the current primary to preserve write availability
+   - Order is determined by the operator's internal reconciliation (not StatefulSet ordinal/"serial number") – each standby is drained, restarted with new image/config, then re-attached
+   - Primary continues serving traffic throughout
 
 2. **Controlled Switchover Phase** (Manual with Supervised Mode):
    - Check standby lag before switchover to ensure optimal timing
@@ -253,32 +305,49 @@ DocumentDB leverages CNPG's mature PostgreSQL HA capabilities to provide zero-do
 
 **Command Examples**: See [CNPG Zero-Downtime Upgrade Sequence](./commands.md#cnpg-zero-downtime-upgrade-sequence) for step-by-step commands.
 
-#### Operational Benefits of CNPG HA
+### 4. Operational Benefits of CNPG HA
 
 **✅ Built-in Capabilities:**
 - **WAL-based replication**: Ensures data consistency during failover between primary and standby servers
-- **Automatic endpoint management**: DNS and service updates during switchover
+- **Automatic service endpoint continuity**: Kubernetes Services (e.g. -rw / -ro) keep stable virtual IPs while their label selectors match the new primary / standby pods after role change (no custom DNS management required)
 - **Connection draining**: Graceful client connection handling
 - **Monitoring integration**: Real-time standby lag and health metrics
 - **Rollback support**: Can revert primary assignment if issues detected
 
-**⚠️ Operational Considerations:**
-- **Supervised mode**: Production environments use manual switchover for maximum control
-- **Standby lag monitoring**: Check lag before manual switchover for optimal timing
-- **Connection pool awareness**: Applications should use read/write service endpoints for seamless failover
-- **Monitoring integration**: Real-time health checks help inform manual switchover decisions
 
 
-#### Risk Mitigation Enhancements
+### 5. Risk Mitigation Enhancements
 
-**Enhanced with CNPG Specifics:**
-- **Automatic failover**: Unplanned failures trigger CNPG-managed failover (no custom failoverDelay field required)
-- **Planned maintenance**: Supervised upgrades allow controlled, low-lag switchover timing
-- **Data protection**: WAL streaming plus quorum synchronous replication mitigate data loss while avoiding write stalls from a single replica outage
-- **Service continuity**: Kubernetes service endpoints automatically update during failover/switchover
-- **Monitoring integration**: CNPG status and pg_stat_replication provide real-time health & lag metrics
+Focus areas and how CNPG covers them:
+- **Failure handling**: Automatic failover promotes the most advanced standby (no custom delay tuning required in most cases)
+- **Planned change control**: Supervised mode defers primary switchover until an explicit promote, reducing surprise write leadership changes
+- **Durability without stalls**: Quorum synchronous replication (e.g. ANY 1) balances data safety and write latency; a single slow standby does not block commits
+- **Endpoint stability**: Kubernetes Services keep a stable virtual IP / DNS name; role change only swaps matching pod backends (no application reconfiguration)
+- **Operational visibility**: Cluster status + pod role labels + pg_stat_replication provide live lag and role insight for go / no‑go decisions
+- **Upgrade safety**: Replica-first (standby-first) rolling restarts retain continuous write availability before controlled switchover
 
-This CNPG-based HA strategy ensures DocumentDB clusters achieve true zero-downtime upgrades while maintaining data integrity and operational simplicity.
+Result: Predictable, observable failover & upgrade flows with minimized write interruption and bounded data loss risk.
+
+### 6. Failover / Switchover Timing (No SLA – Empirical Ranges)
+
+DocumentDB inherits CNPG timing characteristics. No formal SLA is provided; measure in your own environment. Open‑source operator behavior and internal tests suggest these typical windows under healthy conditions:
+
+Planned switchover (supervised promote):
+- Primary write leadership change: ~2–5s (WAL switch + Service/label update)
+- Former primary pod restart (during rolling upgrade): additional 10–40s (does not block writes)
+
+Unplanned primary pod crash (node healthy):
+- Failure detection (readiness/liveness probe → container restart decision): 2–10s
+- Promotion + Service update: ~2–5s
+- Typical write unavailability: 5–15s total
+
+Unplanned node failure:
+- Node NotReady detection (default controller grace / heartbeats): up to ~40s (tunable)
+- Promotion + Service update after pod eviction: ~2–5s
+- Typical window: 20–60s (optimize by tightening node heartbeat/grace if acceptable)
+
+Primary determinants: probe intervals & thresholds, node heartbeat config, replication lag, synchronous commit settings, storage and network latency. Perform periodic controlled drills (supervised promote, pod kill, node simulate) and record observed gaps between last successful and first resumed write to establish internal benchmarks.
+
 
 ## Multi-Node Upgrade Strategy (Future Enhancement)
 
@@ -308,11 +377,7 @@ The upgrade strategy must account for several Citus-specific considerations. The
 
 **Multi-Region Upgrade Considerations**: While multi-node deployments focus on horizontal scaling within a single location, future multi-region deployments will address geographic distribution challenges across different regions, clouds, or data centers using a primary-replica region architecture. Multi-region upgrades introduce additional complexity including cross-region network latency considerations, provider-specific maintenance windows, data sovereignty and compliance requirements, regional disaster recovery coordination, and potential split-brain scenarios during network partitions between regions. The orchestration strategy will need to account for replica-first upgrade sequencing (upgrading replica regions before the primary region), cross-region data consistency validation between primary and replica regions, region-specific rollback procedures, and coordinated monitoring across geographically distributed infrastructure. This multi-region upgrade strategy will be addressed in a dedicated design document when DocumentDB expands beyond single-region deployments.
 
-
-
-## Failure Modes and Recovery (Essentials)
-
-Focus on highest-impact, actionable scenarios only.
+## Failure Modes and Recovery
 
 1. Helm upgrade / CRD change fails
    - Impact: New CR creation blocked; existing clusters keep running
@@ -354,6 +419,38 @@ Rollback Golden Rules:
 - Always have recent logical/physical backup before Phase 2
 - Automate fast rollback for stateless/operator issues; keep manual confirmation for data changes
 - Track each migration (cluster, from→to, start/finish, result) for audit
+
+## Global Upgrade Observability
+
+Monitor these during any upgrade / migration / failover drill; they drive go / pause / rollback decisions:
+
+Key Metrics & Signals:
+- Replication lag (LSN or write/replay lag) – sustained growth pre‑switchover => pause
+- Synchronous quorum intact (>=1 candidate) – loss lowers durability
+- Promotion events (PrimaryChanged / SwitchoverCompleted) – unexpected extras => investigate
+- Pod readiness (primary & standbys) – flapping or prolonged NotReady => halt
+- Gateway vs Postgres readiness gap – >2m divergence => potential translation issue
+- Write TPS & p99 latency – >2x baseline for >5m post‑promotion => rollback candidate
+- Error rate (client/gateway) – spike correlates with availability window length
+- CPU & I/O latency on promoting standby – saturation slows WAL apply
+- Disk fsync latency – rising trend increases promotion duration
+- Node NotReady events – extend failover window; correlate with timing
+
+Suggested Rollback Threshold Examples (tune internally):
+- Replication lag >30s before manual promote
+- Healthy standby count <2 (in 3-node topology) at switchover decision
+- Post‑promotion write latency >2x baseline sustained 5m
+- Gateway readiness failures >2m after Postgres Ready
+
+Minimal Dashboard:
+1. Replication lag & quorum status
+2. Promotion / failover event timeline
+3. TPS & latency with annotated promotions
+4. Error rate (app + gateway)
+5. Pod readiness / restarts
+6. Resource (CPU, I/O, fsync) for primary & candidate standby
+
+Outcome: Rapid anomaly detection, objective rollback triggers, historical baseline to refine timing expectations.
 
 ## Trade-off Analysis
 

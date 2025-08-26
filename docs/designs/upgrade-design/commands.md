@@ -128,7 +128,7 @@ kubectl get events --field-selector involvedObject.name=my-cluster
 
 # Validate cluster after API migration (Developer)
 kubectl run test-connection --rm -i --image=mongo:7 -- \
-  mongosh "mongodb://my-cluster-rw:27017/testdb" --eval "
+  mongosh "mongodb://my-cluster-rw:10260/testdb" --eval "
   db.test.insertOne({migrated_to_v2: true, timestamp: new Date()});
   print('API v2 connectivity test passed');
   "
@@ -366,7 +366,7 @@ migrate_and_test() {
   
   # Test connectivity
   kubectl run test-migration-$cluster --rm -i --image=mongo:7 -- \
-    mongosh "mongodb://${cluster}-rw:27017/test" --eval "
+  mongosh "mongodb://${cluster}-rw:10260/test" --eval "
     db.migration_test.insertOne({
       cluster: '$cluster', 
       api_version: '$target_version',
@@ -711,7 +711,7 @@ if [[ -v CHANGED_COMPONENTS[postgres] ]] || [[ -v CHANGED_COMPONENTS[gateway] ]]
         
         # Test basic connectivity
         kubectl run rollback-test-$cluster --rm -i --tty --timeout=30s --image=mongo:7 -- \
-            mongosh "mongodb://$service_name.$namespace.svc.cluster.local:27017/test" --eval "
+            mongosh "mongodb://$service_name.$namespace.svc.cluster.local:10260/test" --eval "
             db.rollback_test.insertOne({test: 'rollback_validation', timestamp: new Date()});
             print('Rollback connectivity test passed for cluster: $cluster');
             " 2>/dev/null || echo "❌ Connectivity test failed for cluster: $cluster"
@@ -854,7 +854,7 @@ fi
 # Verify rollback
 echo "Verifying rollback connectivity..."
 kubectl run rollback-test --rm -i --timeout=60s --image=mongo:7 -- \
-  mongosh "mongodb://${GREEN_CLUSTER_NAME}-rw.$NAMESPACE.svc.cluster.local:27017/test" --eval "
+  mongosh "mongodb://${GREEN_CLUSTER_NAME}-rw.$NAMESPACE.svc.cluster.local:10260/test" --eval "
   db.rollback_test.insertOne({test: 'rollback_validation', timestamp: new Date()});
   print('Rollback connectivity test passed');
   " 2>/dev/null
@@ -864,7 +864,9 @@ echo "✅ Emergency rollback completed"
 
 ## CNPG Supervised HA Upgrade Procedures
 
-This section contains detailed command examples for CNPG-based high availability upgrade procedures supporting the local HA strategy outlined in the [upgrade design document](./upgrade-design-doc.md#phase-4-local-high-availability-ha-strategy).
+This section contains detailed command examples for CNPG-based high availability upgrade procedures supporting the local HA strategy outlined in the [upgrade design document](./upgrade-design-doc.md#local-high-availability-ha-and-upgrade-strategy).
+
+Terminology note: We use primary + standby (instead of primary + replica). A standby is a streaming replica that can be promoted. The supervised upgrade flow is standby-first (all standbys roll to new image, then controlled switchover, then former primary upgrades) providing continuous write availability and a rollback decision window.
 
 ### CNPG HA Configuration Examples
 
@@ -881,7 +883,7 @@ metadata:
     documentdb.microsoft.com/sidecar-inject: "true"   # Only if injector matches this label
     documentdb.microsoft.com/cluster-version: "v1.4.0"
 spec:
-  instances: 3   # 1 primary + 2 replicas
+  instances: 3   # 1 primary + 2 standbys
 
   # Manual control over primary switch during image upgrades
   primaryUpdateStrategy: supervised
@@ -909,7 +911,7 @@ spec:
     storageClass: fast-ssd
 
   # NOTE: Fields like primaryUpdateMethod, switchoverDelay, failoverDelay do NOT exist in CNPG.
-  # Supervised flow: patch imageName -> replicas upgrade -> manual promotion -> former primary upgrades.
+  # Supervised flow: patch imageName -> standbys upgrade -> manual promotion -> former primary upgrades.
 ```
 
 > Changes vs previous draft:
@@ -938,7 +940,7 @@ kubectl cnpg status documentdb-cluster -n production
 #### Step 1: Pre-Upgrade Validation
 
 ```bash
-# Verify cluster health and replica synchronization
+# Verify cluster health and standby synchronization
 echo "=== Pre-Upgrade Validation ==="
 
 # Check overall cluster status
@@ -950,8 +952,8 @@ if [ "$READY_COND" != "True" ]; then
   echo "❌ Cluster not Ready (Ready condition: $READY_COND)";
   echo "Aborting upgrade. Fix cluster issues first."; exit 1; fi
 
-# Check replica lag (ensure minimal lag before switchover)
-echo "Checking replica lag (verbose status)..."
+# Check standby lag (ensure minimal lag before switchover)
+echo "Checking standby lag (verbose status)..."
 kubectl cnpg status documentdb-cluster -n production --verbose || true
 echo "(Optionally query pg_stat_replication for precise byte/LSN lag)"
 
@@ -964,7 +966,7 @@ echo "Current cluster image: $CURRENT_VERSION"
 
 # Test connectivity before upgrade
 kubectl run pre-upgrade-test --rm -i --timeout=30s --image=mongo:7 -- \
-  mongosh "mongodb://documentdb-cluster-rw.production.svc.cluster.local:27017/test" --eval "
+  mongosh "mongodb://documentdb-cluster-rw.production.svc.cluster.local:10260/test" --eval "
   db.pre_upgrade_test.insertOne({test: 'connectivity_check', timestamp: new Date()});
   print('Pre-upgrade connectivity test passed');
   " 2>/dev/null
@@ -988,7 +990,7 @@ kubectl patch cluster documentdb-cluster -n production --type='merge' -p '{
 STRATEGY=$(kubectl get cluster documentdb-cluster -n production -o jsonpath='{.spec.primaryUpdateStrategy}')
 echo "Primary update strategy: $STRATEGY"
 
-# Trigger rolling update (replicas upgrade automatically)
+# Trigger rolling update (standbys upgrade automatically)
 echo "=== Triggering Rolling Update ==="
 
 TARGET_IMAGE="mcr.microsoft.com/documentdb/documentdb:16.3-v1.4.0"
@@ -1001,14 +1003,14 @@ kubectl patch cluster documentdb-cluster -n production --type='merge' -p "{
 echo "Upgrade initiated to target image: $TARGET_IMAGE"
 ```
 
-#### Step 3: Monitor Replica Upgrades
+#### Step 3: Monitor Standby Upgrades
 
 ```bash
-# Monitor replica upgrades (wait for completion)
-echo "=== Monitoring Replica Upgrades ==="
+# Monitor standby upgrades (wait for completion)
+echo "=== Monitoring Standby Upgrades ==="
 
 # Watch pods during upgrade
-echo "Watching pod changes during replica upgrade..."
+echo "Watching pod changes during standby upgrade..."
 kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -w &
 WATCH_PID=$!
 
@@ -1021,14 +1023,14 @@ while true; do
     echo "$STATUS"
     
     # Check if primary is still the only non-upgraded instance
-  UPGRADED_REPLICAS=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -o jsonpath="{.items[?(@.spec.containers[?(@.name=='postgres')].image=='$TARGET_IMAGE')].metadata.name}" | wc -w)
+  UPGRADED_STANDBYS=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -o jsonpath="{.items[?(@.spec.containers[?(@.name=='postgres')].image=='$TARGET_IMAGE')].metadata.name}" | wc -w)
   TOTAL_INSTANCES=$(kubectl get cluster documentdb-cluster -n production -o jsonpath='{.spec.instances}')
     
-    echo "Upgraded instances: $UPGRADED_REPLICAS/$TOTAL_INSTANCES"
+  echo "Upgraded instances: $UPGRADED_STANDBYS/$TOTAL_INSTANCES"
     
-  # Ready when replicas (instances - 1) upgraded
-  if [ "$UPGRADED_REPLICAS" -eq $((TOTAL_INSTANCES - 1)) ]; then
-        echo "✅ Replica upgrades completed. Ready for switchover."
+  # Ready when standbys (instances - 1) upgraded
+  if [ "$UPGRADED_STANDBYS" -eq $((TOTAL_INSTANCES - 1)) ]; then
+        echo "✅ Standby upgrades completed. Ready for switchover."
         break
     fi
     
@@ -1049,22 +1051,22 @@ echo "=== Performing Controlled Switchover ==="
 CURRENT_PRIMARY=$(kubectl cnpg status documentdb-cluster -n production | grep -i "Primary" | awk '{print $2}')
 echo "Current primary: $CURRENT_PRIMARY"
 
-# Find most aligned replica (should be one of the upgraded replicas)
-echo "Finding most aligned replica..."
+# Find most aligned standby (should be one of the upgraded standbys)
+echo "Finding most aligned standby..."
 kubectl cnpg status documentdb-cluster -n production --verbose
 
-# List available replicas with their status
-REPLICAS=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -o jsonpath='{.items[?(@.metadata.name!="'$CURRENT_PRIMARY'")].metadata.name}')
-echo "Available replicas: $REPLICAS"
+# List available standbys with their status
+STANDBYS=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -o jsonpath='{.items[?(@.metadata.name!="'$CURRENT_PRIMARY'")].metadata.name}')
+echo "Available standbys: $STANDBYS"
 
-# Choose the first upgraded replica (you can customize this selection logic)
-TARGET_REPLICA=$(echo $REPLICAS | awk '{print $1}')
-echo "Selected target replica for promotion: $TARGET_REPLICA"
+# Choose the first upgraded standby (you can customize this selection logic)
+TARGET_STANDBY=$(echo $STANDBYS | awk '{print $1}')
+echo "Selected target standby for promotion: $TARGET_STANDBY"
 
 # Perform switchover (some plugin versions support --target)
-echo "Initiating switchover to $TARGET_REPLICA..."
-kubectl cnpg promote documentdb-cluster --target $TARGET_REPLICA -n production || \
-  kubectl cnpg promote documentdb-cluster $TARGET_REPLICA -n production
+echo "Initiating switchover to $TARGET_STANDBY..."
+kubectl cnpg promote documentdb-cluster --target $TARGET_STANDBY -n production || \
+  kubectl cnpg promote documentdb-cluster $TARGET_STANDBY -n production
 
 # Wait for switchover to complete
 echo "Waiting for switchover to complete..."
@@ -1074,10 +1076,10 @@ sleep 30
 NEW_PRIMARY=$(kubectl cnpg status documentdb-cluster -n production | grep -i "Primary" | awk '{print $2}')
 echo "New primary after switchover: $NEW_PRIMARY"
 
-if [ "$NEW_PRIMARY" = "$TARGET_REPLICA" ]; then
+if [ "$NEW_PRIMARY" = "$TARGET_STANDBY" ]; then
     echo "✅ Switchover successful: $CURRENT_PRIMARY → $NEW_PRIMARY"
 else
-    echo "❌ Switchover may have failed. Expected: $TARGET_REPLICA, Got: $NEW_PRIMARY"
+  echo "❌ Switchover may have failed. Expected: $TARGET_STANDBY, Got: $NEW_PRIMARY"
 fi
 ```
 
@@ -1114,7 +1116,7 @@ kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -o json | \
 # Test connectivity and performance after upgrade
 echo "=== Post-Upgrade Connectivity Test ==="
 kubectl run post-upgrade-test --rm -i --timeout=30s --image=mongo:7 -- \
-  mongosh "mongodb://documentdb-cluster-rw.production.svc.cluster.local:27017/test" --eval "
+  mongosh "mongodb://documentdb-cluster-rw.production.svc.cluster.local:10260/test" --eval "
   db.post_upgrade_test.insertOne({
     test: 'upgrade_completion_check', 
     timestamp: new Date(),
@@ -1194,24 +1196,24 @@ kubectl patch cluster $CLUSTER_NAME -n $NAMESPACE --type='merge' -p "{
   }
 }"
 
-# Wait for replica upgrades
-echo "=== Step 4: Wait for Replica Upgrades ==="
-# Dynamically derive replica count: instances - 1
+# Wait for standby upgrades
+echo "=== Step 4: Wait for Standby Upgrades ==="
+# Dynamically derive standby count: instances - 1
 INSTANCES=$(kubectl get cluster $CLUSTER_NAME -n $NAMESPACE -o jsonpath='{.spec.instances}')
-REPLICAS=$((INSTANCES - 1))
-wait_for_condition '[ $(kubectl get pods -l cnpg.io/cluster='$CLUSTER_NAME' -n '$NAMESPACE' -o jsonpath="{.items[?(@.spec.containers[?(@.name=='postgres')].image==\"'$TARGET_IMAGE'\")].metadata.name}" | wc -w) -eq '$REPLICAS' ]' 1200
+STANDBY_COUNT=$((INSTANCES - 1))
+wait_for_condition '[ $(kubectl get pods -l cnpg.io/cluster='$CLUSTER_NAME' -n '$NAMESPACE' -o jsonpath="{.items[?(@.spec.containers[?(@.name=='postgres')].image==\"'$TARGET_IMAGE'\")].metadata.name}" | wc -w) -eq '$STANDBY_COUNT' ]' 1200
 
-# Get current primary and select target replica
+# Get current primary and select target standby
 CURRENT_PRIMARY=$(kubectl cnpg status $CLUSTER_NAME -n $NAMESPACE | grep -i "Primary" | awk '{print $2}')
-TARGET_REPLICA=$(kubectl get pods -l cnpg.io/cluster=$CLUSTER_NAME -n $NAMESPACE -o jsonpath='{.items[?(@.metadata.name!="'$CURRENT_PRIMARY'")].metadata.name}' | awk '{print $1}')
+TARGET_STANDBY=$(kubectl get pods -l cnpg.io/cluster=$CLUSTER_NAME -n $NAMESPACE -o jsonpath='{.items[?(@.metadata.name!="'$CURRENT_PRIMARY'")].metadata.name}' | awk '{print $1}')
 
 echo "Current primary: $CURRENT_PRIMARY"
-echo "Target replica: $TARGET_REPLICA"
+echo "Target standby: $TARGET_STANDBY"
 
 # Perform switchover
 echo "=== Step 5: Perform Switchover ==="
-kubectl cnpg promote $CLUSTER_NAME --target $TARGET_REPLICA -n $NAMESPACE || \
-  kubectl cnpg promote $CLUSTER_NAME $TARGET_REPLICA -n $NAMESPACE
+kubectl cnpg promote $CLUSTER_NAME --target $TARGET_STANDBY -n $NAMESPACE || \
+  kubectl cnpg promote $CLUSTER_NAME $TARGET_STANDBY -n $NAMESPACE
 
 # Wait for all instances to be upgraded
 echo "=== Step 6: Wait for Upgrade Completion ==="
@@ -1223,7 +1225,7 @@ kubectl cnpg status $CLUSTER_NAME -n $NAMESPACE
 
 # Test connectivity
 kubectl run upgrade-validation-$RANDOM --rm -i --timeout=30s --image=mongo:7 -- \
-  mongosh "mongodb://${CLUSTER_NAME}-rw.${NAMESPACE}.svc.cluster.local:27017/test" --eval "
+  mongosh "mongodb://${CLUSTER_NAME}-rw.${NAMESPACE}.svc.cluster.local:10260/test" --eval "
   db.upgrade_validation.insertOne({
     test: 'automated_upgrade_validation', 
     timestamp: new Date(),
@@ -1262,7 +1264,7 @@ kubectl patch cluster documentdb-cluster -n production --type='merge' -p '{
 # Manual pod restart if stuck
 kubectl delete pod documentdb-cluster-1 -n production
 
-# Check replica lag during troubleshooting
+# Check standby lag during troubleshooting
 kubectl cnpg status documentdb-cluster -n production --verbose
 
 # Emergency rollback to previous image

@@ -871,53 +871,53 @@ This section contains detailed command examples for CNPG-based high availability
 **3-Instance DocumentDB Cluster with HA Configuration:**
 
 ```yaml
-# documentdb-ha-cluster.yaml
+# documentdb-ha-cluster.yaml (corrected example)
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
   name: documentdb-cluster
   namespace: production
+  labels:
+    documentdb.microsoft.com/sidecar-inject: "true"   # Only if injector matches this label
+    documentdb.microsoft.com/cluster-version: "v1.4.0"
 spec:
-  instances: 3  # 1 primary + 2 replicas
-  
-  # Controlled upgrade settings for zero-downtime
-  primaryUpdateStrategy: supervised    # Manual control over primary upgrade timing
-  primaryUpdateMethod: switchover      # Planned failover to replica during upgrades
-  
-  # Failover timing controls (RTO/RPO balance)
-  switchoverDelay: "30s"              # Graceful shutdown timeout for planned upgrades
-  failoverDelay: "0s"                 # Immediate failover for unexpected failures
-  
-  # PostgreSQL streaming replication configuration
+  instances: 3   # 1 primary + 2 replicas
+
+  # Manual control over primary switch during image upgrades
+  primaryUpdateStrategy: supervised
+
+  # Engine + extension image (changed for upgrades)
+  imageName: mcr.microsoft.com/documentdb/documentdb:16.3-v1.4.0
+
   postgresql:
     parameters:
-      max_wal_senders: "10"           # Support multiple replicas
-      wal_level: "replica"            # Enable streaming replication
-      synchronous_commit: "on"        # Ensure replica consistency
-      synchronous_standby_names: "*" # Any replica can be synchronous
-      checkpoint_timeout: "5min"     # Checkpoint frequency
-      max_wal_size: "1GB"           # WAL size management
-      
-  # Resource allocation for HA workloads
+      wal_level: "replica"
+      max_wal_senders: "6"                  # Enough for replicas + future logical slots
+      synchronous_commit: "remote_write"    # Balance durability & latency
+      synchronous_standby_names: 'ANY 1 (*)' # Quorum of 1; avoids write stalls if one replica gone
+
   resources:
     requests:
-      memory: "2Gi"
       cpu: "1"
+      memory: "2Gi"
     limits:
-      memory: "4Gi"
       cpu: "2"
-      
-  # Storage configuration
+      memory: "4Gi"
+
   storage:
-    size: "100Gi"
-    storageClass: "fast-ssd"
-    
-  # DocumentDB sidecar injection (handled by sidecar injector)
-  metadata:
-    labels:
-      documentdb.microsoft.com/sidecar-inject: "true"
-      documentdb.microsoft.com/cluster-version: "v1.4.0"
+    size: 100Gi
+    storageClass: fast-ssd
+
+  # NOTE: Fields like primaryUpdateMethod, switchoverDelay, failoverDelay do NOT exist in CNPG.
+  # Supervised flow: patch imageName -> replicas upgrade -> manual promotion -> former primary upgrades.
 ```
+
+> Changes vs previous draft:
+> - Removed non-existent spec fields (primaryUpdateMethod, switchoverDelay, failoverDelay)
+> - Moved labels to correct metadata level (was under spec.metadata erroneously)
+> - Replaced synchronous standby config ("*" + synchronous_commit=on) with safer quorum pattern
+> - Trimmed parameters that added noise without justification (checkpoint_timeout, max_wal_size)
+> - Explicit imageName included
 
 **Apply HA Configuration:**
 ```bash
@@ -944,17 +944,16 @@ echo "=== Pre-Upgrade Validation ==="
 # Check overall cluster status
 kubectl cnpg status documentdb-cluster -n production
 
-# Verify cluster is in Ready phase
-CLUSTER_PHASE=$(kubectl get cluster documentdb-cluster -n production -o jsonpath='{.status.phase}')
-if [ "$CLUSTER_PHASE" != "Cluster in healthy state" ]; then
-    echo "❌ Cluster not in healthy state: $CLUSTER_PHASE"
-    echo "Aborting upgrade. Fix cluster issues first."
-    exit 1
-fi
+# Verify Ready condition (portable)
+READY_COND=$(kubectl get cluster documentdb-cluster -n production -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+if [ "$READY_COND" != "True" ]; then
+  echo "❌ Cluster not Ready (Ready condition: $READY_COND)";
+  echo "Aborting upgrade. Fix cluster issues first."; exit 1; fi
 
-# Check replica lag (should be minimal for safe switchover)
-echo "Checking replica lag..."
-kubectl cnpg status documentdb-cluster -n production --verbose
+# Check replica lag (ensure minimal lag before switchover)
+echo "Checking replica lag (verbose status)..."
+kubectl cnpg status documentdb-cluster -n production --verbose || true
+echo "(Optionally query pg_stat_replication for precise byte/LSN lag)"
 
 # Verify all instances are running
 kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production
@@ -1022,13 +1021,13 @@ while true; do
     echo "$STATUS"
     
     # Check if primary is still the only non-upgraded instance
-    UPGRADED_REPLICAS=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -o jsonpath='{.items[?(@.spec.containers[0].image=="'$TARGET_IMAGE'")].metadata.name}' | wc -w)
-    TOTAL_INSTANCES=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production --no-headers | wc -l)
+  UPGRADED_REPLICAS=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -o jsonpath="{.items[?(@.spec.containers[?(@.name=='postgres')].image=='$TARGET_IMAGE')].metadata.name}" | wc -w)
+  TOTAL_INSTANCES=$(kubectl get cluster documentdb-cluster -n production -o jsonpath='{.spec.instances}')
     
     echo "Upgraded instances: $UPGRADED_REPLICAS/$TOTAL_INSTANCES"
     
-    # If 2 out of 3 instances upgraded (replicas), ready for switchover
-    if [ "$UPGRADED_REPLICAS" -eq 2 ]; then
+  # Ready when replicas (instances - 1) upgraded
+  if [ "$UPGRADED_REPLICAS" -eq $((TOTAL_INSTANCES - 1)) ]; then
         echo "✅ Replica upgrades completed. Ready for switchover."
         break
     fi
@@ -1046,8 +1045,8 @@ kill $WATCH_PID 2>/dev/null
 # Manual switchover when ready
 echo "=== Performing Controlled Switchover ==="
 
-# Get current primary
-CURRENT_PRIMARY=$(kubectl cnpg status documentdb-cluster -n production | grep "Primary" | awk '{print $2}')
+# Get current primary (plugin output varies; adjust parsing if needed)
+CURRENT_PRIMARY=$(kubectl cnpg status documentdb-cluster -n production | grep -i "Primary" | awk '{print $2}')
 echo "Current primary: $CURRENT_PRIMARY"
 
 # Find most aligned replica (should be one of the upgraded replicas)
@@ -1062,16 +1061,17 @@ echo "Available replicas: $REPLICAS"
 TARGET_REPLICA=$(echo $REPLICAS | awk '{print $1}')
 echo "Selected target replica for promotion: $TARGET_REPLICA"
 
-# Perform switchover
+# Perform switchover (some plugin versions support --target)
 echo "Initiating switchover to $TARGET_REPLICA..."
-kubectl cnpg promote documentdb-cluster $TARGET_REPLICA -n production
+kubectl cnpg promote documentdb-cluster --target $TARGET_REPLICA -n production || \
+  kubectl cnpg promote documentdb-cluster $TARGET_REPLICA -n production
 
 # Wait for switchover to complete
 echo "Waiting for switchover to complete..."
 sleep 30
 
 # Verify new primary
-NEW_PRIMARY=$(kubectl cnpg status documentdb-cluster -n production | grep "Primary" | awk '{print $2}')
+NEW_PRIMARY=$(kubectl cnpg status documentdb-cluster -n production | grep -i "Primary" | awk '{print $2}')
 echo "New primary after switchover: $NEW_PRIMARY"
 
 if [ "$NEW_PRIMARY" = "$TARGET_REPLICA" ]; then
@@ -1093,8 +1093,8 @@ kubectl cnpg status documentdb-cluster -n production
 # Wait for former primary to complete upgrade
 echo "Waiting for all instances to complete upgrade..."
 while true; do
-    UPGRADED_COUNT=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -o jsonpath='{.items[?(@.spec.containers[0].image=="'$TARGET_IMAGE'")].metadata.name}' | wc -w)
-    TOTAL_COUNT=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production --no-headers | wc -l)
+  UPGRADED_COUNT=$(kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -o jsonpath="{.items[?(@.spec.containers[?(@.name=='postgres')].image=='$TARGET_IMAGE')].metadata.name}" | wc -w)
+  TOTAL_COUNT=$(kubectl get cluster documentdb-cluster -n production -o jsonpath='{.spec.instances}')
     
     echo "Upgrade progress: $UPGRADED_COUNT/$TOTAL_COUNT instances completed"
     
@@ -1106,10 +1106,10 @@ while true; do
     sleep 30
 done
 
-# Verify all instances running target version
+# Verify all instances running target version (postgres container only)
 echo "=== Final Version Verification ==="
-kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production \
-  -o custom-columns="NAME:.metadata.name,IMAGE:.spec.containers[0].image"
+kubectl get pods -l cnpg.io/cluster=documentdb-cluster -n production -o json | \
+  jq -r '.items[] | {name: .metadata.name, image: (.spec.containers[] | select(.name=="postgres").image)} | "\(.name)\t\(.image)"'
 
 # Test connectivity and performance after upgrade
 echo "=== Post-Upgrade Connectivity Test ==="
@@ -1129,7 +1129,7 @@ kubectl exec -it documentdb-cluster-1 -n production -- pg_isready
 echo "✅ CNPG supervised HA upgrade completed successfully"
 ```
 
-### CNPG HA Upgrade Automation Script
+### CNPG HA Upgrade Automation Script (corrected)
 
 **Complete automated HA upgrade script:**
 
@@ -1173,12 +1173,10 @@ wait_for_condition() {
 echo "=== Step 1: Pre-Upgrade Validation ==="
 kubectl cnpg status $CLUSTER_NAME -n $NAMESPACE
 
-# Check cluster health
-CLUSTER_PHASE=$(kubectl get cluster $CLUSTER_NAME -n $NAMESPACE -o jsonpath='{.status.phase}')
-if [[ ! "$CLUSTER_PHASE" =~ "healthy" ]]; then
-    echo "❌ Cluster not healthy: $CLUSTER_PHASE"
-    exit 1
-fi
+# Ready condition check (instead of brittle phase string)
+READY_COND=$(kubectl get cluster $CLUSTER_NAME -n $NAMESPACE -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')
+if [ "$READY_COND" != "True" ]; then
+  echo "❌ Cluster not Ready (Ready condition: $READY_COND)"; exit 1; fi
 
 # Enable supervised mode
 echo "=== Step 2: Enable Supervised Mode ==="
@@ -1198,10 +1196,13 @@ kubectl patch cluster $CLUSTER_NAME -n $NAMESPACE --type='merge' -p "{
 
 # Wait for replica upgrades
 echo "=== Step 4: Wait for Replica Upgrades ==="
-wait_for_condition '[ $(kubectl get pods -l cnpg.io/cluster='$CLUSTER_NAME' -n '$NAMESPACE' -o jsonpath="{.items[?(@.spec.containers[0].image==\"'$TARGET_IMAGE'\")].metadata.name}" | wc -w) -eq 2 ]' 1200
+# Dynamically derive replica count: instances - 1
+INSTANCES=$(kubectl get cluster $CLUSTER_NAME -n $NAMESPACE -o jsonpath='{.spec.instances}')
+REPLICAS=$((INSTANCES - 1))
+wait_for_condition '[ $(kubectl get pods -l cnpg.io/cluster='$CLUSTER_NAME' -n '$NAMESPACE' -o jsonpath="{.items[?(@.spec.containers[?(@.name=='postgres')].image==\"'$TARGET_IMAGE'\")].metadata.name}" | wc -w) -eq '$REPLICAS' ]' 1200
 
 # Get current primary and select target replica
-CURRENT_PRIMARY=$(kubectl cnpg status $CLUSTER_NAME -n $NAMESPACE | grep "Primary" | awk '{print $2}')
+CURRENT_PRIMARY=$(kubectl cnpg status $CLUSTER_NAME -n $NAMESPACE | grep -i "Primary" | awk '{print $2}')
 TARGET_REPLICA=$(kubectl get pods -l cnpg.io/cluster=$CLUSTER_NAME -n $NAMESPACE -o jsonpath='{.items[?(@.metadata.name!="'$CURRENT_PRIMARY'")].metadata.name}' | awk '{print $1}')
 
 echo "Current primary: $CURRENT_PRIMARY"
@@ -1209,11 +1210,12 @@ echo "Target replica: $TARGET_REPLICA"
 
 # Perform switchover
 echo "=== Step 5: Perform Switchover ==="
-kubectl cnpg promote $CLUSTER_NAME $TARGET_REPLICA -n $NAMESPACE
+kubectl cnpg promote $CLUSTER_NAME --target $TARGET_REPLICA -n $NAMESPACE || \
+  kubectl cnpg promote $CLUSTER_NAME $TARGET_REPLICA -n $NAMESPACE
 
 # Wait for all instances to be upgraded
 echo "=== Step 6: Wait for Upgrade Completion ==="
-wait_for_condition '[ $(kubectl get pods -l cnpg.io/cluster='$CLUSTER_NAME' -n '$NAMESPACE' -o jsonpath="{.items[?(@.spec.containers[0].image==\"'$TARGET_IMAGE'\")].metadata.name}" | wc -w) -eq 3 ]' 900
+wait_for_condition '[ $(kubectl get pods -l cnpg.io/cluster='$CLUSTER_NAME' -n '$NAMESPACE' -o jsonpath="{.items[?(@.spec.containers[?(@.name=='postgres')].image==\"'$TARGET_IMAGE'\")].metadata.name}" | wc -w) -eq '$INSTANCES' ]' 900
 
 # Final validation
 echo "=== Step 7: Final Validation ==="

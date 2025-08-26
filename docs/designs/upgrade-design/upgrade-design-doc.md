@@ -44,7 +44,7 @@ A MongoDB protocol translator that runs as a sidecar container alongside Postgre
 A PostgreSQL server enhanced with DocumentDB extensions that enable MongoDB-like document storage and querying capabilities over a relational database. Deployed in customer application namespaces on worker nodes.
 
 ### 4. CNPG Sidecar Injector
-An admission webhook that automatically injects the Gateway container into CNPG PostgreSQL pods during deployment. Runs in the `cnpg-system` namespace on worker nodes.
+An admission webhook that automatically injects the DocumentDb Gateway container into CNPG PostgreSQL pods during deployment. Runs in the `cnpg-system` namespace on worker nodes.
 
 ### 5. CNPG Operator
 The CloudNative-PG operator that handles PostgreSQL cluster lifecycle management, including high availability, backups, and upgrades. Runs in the `cnpg-system` namespace on worker nodes.
@@ -69,7 +69,7 @@ Our upgrade strategy follows four core principles:
 All upgrades maintain service availability through rolling updates and automatic rollback on failure.
 
 ### 2. Backward Compatibility Principle  
-Support N-2 API versions with 6-month deprecation cycles for gradual migration.
+Support N-2 API versions with deprecation cycles (6-months) for gradual migration.
 
 ### 3. Fail-Safe Operation Principle
 Failed upgrades automatically rollback using atomic Helm operations and change detection.
@@ -92,8 +92,7 @@ Clear separation: Kubernetes admins upgrade infrastructure, Database admins coor
 - **Cross-cloud migration**: Upgrades within same Kubernetes cluster only
 - **Automatic data migration**: Breaking schema changes require manual planning
 - **Zero-configuration experience**: Some operational knowledge required
-- **Real-time migration**: API migrations designed for planned execution windows
-- **Multi-tenant upgrades**: Each DocumentDB cluster upgraded independently
+
 
 ## Versioning Strategy
 
@@ -115,125 +114,62 @@ Clear separation: Kubernetes admins upgrade infrastructure, Database admins coor
 - **Easier Rollbacks**: Single version rollback affects all components consistently
 - **Clear Release Management**: Single release pipeline for all components
 
-## Upgrade Scenarios
+## Upgrade Strategies
 
-**With Unified Versioning**: All component upgrades are triggered by a single DocumentDB operator version upgrade. Individual component upgrades are not available to customers.
+DocumentDB uses a multi-version API approach where a single operator version supports multiple DocumentDB cluster versions simultaneously, enabling gradual migration without forcing upgrades.
 
-## Team Responsibilities and Multi-Version Support Strategy
+### Three-Tier Responsibility Model
 
-DocumentDB uses a **multi-version API approach** where a single operator version supports multiple DocumentDB cluster versions simultaneously, enabling gradual migration without forcing upgrades.
-
-### Team Roles and Responsibilities
-
-**Three-Tier Responsibility Model:**
-
-#### 1. Kubernetes Admin / Control Plane Admin
-- **Scope**: Kubernetes cluster infrastructure and operators
-- **Responsibilities**: 
-  - Kubernetes cluster upgrades and maintenance
-  - Operator lifecycle management (DocumentDB, CNPG, Sidecar Injector)
-  - Infrastructure-level component upgrades
-  - Platform security and resource management
-- **Upgrade Activities**: Infrastructure upgrade phase (operator components)
-
-#### 2. Database Admin (DBA)
-- **Scope**: DocumentDB instance management across environments
-- **Responsibilities**:
-  - DocumentDB cluster provisioning for dev/test/staging/production
-  - Database configuration and version rollouts
-  - Cluster API version migration planning and coordination
-  - Performance monitoring and capacity planning
-  - Backup and disaster recovery strategies
-- **Upgrade Activities**: Cluster API migration coordination and execution
-
-#### 3. Database Developer / Application Developer
-- **Scope**: Database data and application integration
-- **Responsibilities**:
-  - Application database schema and data management
-  - Client application integration with DocumentDB clusters
-  - Test coverage across development environments
-  - Application-specific migration testing and validation
-- **Upgrade Activities**: Application compatibility testing and validation
+| Role | Primary Scope | Upgrade Ownership |
+|------|---------------|------------------|
+| Kubernetes Admin | Cluster infrastructure & operators | Phase 1 – Infrastructure upgrade |
+| Database Admin (DBA) | Cluster fleet lifecycle & performance | Phase 2 – Cluster API migration |
+| Application / Database Developer | App integration & validation | Phase 3 – Application validation |
 
 ### Multi-Version Support Architecture
 
-**Single Operator, Multiple Cluster Versions:**
-- **Operator v2**: Supports both DocumentDB cluster `v1` and `v2` APIs
-- **Operator v3**: Supports DocumentDB cluster `v1` (deprecated), `v2`, and `v3` APIs  
-- **Operator v4**: Supports DocumentDB cluster `v2`, `v3`, and `v4` APIs (v1 removed)
+- Operator v2: serves cluster API v1 + v2
+- Operator v3: serves v1 (deprecated) + v2 + v3
+- Operator v4: serves v2 + v3 + v4 (v1 removed)
 
-**API Deprecation Cycle:**
-- **Version N**: Introduce new cluster API version
-- **Version N+1**: Previous version marked as deprecated but still supported
-- **Version N+2**: Deprecated version removed, only latest 2-3 versions supported
-
-### Upgrade Process with Multi-Version Support
+Deprecation cadence: Version N introduces API vN; N+1 deprecates v(N-1); N+2 removes v(N-1). Operator maintains at most 2–3 active versions.
 
 ### Phase 1: Infrastructure Upgrade (Kubernetes Admin)
-**Responsibility**: Upgrade DocumentDB operator infrastructure to support new cluster versions
-**Scope**: Kubernetes-level operator components only
-**Command**: Helm upgrade of DocumentDB operator chart
+- Scope: Helm upgrade of unified operator chart (DocumentDB operator, Sidecar Injector, CNPG if required)
+- Upgrades: controller, CRDs (add new fields keep old), webhooks, RBAC, sidecar injector, optional CNPG version
+- Not Upgraded: existing cluster CRs, gateway image, postgres+extension images, application workloads
+- Key Steps:
+   - Helm dry-run validation
+   - Atomic Helm upgrade (rollback on failure)
+   - Operator & webhook health checks
+   - Backward compatibility check (new operator reconciles existing clusters)
+- Success Criteria:
+   - All operator pods Ready
+   - Existing clusters stay Healthy/Ready
+   - New cluster with new API version can be created
 
-**What gets upgraded**:
-- DocumentDB Operator controller (v1 → v2) - now supports both cluster v1 and v2
-- CNPG Operator (if version change required)
-- Sidecar Injector (v1 → v2) 
-- CRDs with new v2 fields added, v1 fields maintained
-- RBAC, and operator configurations
+### Phase 2: Cluster Migration (DBA)
+Goal: Per-cluster apiVersion/spec bump (e.g. v1→v2) in controlled waves.
+Steps per cluster:
+1. Pre-checks (recent backup, replication healthy, capacity OK)
+2. Server-side dry-run patch
+3. Apply manifest (apiVersion + new spec fields)
+4. Watch Ready condition & CNPG replication status
+5. Smoke test: connect, CRUD, check gateway/extension versions
+6. Record outcome or rollback (reapply previous manifest)
+Rollback triggers: Ready timeout, sustained latency/error regression, high replication lag, crash loops.
 
-**What does NOT get upgraded**:
-- Existing DocumentDB clusters remain on v1 API
-- Applications continue using v1 DocumentDB features unchanged
-- No data migration or application downtime
-- **Backward Compatibility**: v2 operator fully supports existing v1 clusters
+### Phase 3: Application Validation (Developer)
+Actions: Validate connectivity, CRUD/index/query latency, error rates, enable new feature flags if desired.
+Escalate to DBA on regression; otherwise mark migration complete.
 
-### Phase 2: Cluster Migration Coordination (Database Admin)  
-**Responsibility**: Plan and coordinate DocumentDB cluster API version migrations
-**Scope**: Per-cluster API version upgrades across environments
-**Method**: Coordinate with Database Developers for phased migration execution
+Benefits:
+- Clear role separation
+- Gradual adoption & controlled risk
+- Side-by-side API versions until retirement
+- Simple rollback boundaries
 
-**What gets planned and coordinated**:
-- Cluster API migration timeline across dev/test/staging/production
-- Migration dependencies and environment-specific requirements
-- Database configuration updates for v2 API features
-- Cluster-level backup and validation procedures
-- Performance and capacity impact assessment
-
-**Database Admin Control**:
-- Plans migration schedule across all environments
-- Coordinates with Database Developers for execution
-- Manages cluster configurations and database-level settings
-- Oversees backup and recovery procedures during migration
-### Phase 3: Application Migration Execution (Database Developer)
-**Responsibility**: Execute cluster API migration and validate application compatibility
-**Scope**: Application-specific testing and validation
-**Method**: Update API version in deployment files and execute migration with comprehensive testing
-
-**What gets executed**:
-- Specific DocumentDB cluster API (v1 → v2) migration
-- Application compatibility testing with v2 API features
-- Client application integration validation
-- Data integrity verification during migration
-- Performance testing and optimization
-
-**Database Developer Control**:
-- Executes migration based on Database Admin's coordination plan
-- Gradual rollout across development, staging, production environments
-- Application-specific testing and validation with v2 features
-- Rollback capability per cluster (v2 → v1 downgrade) if application issues occur
-- Test coverage across environments to ensure application compatibility
-
-**Benefits of Three-Tier Responsibility Model**:
-- **Clear Role Separation**: Each team focuses on their domain expertise
-- **Coordinated Migration**: Database Admins coordinate while Database Developers execute
-- **Gradual API Migration**: Database Developers control application-specific migration timeline
-- **Risk Mitigation**: Test new API versions in dev/staging before production migration
-- **Backward Compatibility**: Multiple cluster API versions supported simultaneously
-- **Controlled Deprecation**: API versions deprecated gradually over multiple operator releases
-
-**Cross-Team Coordination**: Database Admins coordinate migration planning with Database Developers for execution, while Kubernetes Admins provide the infrastructure foundation.
-
-**API Version Examples**: See [commands.md](./commands.md) for detailed workflow commands and API version migration examples.
+For detailed commands & YAML examples see [commands.md](./commands.md).
 
 ## Component-Specific Upgrade Considerations
 
@@ -289,11 +225,10 @@ DocumentDB leverages CNPG's mature PostgreSQL HA capabilities to provide zero-do
 
 **3-Instance Cluster Topology:**
 - **Instance count**: 3 (1 primary + 2 standby servers) for optimal HA balance
-- **Primary update strategy**: Supervised for production, unsupervised for development
-- **Primary update method**: Switchover for planned failover to standby server during upgrades
-- **Switchover delay**: 30-second graceful shutdown timeout for planned upgrades
-- **Failover delay**: Immediate failover (0s) for unexpected failures
-- **PostgreSQL configuration**: Streaming replication with synchronous commit enabled (for standby server synchronization)
+- **Primary update strategy**: Supervised for production (manual controlled switchover), unsupervised for development
+- **Planned switchover**: Manually initiated using CNPG promote command while in supervised mode
+- **Unplanned failover**: Handled automatically by CNPG (no custom delay fields required)
+- **PostgreSQL configuration**: Streaming replication with quorum synchronous replication (e.g., synchronous_standby_names='ANY 1 (*)', synchronous_commit=remote_write) to balance durability and availability
 
 **Configuration Examples**: See [CNPG HA Configuration Examples](./commands.md#cnpg-ha-configuration-examples) for complete YAML specifications.
 
@@ -337,17 +272,17 @@ DocumentDB leverages CNPG's mature PostgreSQL HA capabilities to provide zero-do
 #### Risk Mitigation Enhancements
 
 **Enhanced with CNPG Specifics:**
-- **Automatic failover**: Unplanned failures trigger immediate CNPG failover (`.spec.failoverDelay: "0s"`)
-- **Planned maintenance**: Supervised upgrades allow optimal timing for switchover
-- **Data protection**: WAL streaming and synchronous replication prevent data loss between primary and standby servers
-- **Service continuity**: Kubernetes service endpoints automatically update during failover
-- **Monitoring integration**: CNPG status commands provide real-time cluster health visibility
+- **Automatic failover**: Unplanned failures trigger CNPG-managed failover (no custom failoverDelay field required)
+- **Planned maintenance**: Supervised upgrades allow controlled, low-lag switchover timing
+- **Data protection**: WAL streaming plus quorum synchronous replication mitigate data loss while avoiding write stalls from a single replica outage
+- **Service continuity**: Kubernetes service endpoints automatically update during failover/switchover
+- **Monitoring integration**: CNPG status and pg_stat_replication provide real-time health & lag metrics
 
 This CNPG-based HA strategy ensures DocumentDB clusters achieve true zero-downtime upgrades while maintaining data integrity and operational simplicity.
 
 ## Multi-Node Upgrade Strategy (Future Enhancement)
 
-**Multi-Node Upgrade Considerations**: While this document focuses on single-node DocumentDB clusters with local HA (1 primary + 2 standby servers per node), future multi-node deployments will support horizontal scaling using multiple PostgreSQL clusters managed by Citus.
+**Multi-Node Upgrade Considerations**: While this document focuses on single-node DocumentDB clusters with local HA (1 primary + 2 standby servers per node as an example), future multi-node deployments will support horizontal scaling using multiple PostgreSQL clusters managed by Citus. This document provides some high level idea and the detials will be covered in a separate multi-node upgrade design doc.
 
 ### Citus Integration for Multi-Node Architecture
 
@@ -369,302 +304,64 @@ Multi-node upgrades introduce significant complexity that requires careful consi
 
 The upgrade strategy must account for several Citus-specific considerations. The sequencing strategy needs to determine whether to upgrade worker nodes first or the coordinator first, based on Citus version compatibility requirements. Metadata synchronization becomes critical to ensure Citus metadata consistency during rolling upgrades across nodes. Shard rebalancing must be coordinated during worker node upgrades to manage data redistribution effectively. Additionally, maintaining Citus MX routing functionality during node transitions and managing inter-node connectivity during upgrade phases are essential for seamless operations.
 
-
-This multi-node upgrade strategy will be covered in a separate design document when DocumentDB enables multi-node deployment scenarios, building upon the current single-node HA strategy as the foundation.
-
 ## Multi-Region Upgrade Strategy (Future Enhancement)
 
 **Multi-Region Upgrade Considerations**: While multi-node deployments focus on horizontal scaling within a single location, future multi-region deployments will address geographic distribution challenges across different regions, clouds, or data centers using a primary-replica region architecture. Multi-region upgrades introduce additional complexity including cross-region network latency considerations, provider-specific maintenance windows, data sovereignty and compliance requirements, regional disaster recovery coordination, and potential split-brain scenarios during network partitions between regions. The orchestration strategy will need to account for replica-first upgrade sequencing (upgrading replica regions before the primary region), cross-region data consistency validation between primary and replica regions, region-specific rollback procedures, and coordinated monitoring across geographically distributed infrastructure. This multi-region upgrade strategy will be addressed in a dedicated design document when DocumentDB expands beyond single-region deployments.
 
-## Upgrade Strategies
 
-**Multi-Version Support Approach**: DocumentDB uses a multi-version API strategy where a single operator version supports multiple DocumentDB cluster API versions simultaneously, enabling controlled migration.
 
-### 1. Infrastructure Upgrade Strategy (Kubernetes Admin)
+## Failure Modes and Recovery (Essentials)
 
-The operator infrastructure upgrade involves upgrading the control plane components while leaving existing DocumentDB clusters unchanged.
+Focus on highest-impact, actionable scenarios only.
 
-#### A. Infrastructure Components Upgrade
+1. Helm upgrade / CRD change fails
+   - Impact: New CR creation blocked; existing clusters keep running
+   - Detect: Helm timeout/errors
+   - Recover: Automatic rollback (`--atomic`); if partial, delete new CRD + redeploy previous chart
+   - Prevent: Mandatory dry-run + test upgrade in lower envs
 
-**Components Upgraded in Infrastructure Phase:**
-- **DocumentDB Operator**: Controller with multi-version API support, webhooks, CRDs
-- **Sidecar Injector**: Container injection webhook supporting multiple cluster API versions
-- **CNPG Operator**: PostgreSQL cluster management (when version updates required)
+2. Operator crash loop after upgrade
+   - Impact: Reconciliation paused; running clusters unaffected
+   - Detect: Pod restart loop / liveness probe failures
+   - Recover: Rollback chart; inspect logs/resources; adjust limits
+   - Prevent: Resource limits + readiness/liveness tuned
 
-**Components NOT Upgraded in Infrastructure Phase:**
-- **DocumentDB Clusters**: Remain on current API version until Phase 2 migration
-- **Gateway Images**: Stay at current version until API migration
-- **PostgreSQL + Extension**: No changes to running databases until API migration
+3. Cluster API migration fails
+   - Impact: Single cluster degraded
+   - Detect: Ready condition not true within window / errors in status
+   - Recover: Reapply previous manifest (apiVersion/spec); restore from backup if corruption
+   - Prevent: Pre-migration backup + health/lag checks + dry-run patch
 
-**Version Alignment Example (Infrastructure Phase):**
-```yaml
-# After Infrastructure Phase: Operator v2 supports cluster API v1 and v2
-documentdb-operator: v2.0.0          # ✅ Upgraded (supports cluster API v1 + v2)
-sidecar-injector: v2.0.0             # ✅ Upgraded (supports cluster API v1 + v2)
-cnpg-operator: v0.26.0               # ✅ Upgraded (if required)
-# Existing clusters remain on API v1
-cluster-api-version: v1              # ⏸️ Not migrated yet
-cluster-gateway: cluster-api-v1      # ⏸️ Not migrated yet  
-cluster-postgres: cluster-api-v1     # ⏸️ Not migrated yet
-```
+4. Gateway container fails on new API
+   - Impact: App connectivity loss (one cluster)
+   - Detect: CrashLoopBackOff / failed health probes
+   - Recover: Roll back gateway image; restart pod
+   - Prevent: Canary migration + image compatibility tests
 
-#### B. Infrastructure Upgrade Process
+5. Network partition / replica divergence risk
+   - Impact: Potential replication lag or write blockage (split-brain prevented by single primary design)
+   - Detect: Elevated replication lag; unexpected role changes; timeline anomalies
+   - Recover: Allow CNPG failover; if divergence suspected, promote known-good standby and reattach others
+   - Prevent: Stable network, monitoring lag & role labels
 
-**Single Helm Upgrade Approach (Kubernetes Admin):**
+6. Concurrent migrations overload resources
+   - Impact: Multiple clusters slow / fail
+   - Detect: Resource saturation (CPU/memory), multiple Ready timeouts
+   - Recover: Pause further migrations; rollback affected clusters
+   - Prevent: Throttle batch size; enforce migration schedule
 
-1. **Pre-upgrade validation** using Helm dry-run to identify potential issues
-2. **Atomic upgrade execution** with rollback on failure using Helm's `--atomic` flag  
-3. **Operator health verification** ensuring all operators reach ready state
-4. **Multi-version compatibility check** ensuring v2 operator can manage both v1 and v2 cluster APIs
-
-**Command Examples**: See [commands.md](./commands.md) for detailed Infrastructure Upgrade commands and validation.
-
-**Upgrade Process Flow (Infrastructure Phase):**
-1. **CNPG Operator** (if version update required)
-2. **DocumentDB Operator** (CRDs with v2 fields, controller with multi-version support, webhooks, RBAC)
-3. **Sidecar Injector** (webhook supporting both cluster API versions)
-4. **Validation** that v2 operator can manage existing v1 clusters and create new v2 clusters
-
-### 2. Cluster API Migration Strategy (Database Admin + Database Developer)
-
-The cluster API migration involves coordinated planning by Database Admins and execution by Database Developers for transitioning individual DocumentDB clusters from v1 to v2 API.
-
-#### A. Per-Cluster API Migration Components
-
-**Components Migrated in API Migration (per cluster):**
-- **Cluster API Schema**: DocumentDB cluster configuration migrated from v1 to v2 fields
-- **Gateway Image**: Updated to support v2 API features (if different from v1)
-- **PostgreSQL + Extension**: Updated to support v2 API features (if different from v1)
-- **Cluster Configuration**: Access to new v2 features and APIs
-
-**Database Admin + Database Developer Coordinated Process:**
-- **Migration Planning**: Database Admin coordinates timeline across environments  
-- **Migration Execution**: Database Developer executes per Database Admin's plan
-- **Feature Testing**: Database Developer tests v2 API features before production migration
-- **Rollback Capability**: Individual cluster API version downgrade (v2 → v1) if needed
-
-**Command Examples**: See [commands.md](./commands.md) for detailed Database Admin coordination and Database Developer execution commands.
-
-#### B. Cluster API Migration Process
-
-**Developer-Initiated Commands:**
-See [commands.md](./commands.md) for detailed cluster API migration commands including backup, migration, monitoring, and rollback procedures.
-
-**Cluster API Migration Process Flow:**
-1. **Pre-migration backup** (if required for significant changes)
-2. **API schema migration** from v1 to v2 fields and configuration  
-3. **Rolling update** of PostgreSQL pods with v2-compatible images (if needed)
-4. **Gateway container restart** with v2 API support (if needed)
-5. **Configuration validation** of cluster functionality with v2 API
-6. **Application testing** with v2 API features
-
-### 3. Multi-Version API Support Examples
-
-#### Example 1: Operator v2 Supporting Cluster API v1 and v2
-**Infrastructure Phase (Kubernetes Admin):**
-Operator infrastructure upgrade: v1 → v2
-- Operator components: v1 → v2 (now supports cluster API v1 + v2)
-- Existing clusters: remain on cluster API v1
-- New clusters: can be created with either cluster API v1 or v2
-
-**API Migration Phase (Database Admin coordination + Database Developer execution):**
-Database Admin coordinates migration plan, Database Developer executes cluster API version migration from v1 to v2
-
-**API Coexistence**: Operator v2 manages both cluster API v1 and v2 simultaneously
-
-**Command Examples**: See [commands.md](./commands.md) for detailed multi-version API commands.
-
-#### Example 2: Operator v3 with API Deprecation (Medium Risk)
-**Infrastructure Phase (Kubernetes Admin):**
-Operator infrastructure upgrade: v2 → v3
-- Operator components: v2 → v3 (supports cluster API v1-deprecated, v2, v3)
-- Cluster API v1: marked as deprecated but still functional
-- Existing clusters: all versions continue running unchanged
-
-**API Migration Phase (Database Admin coordination + Database Developer execution):**
-Week 1: Development clusters (v1 → v2 or v1 → v3)
-Week 2: Staging validation
-Week 3: Production (after testing new API versions)
-
-**Command Examples**: See [commands.md](./commands.md) for detailed API deprecation migration commands.
-
-#### Example 3: Operator v4 with API Removal (High Risk)
-**Infrastructure Phase (Kubernetes Admin):**
-Operator infrastructure upgrade: v3 → v4
-- All operator components: v3 → v4 (supports cluster API v2, v3, v4)
-- Cluster API v1: removed (no longer supported)
-- **Prerequisites**: All clusters must be migrated off cluster API v1 before operator upgrade
-
-**API Migration Phase (Database Admin coordination + Database Developer execution):**
-Month 1: Development clusters (v2 → v3 or v2 → v4)
-Month 2: Staging environment validation
-Month 3: Production (after extensive testing)
-
-**Command Examples**: See [commands.md](./commands.md) for detailed API removal migration commands.
-
-## Failure Modes and Recovery
-
-### Operator Infrastructure Failures
-
-#### Scenario: Helm Upgrade Fails During CRD Update
-**Impact**: New clusters cannot be created, existing clusters unaffected
-**Probability**: Medium (complex CRD schema changes)
-**Detection**: Helm upgrade timeout or validation errors
-**Recovery**: 
-- Automatic Helm rollback via `--atomic` flag
-- Manual CRD cleanup if needed: `kubectl delete crd documentdbs.db.microsoft.com`
-- Re-apply previous operator version
-**Prevention**: 
-- Mandatory Helm dry-run validation before upgrade
-- Staged rollouts in non-production environments first
-- CRD schema compatibility testing in CI/CD
-
-#### Scenario: DocumentDB Operator Pod Crash During Upgrade
-**Impact**: Existing clusters stable, new cluster creation blocked
-**Probability**: Low (robust health checks)
-**Detection**: Pod restart loops, operator health check failures
-**Recovery**:
-- Kubernetes restarts operator pod automatically
-- If persistent failure, Helm rollback to previous version
-- Check resource limits and node capacity
-**Prevention**:
-- Resource requests/limits properly configured
-- Health checks with appropriate timeouts
-- Pod disruption budgets prevent simultaneous restarts
-
-### API Migration Failures
-
-#### Scenario: Cluster API Migration Fails Mid-Process
-**Impact**: Single cluster affected, others continue operating normally
-**Probability**: Low (pre-migration validation)
-**Detection**: API migration timeout, cluster status degradation
-**Recovery**:
-- Per-cluster rollback to previous API version
-- `kubectl patch documentdb cluster-name --type='merge' -p '{"apiVersion": "db.microsoft.com/v1"}'`
-- Restore from pre-migration backup if data corruption
-**Prevention**:
-- Mandatory backup before API migration
-- Pre-migration cluster health validation
-- Staged migration (dev → staging → production)
-
-#### Scenario: Gateway Container Fails to Start with New API Version
-**Impact**: MongoDB connectivity lost for single cluster
-**Probability**: Medium (configuration incompatibilities)
-**Detection**: Pod crash loops, connection test failures
-**Recovery**:
-- Rolling restart of PostgreSQL pods
-- Revert to previous gateway image version
-- Manual configuration correction if needed
-**Prevention**:
-- Container image compatibility testing
-- Canary deployment for new gateway versions
-- Comprehensive integration test suite
-
-### Split-Brain and Consistency Failures
-
-#### Scenario: Network Partition During Rolling Upgrade
-**Impact**: Potential data inconsistency between standby servers
-**Probability**: Low (robust network infrastructure)
-**Detection**: CNPG cluster status reports split-brain condition
-**Recovery**:
-- CNPG automatic recovery mechanisms engage
-- Manual intervention for prolonged partitions
-- Restore from backup if data corruption detected
-**Prevention**:
-- Extended timeout windows for network instability
-- Proper health checks with retry logic
-- Network monitoring and alerting
-
-#### Scenario: Concurrent API Migrations Cause Resource Conflicts
-**Impact**: Multiple clusters fail migration simultaneously
-**Probability**: Very Low (developer coordination)
-**Detection**: Resource exhaustion, multiple cluster failures
-**Recovery**:
-- Throttle concurrent migrations
-- Prioritize critical production clusters
-- Staged rollback of failed migrations
-**Prevention**:
-- API migration coordination guidelines
-- Resource capacity planning
-- Automated migration scheduling
+Rollback Golden Rules:
+- Always have recent logical/physical backup before Phase 2
+- Automate fast rollback for stateless/operator issues; keep manual confirmation for data changes
+- Track each migration (cluster, from→to, start/finish, result) for audit
 
 ## Trade-off Analysis
 
-This section analyzes key architectural decisions where we had to choose between competing approaches. Each trade-off explains the alternatives considered and why we selected our approach.
-
-### Multi-Version API Support vs Single Version Enforcement
-**The Choice**: Support 2-3 API versions simultaneously in single operator
-**Alternative Rejected**: Force all clusters to upgrade to latest API version immediately
-**Trade-offs**:
-- **Choosing Multi-Version Support**:
-  - ✅ **Benefit**: 6-month migration windows, 90% reduction in forced upgrade incidents
-  - ❌ **Cost**: ~30% increase in operator codebase size, additional testing matrix
-- **Alternative (Single Version)**:
-  - ✅ **Benefit**: Simpler codebase, single testing path
-  - ❌ **Cost**: Breaking changes force immediate migrations, higher operational risk
-**Decision**: Accept complexity to enable gradual migrations (customer requirement)
-
-### Unified Versioning vs Component Independence  
-**The Choice**: All components versioned together with single release
-**Alternative Rejected**: Independent versioning for each component (operator, gateway, postgres, etc.)
-**Trade-offs**:
-- **Choosing Unified Versioning**:
-  - ✅ **Benefit**: Single version to track, eliminates version matrix compatibility testing
-  - ❌ **Cost**: Larger upgrade surface area, more components change per upgrade
-- **Alternative (Independent Versioning)**:
-  - ✅ **Benefit**: Granular control, smaller upgrade scope per component
-  - ❌ **Cost**: Complex version matrix (5 components × multiple versions), compatibility hell
-**Decision**: Prioritize operational simplicity over granular control
-
-### Rolling vs Blue-Green Upgrades
-**The Choice**: Rolling upgrades as default, blue-green for major versions only
-**Alternative Rejected**: Blue-green deployments for all upgrades
-**Trade-offs**:
-- **Choosing Rolling Upgrades**:
-  - ✅ **Benefit**: Uses existing capacity, saves ~50% infrastructure costs
-  - ❌ **Cost**: Higher failure rate (0.1% vs 0.01%), temporary service degradation
-- **Alternative (Blue-Green Only)**:
-  - ✅ **Benefit**: Near-zero downtime, instant rollback capability
-  - ❌ **Cost**: Requires 2x resources, complex networking setup
-**Decision**: Use rolling for cost efficiency, blue-green only for high-risk scenarios
-
-### Automatic vs Manual Rollbacks
-**The Choice**: Automatic rollback for infrastructure, manual approval for data plane
-**Alternative Rejected**: Fully automatic rollbacks for all components
-**Trade-offs**:
-- **Choosing Hybrid Approach**:
-  - ✅ **Benefit**: Fast recovery for infrastructure (95% faster), human oversight for data
-  - ❌ **Cost**: Requires on-call engineering judgment for data plane issues
-- **Alternative (Fully Automatic)**:
-  - ✅ **Benefit**: Fastest possible recovery, no human intervention needed
-  - ❌ **Cost**: Risk of automatic rollback making data corruption worse
-**Decision**: Automatic for stateless, manual approval for stateful components
-
-### Team Autonomy vs Centralized Control
-**The Choice**: Split responsibility between Kubernetes admins (infrastructure), Database admins (coordination), and Database developers (execution)
-**Alternative Rejected**: Single team controls all upgrade phases
-**Trade-offs**:
-- **Choosing Three-Tier Responsibility Model**:
-  - ✅ **Benefit**: Domain expertise alignment, coordinated execution, reduced bottlenecks across teams
-  - ❌ **Cost**: Requires coordination between Database admins and Database developers
-- **Alternative (Centralized Control)**:
-  - ✅ **Benefit**: Single point of responsibility, consistent upgrade process
-  - ❌ **Cost**: Bottlenecks on single team, slower overall upgrade velocity, domain expertise dilution
-**Decision**: Accept coordination overhead for improved domain alignment and team velocity
-
-### CNPG Supervised vs Unsupervised Upgrades
-**The Choice**: Hybrid approach - unsupervised for development, supervised for production
-**Alternative Rejected**: Fully automatic unsupervised upgrades for all environments
-**Trade-offs**:
-- **Choosing Hybrid Approach**:
-  - ✅ **Benefit**: Fast automated dev/staging, manual control for production safety
-  - ❌ **Cost**: Requires manual intervention (~1-5 minutes), environment-specific procedures
-- **Alternative (Unsupervised Only)**:
-  - ✅ **Benefit**: Fully automated, no human intervention needed
-  - ❌ **Cost**: Higher risk of unexpected production issues during failover
-**Decision**: Use unsupervised for development, supervised manual control for production
-
----
+- Unified Component Version vs Independent Component Versions: A single unified version simplifies operations and guarantees compatibility, at the cost of less flexibility to patch components independently.
+- Multi-Version API Support vs Single Version Enforcement: Serving multiple API versions concurrently enables gradual cluster migration and reduces pressure on teams, while increasing operator complexity and test scope.
+- Rolling Upgrades vs Always Blue-Green: Rolling upgrades minimize extra infrastructure and networking overhead, accepting slightly higher in-place change risk; blue‑green is reserved for exceptional high‑risk cases.
+- Hybrid Rollback Strategy vs Full Automation: Automating rollbacks for stateless pieces and keeping manual judgment for stateful data preserves data safety while adding a small decision delay.
+- Role Separation (K8s Admin / DBA / App Dev) vs Single Owning Team: Splitting responsibilities aligns expertise and allows parallel work, introducing some coordination overhead.
 
 ## Implementation Reference
 

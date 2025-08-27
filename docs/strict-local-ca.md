@@ -20,20 +20,23 @@ Notes
 - DocumentDB image: ghcr.io/microsoft/documentdb/documentdb-local:16 (or your mirrored ACR path).
 - The gateway TLS secret issued by cert-manager will include ca.crt, tls.crt, tls.key.
 - Use an SNI host that matches the certificate, e.g. <EXTERNAL-IP>.sslip.io.
+ - If Azure Policy blocks GHCR in your workload namespace, mirror the gateway image and set `spec.gatewayImage` in the DocumentDB resource.
 
 ---
 
 ## 0) Variables
 
 ```bash
-export SUBSCRIPTION_ID="<your-subscription-guid>"
-export RG="<your-resource-group>"
-export AKS_NAME="<your-aks-name>"
-export ACR_NAME="<youracr>"                 # e.g., guanzhoutest
+export SUBSCRIPTION_ID="81901d5e-31aa-46c5-b61a-537dbd5df1e7"
+export LOCATION="eastus2"
+export RG="documentdb-aks4-rg"
+export ACR_NAME="guanzhoutest"           # use this ACR name as provided
+export AKS_NAME="documentdb-aks4"
+export KV_NAME="ddb-issuer-04"           # optional for AKV prep (unique in your tenant)
 export OPERATOR_IMAGE_REPO="$ACR_NAME.azurecr.io/documentdb/operator"
 export SIDECAR_IMAGE_REPO="$ACR_NAME.azurecr.io/documentdb/sidecar"
 export CNPG_IMAGE_REPO_ACR="$ACR_NAME.azurecr.io/cloudnative-pg"
-export CNPG_IMAGE_TAG="1.27.0"              # known-good version
+export CNPG_IMAGE_TAG="1.27.0"           # known-good version
 export IMAGE_TAG="$(date +%Y%m%d%H%M%S)"
 ```
 
@@ -48,16 +51,38 @@ Option A — Policy exemption (fastest if you have rights)
 - Use your org’s standard process. The exemption should allow ghcr.io for CloudNativePG pods in the operator namespace.
 
 Option B — Mirror CNPG image to ACR (no policy changes)
-- Import image into ACR, then use that repository in Helm values.
+- Pull from GHCR locally, retag to your ACR, then push. Use that repository in Helm values.
 
 ```bash
-# Imports the public image into your ACR under $CNPG_IMAGE_REPO_ACR:$CNPG_IMAGE_TAG
-az acr import -n "$ACR_NAME" \
-  --source "ghcr.io/cloudnative-pg/cloudnative-pg:$CNPG_IMAGE_TAG" \
-  --image "cloudnative-pg:$CNPG_IMAGE_TAG"
+# Optional: authenticate to GHCR if required
+# echo "$GITHUB_TOKEN" | docker login ghcr.io -u <github-username> --password-stdin || true
+
+# Authenticate to your ACR
+az acr login -n "$ACR_NAME"
+
+# Pull from GHCR, retag for ACR, and push
+docker pull "ghcr.io/cloudnative-pg/cloudnative-pg:$CNPG_IMAGE_TAG"
+docker tag  "ghcr.io/cloudnative-pg/cloudnative-pg:$CNPG_IMAGE_TAG" "$ACR_NAME.azurecr.io/cloudnative-pg:$CNPG_IMAGE_TAG"
+docker push "$ACR_NAME.azurecr.io/cloudnative-pg:$CNPG_IMAGE_TAG"
+
+# Validate the repo and tag exist in your ACR
+az acr repository show -n "$ACR_NAME" --repository "cloudnative-pg" >/dev/null && echo "CNPG repo exists"
+az acr repository show-tags -n "$ACR_NAME" --repository "cloudnative-pg" \
+  --query "[?@=='$CNPG_IMAGE_TAG']" -o tsv | grep -q "$CNPG_IMAGE_TAG" && echo "CNPG tag imported"
 ```
 
 If import is blocked by ghcr.io, authenticate to GHCR or use a temporary policy exemption (Option A).
+
+Optional — Mirror the gateway image if GHCR is blocked for workloads
+
+```bash
+# Pull the gateway image from GHCR, retag for ACR, and push
+docker pull "ghcr.io/microsoft/documentdb/documentdb-local:16"
+docker tag  "ghcr.io/microsoft/documentdb/documentdb-local:16" "$ACR_NAME.azurecr.io/documentdb/documentdb-local:16"
+docker push "$ACR_NAME.azurecr.io/documentdb/documentdb-local:16"
+```
+
+Note: If your network blocks anonymous pulls from GHCR, `docker login ghcr.io` with a GitHub personal access token that has `read:packages`.
 
 ---
 
@@ -139,6 +164,8 @@ spec:
   nodeCount: 1
   instancesPerNode: 1
   documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+  # If GHCR is blocked for this namespace, mirror the gateway image to your ACR and set it here:
+  # gatewayImage: <youracr>.azurecr.io/documentdb/documentdb-local:16
   resource:
     pvcSize: 10Gi
   exposeViaService:
@@ -176,13 +203,16 @@ export SNI_HOST="${SVC_IP}.sslip.io"
 kubectl -n documentdb-preview-ns patch documentdb documentdb-preview --type merge \
   -p '{"spec":{"tls":{"certManager":{"dnsNames":["'"$SNI_HOST"'"]}}}}'
 
+# Important: The operator creates the Certificate once and doesn't update it on dnsNames changes.
+# Force re-issuance by deleting the Certificate; the operator will recreate it with the new SANs.
+kubectl -n documentdb-preview-ns delete certificate documentdb-preview-gateway-cert --ignore-not-found
+
 # Watch certificate become Ready and the gateway secret update
 kubectl -n documentdb-preview-ns get documentdb documentdb-preview -o jsonpath='{.status.tls.secretName}{"\n"}'
 kubectl -n documentdb-preview-ns get certificate -o wide
 kubectl -n documentdb-preview-ns get secret $(kubectl -n documentdb-preview-ns get documentdb documentdb-preview -o jsonpath='{.status.tls.secretName}') -o json | jq '.data | keys'
 ```
-
-You should see a secret name like documentdb-preview-gateway-cert that contains tls.crt, tls.key, and ca.crt.
+You should see a secret name like documentdb-preview-gateway-cert-tls that contains tls.crt, tls.key, and ca.crt.
 
 ---
 
@@ -214,11 +244,15 @@ Expected: `{ ok: 1 }` with a valid certificate chain and hostname match.
 - Hostname mismatch
   - Ensure `.spec.tls.certManager.dnsNames` contains the SNI host you used (e.g., <IP>.sslip.io).
   - Reapply the DocumentDB resource to trigger re-issuance; confirm the Certificate is Ready.
+- Cert did not update after adding dnsNames
+  - Delete the Certificate named `<docdb-name>-gateway-cert` (e.g., `documentdb-preview-gateway-cert`); the operator will recreate it with the new dnsNames.
 - No ca.crt in secret
   - Verify the Issuer is backed by a CA (`02-issuer-from-ca.yaml`) and you are in CertManager mode.
+  - If still missing, export `ca.crt` from the `documentdb-root-ca` secret created in step 5.
 - Image pull blocked by Azure Policy
   - Ensure operator and sidecar use your ACR images.
   - For CNPG, use Option A (policy exemption) or Option B (mirror to ACR) above.
+  - For the gateway sidecar image, either allow GHCR or mirror and set `spec.gatewayImage` in your DocumentDB resource.
 - Service external IP is pending
   - Wait a few minutes; check your AKS LB provisioning and subnet.
 - Sidecar args include certificate paths

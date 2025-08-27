@@ -140,10 +140,10 @@ Set variables
 ```
 export SUBSCRIPTION_ID="81901d5e-31aa-46c5-b61a-537dbd5df1e7"
 export LOCATION="eastus2"
-export RG="documentdb-aks2-rg"
+export RG="documentdb-aks4-rg"
 export ACR_NAME="guanzhoutest"           # use this ACR name as provided
-export AKS_NAME="documentdb-aks2"
-export KV_NAME="ddb-issuer-02"           # optional for AKV prep (unique in your tenant)
+export AKS_NAME="documentdb-aks4"
+export KV_NAME="ddb-issuer-04"           # optional for AKV prep (unique in your tenant)
 export OPERATOR_IMAGE_REPO="$ACR_NAME.azurecr.io/documentdb/operator"
 export SIDECAR_IMAGE_REPO="$ACR_NAME.azurecr.io/documentdb/sidecar"
 export IMAGE_TAG="$(date +%Y%m%d%H%M%S)"
@@ -172,7 +172,7 @@ az group create -n "$RG" -l "$LOCATION"
 
 3) Create ACR (if not already present)
 ```
-az acr create -g "$RG" -n "$ACR_NAME" --sku Standard
+az acr create -g "$RG" -n "$ACR_NAME" --sku Standard_d8s_v5
 ```
 
 4) Create AKS with managed identity and attach ACR
@@ -180,7 +180,8 @@ az acr create -g "$RG" -n "$ACR_NAME" --sku Standard
 az aks create -g "$RG" -n "$AKS_NAME" -l "$LOCATION" \
   --enable-managed-identity \
   --node-count 3 \
-  --attach-acr "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG/providers/Microsoft.ContainerRegistry/registries/$ACR_NAME"
+  -s Standard_d8s_v5 \
+  --attach-acr "/subscriptions/81901d5e-31aa-46c5-b61a-537dbd5df1e7/resourceGroups/guanzhou-test-rg/providers/Microsoft.ContainerRegistry/registries/guanzhoutest"
 ```
 
 5) Get kubeconfig credentials
@@ -209,7 +210,7 @@ az acr login -n "$ACR_NAME"
 
 7) Build and push images (operator and sidecar injector)
 ```
-docker build -t "$OPERATOR_IMAGE_REPO:$IMAGE_TAG" -f Dockerfile .
+docker build -t "$OPERATOR_IMAGE_REPO:$IMAGE_TAG" -f Dockerfile . 
 ```
 ```
 docker build -t "$SIDECAR_IMAGE_REPO:$IMAGE_TAG" -f plugins/sidecar-injector/Dockerfile plugins/sidecar-injector
@@ -224,19 +225,15 @@ docker push "$SIDECAR_IMAGE_REPO:$IMAGE_TAG"
 8) Install cert-manager (required for Certificate resources)
 ```
 helm repo add jetstack https://charts.jetstack.io
-```
-```
+
 helm repo update
-```
-```
+
 kubectl create namespace cert-manager
-```
-```
+
 helm upgrade --install cert-manager jetstack/cert-manager \
   --namespace cert-manager \
   --set installCRDs=true
-```
-```
+
 kubectl -n cert-manager get pods
 ```
 

@@ -8,22 +8,28 @@ This document outlines the upgrade strategy for the DocumentDB Kubernetes operat
 
 The following sections provide essential background information for implementing DocumentDB operator upgrades:
 
-### 1. Kubernetes Operators
+### 1. Kubernetes Architecture
+Kubernetes (K8s) is an open-source container orchestration system that makes deploying, scaling, and operating containerized applications easier across a cluster of control plane and worker nodes. A Pod is the smallest deployable unit: one or more tightly coupled containers sharing the same network namespace and storage volumes.
+
+**Learn more**: https://kubernetes.io/
+
+
+### 2. Kubernetes Operators
 Kubernetes operators extend the API to manage complex applications through custom resources and controllers that continuously reconcile desired state. Operators use admission webhooks to validate and modify resources during creation and updates.
 
 **Learn more**: [Kubernetes Operator Pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/) | [Operator White Paper](https://github.com/cncf/tag-app-delivery/blob/163962c4b1cd70d085107fc579e3e04c2e14d59c/operator-wg/whitepaper/Operator-WhitePaper_v1-0.md) | [Custom Resources](https://kubernetes.io/docs/concepts/extend-kubernetes/api-extension/custom-resources/) | [Admission Controllers](https://kubernetes.io/docs/reference/access-authn-authz/admission-controllers/)
 
-### 2. DocumentDB Operator Architecture
+### 3. DocumentDB Operator Architecture
 The DocumentDB operator provides a MongoDB-compatible API over PostgreSQL by orchestrating multiple components: the operator controller, gateway containers for protocol translation, PostgreSQL clusters with DocumentDB extensions, and sidecar injection for seamless integration with CloudNative-PG (CNPG) operator.
 
 **Learn more**: [DocumentDB Operator README](../../../README.md) | [CloudNative-PG Documentation](https://cloudnative-pg.io/documentation/)
 
-### 3. Helm Chart Management
+### 4. Helm Chart Management
 Helm makes Kubernetes application packaging and deployment easy by bundling multiple related resources into a single chart. We provide a DocumentDB operator Helm chart that customers can install with a single command, automatically deploying all necessary components including the DocumentDB operator, CNPG operator, sidecar injector, and associated configurations.
 
 **Learn more**: [Helm Documentation](https://helm.sh/docs/) | [Managing CRDs with Helm](https://helm.sh/docs/chart_best_practices/custom_resource_definitions/) | [Helm Upgrade Process](https://helm.sh/docs/helm/helm_upgrade/)
 
-### 4. PostgreSQL and Extensions
+### 5. PostgreSQL and Extensions
 PostgreSQL version upgrades involve considerations for both the database engine and extensions, with major version upgrades requiring data migration and careful compatibility validation. Extension upgrades may modify schemas or data structures independently of the PostgreSQL version.
 
 **Learn more**: [PostgreSQL Versioning Policy](https://www.postgresql.org/support/versioning/) | [PostgreSQL Upgrade Methods](https://www.postgresql.org/docs/current/upgrading.html) | [Extension Management](https://www.postgresql.org/docs/current/extend-extensions.html)
@@ -65,8 +71,8 @@ The CloudNative-PG operator that handles PostgreSQL cluster lifecycle management
 
 Our upgrade strategy follows four core principles:
 
-### 1. Zero-Downtime Principle
-All upgrades maintain service availability through rolling updates and automatic rollback on failure.
+### 1. Continuous Service Principle
+Upgrades aim to keep the primary endpoint continuously reachable (no planned maintenance window) via rolling changes and automatic rollback. Brief failover/switchover gaps (seconds) may cause transient write retries; we do not yet publish a formal availability target or SLA.
 
 ### 2. Backward Compatibility Principle  
 Support N-2 API versions with deprecation cycles (6-months) for gradual migration.
@@ -80,7 +86,7 @@ Clear separation: Kubernetes admins upgrade infrastructure, Database admins coor
 ## Goals and Non-Goals
 
 ### Goals
-- **Zero-downtime upgrades**: All DocumentDB components upgrade without service interruption
+- **Continuous-service upgrades**: Rolling strategies avoid planned maintenance windows; brief failover switchover gaps (seconds) can still occur
 - **Gradual migration capability**: Support API version migration over weeks/months timeline
 - **Automated rollback**: Failed upgrades automatically revert to previous stable state
 - **Team independence**: Platform and application teams operate on separate timelines
@@ -117,13 +123,15 @@ Clear separation: Kubernetes admins upgrade infrastructure, Database admins coor
 ## Upgrade Strategies
 
 ### Three-Tier Responsibility Model
-Clear separation of platform, data, and application duties to enable parallel progress and safe staged upgrades.
+Clear separation of platform, data, and application duties enables parallel progress and safe staged upgrades.
 
 | Role | Primary Scope | Upgrade Ownership |
 |------|---------------|------------------|
 | Kubernetes Admin | Cluster infrastructure & operators | Phase 1 – Infrastructure upgrade |
 | Database Admin (DBA) | Cluster fleet lifecycle & performance | Phase 2 – Cluster API migration |
 | Application / Database Developer | App integration & validation | Phase 3 – Application validation |
+
+_Note: In many DocumentDB deployments the DBA and Application roles are performed by the same person; roles remain separated here to keep distinct checklists and hand-off gates._
 
 ### Multi-Version Support Architecture
 DocumentDB uses a multi-version API approach where a single operator version supports multiple DocumentDB cluster versions simultaneously, enabling gradual migration without forcing upgrades.
@@ -160,8 +168,7 @@ Steps per cluster:
 Rollback triggers: Ready timeout, sustained latency/error regression, high replication lag, crash loops.
 
 ### Phase 3: Application Validation (Developer)
-Actions: Validate connectivity, CRUD/index/query latency, error rates, enable new feature flags if desired.
-Escalate to DBA on regression; otherwise mark migration complete.
+Actions: Validate connectivity, CRUD/index/query latency, error rates, enable new feature flags if desired. If the same individual performed Phase 2, treat this as a separate explicit verification gate before marking migration complete. Escalate only if issues require infrastructure/operator rollback.
 
 Benefits:
 - Clear role separation
@@ -186,7 +193,7 @@ While all components upgrade together, each has specific characteristics:
 - **State**: **Stateful** - PostgreSQL contains persistent application data
 - **Impact**: Variable (depends on API version differences)
 - **Risk**: Variable - Data migration only required for breaking schema changes
-- **Risk Mitigation**: CNPG managed HA with supervised rolling updates for zero-downtime upgrades
+- **Risk Mitigation**: CNPG managed HA with supervised rolling updates for continuous-service (no planned outage) upgrades
 - **HA Strategy**: 3-instance clusters (1 primary + 2 standby servers) with CNPG-controlled failover sequence
 - **Categories**:
   - **Same PostgreSQL Version**: Cluster API v1 → v2 with same PG version (low risk, configuration change only)
@@ -219,7 +226,7 @@ While all components upgrade together, each has specific characteristics:
 
 ## Local High Availability (HA) and Upgrade Strategy
 
-DocumentDB leverages CNPG's mature PostgreSQL HA capabilities to provide zero-downtime upgrades through controlled failover orchestration.
+DocumentDB leverages CNPG's mature PostgreSQL HA capabilities to provide continuous-service upgrades (no planned outage window) through controlled failover orchestration.
 
 ### 1. CNPG in Brief (What It Is & How It Works)
 CloudNative‑PG (CNPG) is a Kubernetes operator that natively manages highly available PostgreSQL clusters. It watches a `Cluster` custom resource and directly creates / replaces Pods, PVCs, and Services to enforce the desired state.
@@ -270,7 +277,7 @@ Why 3 instead of 2:
 
 #### Internal CNPG vs External Gateway Services (Essentials)
 CNPG creates internal PostgreSQL Services:
-`<cluster>-rw` (primary 5432), `<cluster>-ro` (all pods 5432), `<cluster>-r` (replication internals).
+`<cluster>-rw` (primary only, 5432), `<cluster>-ro` (standby replicas only, 5432), `<cluster>-r` (any instance: primary or standby, 5432).
 
 DocumentDB exposes Mongo protocol via separate gateway Services on port 10260, not by altering CNPG ones:
 `documentdb-gateway-rw` (primary), `documentdb-gateway-ro` (standbys).
@@ -284,7 +291,7 @@ Keep both layers for protocol separation, safer upgrades, security scoping, and 
 **Configuration Examples**: See [CNPG HA Configuration Examples](./commands.md#cnpg-ha-configuration-examples) for complete YAML specifications.
 
 
-### 3. Zero-Downtime Upgrade Sequence
+### 3. Minimal-Interruption Upgrade Sequence
 
 **CNPG Managed Rolling Update Process:**
 
@@ -303,7 +310,7 @@ Keep both layers for protocol separation, safer upgrades, security scoping, and 
    - New primary (former standby server) continues serving traffic
    - Zero service interruption during transition
 
-**Command Examples**: See [CNPG Zero-Downtime Upgrade Sequence](./commands.md#cnpg-zero-downtime-upgrade-sequence) for step-by-step commands.
+**Command Examples**: See [CNPG Minimal-Interruption Upgrade Sequence](./commands.md#cnpg-zero-downtime-upgrade-sequence) for step-by-step commands (link label kept for backward compatibility).
 
 ### 4. Operational Benefits of CNPG HA
 
@@ -330,7 +337,7 @@ Result: Predictable, observable failover & upgrade flows with minimized write in
 
 ### 6. Failover / Switchover Timing (No SLA – Empirical Ranges)
 
-DocumentDB inherits CNPG timing characteristics. No formal SLA is provided; measure in your own environment. Open‑source operator behavior and internal tests suggest these typical windows under healthy conditions:
+DocumentDB inherits CNPG timing characteristics. No formal SLA is provided; measure in your own environment. Open‑source operator behavior and internal tests suggest these typical windows under healthy conditions.
 
 Planned switchover (supervised promote):
 - Primary write leadership change: ~2–5s (WAL switch + Service/label update)
@@ -348,34 +355,6 @@ Unplanned node failure:
 
 Primary determinants: probe intervals & thresholds, node heartbeat config, replication lag, synchronous commit settings, storage and network latency. Perform periodic controlled drills (supervised promote, pod kill, node simulate) and record observed gaps between last successful and first resumed write to establish internal benchmarks.
 
-
-## Multi-Node Upgrade Strategy (Future Enhancement)
-
-**Multi-Node Upgrade Considerations**: While this document focuses on single-node DocumentDB clusters with local HA (1 primary + 2 standby servers per node as an example), future multi-node deployments will support horizontal scaling using multiple PostgreSQL clusters managed by Citus. This document provides some high level idea and the detials will be covered in a separate multi-node upgrade design doc.
-
-### Citus Integration for Multi-Node Architecture
-
-DocumentDB will leverage **Citus** (PostgreSQL extension for distributed SQL) to enable horizontal scaling through multi-node deployments. This integration requires enhancements to the CNPG operator to support Citus-specific cluster topologies.
-
-**Multi-Node Architecture with Citus**
-
-The Citus cluster architecture consists of a single coordinator node that manages distributed queries and metadata, along with multiple worker nodes that provide horizontal scaling capabilities. Each node maintains its own high availability configuration, with the coordinator node running 1 primary plus 2 standby servers managed by CNPG, and each worker node following the same HA pattern. For example, a deployment with 3 worker nodes would result in 9 total PostgreSQL instances (3 primaries and 6 standby servers). Citus MX handles intelligent query routing and distributed transaction coordination across all nodes, while the sharding strategy automatically distributes data across worker nodes based on document keys.
-
-**CNPG Integration Requirements**
-
-To support this architecture, CNPG will need several enhancements including cluster-level configuration support for Citus coordinator and worker node specifications, enhanced service discovery for inter-node communication, coordinated backup procedures across all Citus nodes, and orchestrated upgrades that maintain Citus cluster consistency throughout the process.
-
-**Upgrade Complexity Considerations**
-
-Multi-node upgrades introduce significant complexity that requires careful consideration of node upgrade sequencing based on availability zones, traffic balancing across worker nodes, cross-node dependency analysis, and risk mitigation strategies such as upgrading non-critical worker nodes before the coordinator node. The primary orchestration challenges include synchronizing upgrades across distributed worker nodes, maintaining data consistency during worker node upgrades, handling partial upgrade failures across multiple nodes, coordinating Citus metadata updates during upgrades, and ensuring Citus MX routing remains functional throughout the upgrade process.
-
-**Citus-Specific Upgrade Strategy**
-
-The upgrade strategy must account for several Citus-specific considerations. The sequencing strategy needs to determine whether to upgrade worker nodes first or the coordinator first, based on Citus version compatibility requirements. Metadata synchronization becomes critical to ensure Citus metadata consistency during rolling upgrades across nodes. Shard rebalancing must be coordinated during worker node upgrades to manage data redistribution effectively. Additionally, maintaining Citus MX routing functionality during node transitions and managing inter-node connectivity during upgrade phases are essential for seamless operations.
-
-## Multi-Region Upgrade Strategy (Future Enhancement)
-
-**Multi-Region Upgrade Considerations**: While multi-node deployments focus on horizontal scaling within a single location, future multi-region deployments will address geographic distribution challenges across different regions, clouds, or data centers using a primary-replica region architecture. Multi-region upgrades introduce additional complexity including cross-region network latency considerations, provider-specific maintenance windows, data sovereignty and compliance requirements, regional disaster recovery coordination, and potential split-brain scenarios during network partitions between regions. The orchestration strategy will need to account for replica-first upgrade sequencing (upgrading replica regions before the primary region), cross-region data consistency validation between primary and replica regions, region-specific rollback procedures, and coordinated monitoring across geographically distributed infrastructure. This multi-region upgrade strategy will be addressed in a dedicated design document when DocumentDB expands beyond single-region deployments.
 
 ## Failure Modes and Recovery
 
@@ -416,9 +395,38 @@ The upgrade strategy must account for several Citus-specific considerations. The
    - Prevent: Throttle batch size; enforce migration schedule
 
 Rollback Golden Rules:
-- Always have recent logical/physical backup before Phase 2
-- Automate fast rollback for stateless/operator issues; keep manual confirmation for data changes
-- Track each migration (cluster, from→to, start/finish, result) for audit
+  - Always have recent logical/physical backup before Phase 2
+  - Automate fast rollback for stateless/operator issues; keep manual confirmation for data changes
+  - Track each migration (cluster, from→to, start/finish, result) for audit
+
+
+## Multi-Node Upgrade Strategy (Future Enhancement)
+
+**Multi-Node Upgrade Considerations**: While this document focuses on single-node DocumentDB clusters with local HA (1 primary + 2 standby servers per node as an example), future multi-node deployments will support horizontal scaling using multiple PostgreSQL clusters managed by Citus. This document provides some high level idea and the detials will be covered in a separate multi-node upgrade design doc.
+
+### Citus Integration for Multi-Node Architecture
+
+DocumentDB will leverage **Citus** (PostgreSQL extension for distributed SQL) to enable horizontal scaling through multi-node deployments. This integration requires enhancements to the CNPG operator to support Citus-specific cluster topologies.
+
+**Multi-Node Architecture with Citus**
+
+The Citus cluster architecture consists of a single coordinator node that manages distributed queries and metadata, along with multiple worker nodes that provide horizontal scaling capabilities. Each node maintains its own high availability configuration, with the coordinator node running 1 primary plus 2 standby servers managed by CNPG, and each worker node following the same HA pattern. For example, a deployment with 3 worker nodes would result in 9 total PostgreSQL instances (3 primaries and 6 standby servers). Citus MX handles intelligent query routing and distributed transaction coordination across all nodes, while the sharding strategy automatically distributes data across worker nodes based on document keys.
+
+**CNPG Integration Requirements**
+
+To support this architecture, CNPG will need several enhancements including cluster-level configuration support for Citus coordinator and worker node specifications, enhanced service discovery for inter-node communication, coordinated backup procedures across all Citus nodes, and orchestrated upgrades that maintain Citus cluster consistency throughout the process.
+
+**Upgrade Complexity Considerations**
+
+Multi-node upgrades introduce significant complexity that requires careful consideration of node upgrade sequencing based on availability zones, traffic balancing across worker nodes, cross-node dependency analysis, and risk mitigation strategies such as upgrading non-critical worker nodes before the coordinator node. The primary orchestration challenges include synchronizing upgrades across distributed worker nodes, maintaining data consistency during worker node upgrades, handling partial upgrade failures across multiple nodes, coordinating Citus metadata updates during upgrades, and ensuring Citus MX routing remains functional throughout the upgrade process.
+
+**Citus-Specific Upgrade Strategy**
+
+The upgrade strategy must account for several Citus-specific considerations. The sequencing strategy needs to determine whether to upgrade worker nodes first or the coordinator first, based on Citus version compatibility requirements. Metadata synchronization becomes critical to ensure Citus metadata consistency during rolling upgrades across nodes. Shard rebalancing must be coordinated during worker node upgrades to manage data redistribution effectively. Additionally, maintaining Citus MX routing functionality during node transitions and managing inter-node connectivity during upgrade phases are essential for seamless operations.
+
+## Multi-Region Upgrade Strategy (Future Enhancement)
+
+**Multi-Region Upgrade Considerations**: While multi-node deployments focus on horizontal scaling within a single location, future multi-region deployments will address geographic distribution challenges across different regions, clouds, or data centers using a primary-replica region architecture. Multi-region upgrades introduce additional complexity including cross-region network latency considerations, provider-specific maintenance windows, data sovereignty and compliance requirements, regional disaster recovery coordination, and potential split-brain scenarios during network partitions between regions. The orchestration strategy will need to account for replica-first upgrade sequencing (upgrading replica regions before the primary region), cross-region data consistency validation between primary and replica regions, region-specific rollback procedures, and coordinated monitoring across geographically distributed infrastructure. This multi-region upgrade strategy will be addressed in a dedicated design document when DocumentDB expands beyond single-region deployments.
 
 ## Global Upgrade Observability
 

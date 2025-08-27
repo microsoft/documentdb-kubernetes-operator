@@ -21,7 +21,8 @@ Repo examples you can reference:
 
 ## Set variables
 ```bash
-export suffix=$(date +%m%d%H)
+export suffix="082710"
+#export suffix=$(date +%m%d%H)
 export SUBSCRIPTION_ID="81901d5e-31aa-46c5-b61a-537dbd5df1e7"
 export LOCATION="eastus2"
 export RG="documentdb-aks-${suffix}-rg"
@@ -246,15 +247,38 @@ az keyvault certificate import --vault-name "$KV_NAME" -n "$CERT_NAME" \
 ```
 Important: The certificate’s SAN must include `$SNI_HOST` (e.g., `<LB-IP>.sslip.io`). If it doesn’t, strict hostname verification will fail.
 
-Option B: Create a self-signed certificate in AKV (quick test):
+Option B: Create a self-signed certificate in AKV with SAN set (strict TLS):
 ```bash
-# Uses the default policy as a base; most tenants will need a custom policy
-# for exportable keys. If default isn’t exportable, prefer Option A.
+# Create a custom certificate policy that sets CN and SAN to your SNI host.
+# This makes strict hostname verification pass without tlsAllowInvalidHostnames.
+cat > /tmp/akv-cert-policy.json <<EOF
+{
+  "issuerParameters": { "name": "Self" },
+  "x509CertificateProperties": {
+    "subject": "CN=${SNI_HOST}",
+    "subjectAlternativeNames": { "dnsNames": [ "${SNI_HOST}" ] },
+    "keyUsage": [ "digitalSignature", "keyEncipherment" ],
+    "validityInMonths": 12
+  },
+  "keyProperties": {
+    "exportable": true,
+    "keyType": "RSA",
+    "keySize": 2048,
+    "reuseKey": false
+  },
+  "secretProperties": { "contentType": "application/x-pem-file" }
+}
+EOF
+
+# Create the certificate in Key Vault using the custom policy
 az keyvault certificate create \
   --vault-name "$KV_NAME" -n "$CERT_NAME" \
-  --policy "$(az keyvault certificate get-default-policy)"
+  --policy @/tmp/akv-cert-policy.json
+
+# Tip: If you prefer a public CA, create a CSR with the same SANs and have it signed, then merge.
 ```
-Note: For strict client verification, use a CA-backed certificate or a chain your client trusts.
+Note: The SAN must match ${SNI_HOST}. For a stable name, use a custom domain or a pre-allocated
+Azure Public IP with a DNS label (e.g., <label>.<region>.cloudapp.azure.com) and mint for that.
 
 ## 4) Create a SecretProviderClass to sync the TLS secret
 We’ll sync a Kubernetes TLS secret named `$SECRET_NAME` in namespace `$NS` that contains `tls.crt` and `tls.key`.
@@ -303,7 +327,7 @@ env CERT_NAME="$CERT_NAME" KV_NAME="$KV_NAME" envsubst < /tmp/azure-secret-provi
 
 # If you see IMDS errors like "Multiple user assigned identities exist" in pod events,
 # set the kubelet user-assigned identity clientId explicitly on the SPC and restart the puller:
-KUBELET_CLIENT_ID=$(az aks show -g "$RG" -n "$AKS_NAME" --query identityProfile.kubeletidentity.clientId -o tsv)
+KUBELET_CLIENT_ID=$(az aks show -g "$RG" -n "$AKS_NAME" --query identityProfile.kubeletidentity.clientId -o tsv | tr -d '\r')
 kubectl -n "$NS" patch secretproviderclass documentdb-azure-tls --type merge -p '{"spec":{"parameters":{"userAssignedIdentityID":"'"$KUBELET_CLIENT_ID"'"}}}'
 kubectl -n "$NS" rollout restart deploy cert-puller || true
 ```

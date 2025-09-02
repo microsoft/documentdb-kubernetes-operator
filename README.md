@@ -10,7 +10,7 @@ The DocumentDB Kubernetes Operator extends Kubernetes with Custom Resource Defin
 
 - **Declarative Management**: Define your DocumentDB clusters using Kubernetes manifests
 - **Automated Operations**: Automatic deployment, scaling, and lifecycle management
-- **MongoDB Compatibility**: Full MongoDB API compatibility for seamless application integration
+- **MongoDB Compatibility**: MongoDB API–compatible for seamless integration
 - **Cloud Native**: Built on CloudNative-PG for robust PostgreSQL foundation
 - **Helm Chart Support**: Easy installation and configuration via Helm
 - **Production Ready**: Designed for enterprise-grade deployments

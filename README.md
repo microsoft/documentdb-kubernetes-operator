@@ -25,7 +25,7 @@ For comprehensive documentation, installation guides, configuration options, and
 
 ### Quick Links
 
-- [Installation Guide](https://microsoft.github.io/documentdb-kubernetes-operator/v1/quick-start)
+- [Installation Guide](https://microsoft.github.io/documentdb-kubernetes-operator/v1/#quickstart)
 
 ## 🔗 Connecting to DocumentDB
 

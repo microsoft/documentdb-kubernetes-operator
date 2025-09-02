@@ -65,7 +65,7 @@ cert-manager        cert-manager-webhook-6cc5dccc4b-7jmrh           1/1     Runn
 Use the following command to install the DocumentDB operator:
 
 ```sh
-helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator --version 0.0.1 --namespace documentdb-operator --create-namespace
+helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-operator --version 0.0.1-multi-arch --namespace documentdb-operator --create-namespace
 ```
 
 This will install the operator in the `documentdb-operator` namespace. Verify that it is running:

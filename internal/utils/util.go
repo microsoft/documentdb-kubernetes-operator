@@ -285,3 +285,17 @@ func GetGatewayImageForDocumentDB(documentdb *dbpreview.DocumentDB) string {
 	// Fall back to default
 	return DEFAULT_GATEWAY_IMAGE
 }
+
+func GenerateServiceName(source, target, resourceGroup string) string {
+	name := fmt.Sprintf("%s-%s", source, target)
+	diff := 63 - len(name) - len(resourceGroup) - 2
+	if diff >= 0 {
+		return name
+	} else {
+		// truncate source and target region names equally if needed
+		truncateBy := (-diff + 1) / 2 // +1 to handle odd numbers
+		sourceLen := len(source) - truncateBy
+		targetLen := len(target) - truncateBy
+		return fmt.Sprintf("%s-%s", source[0:sourceLen], target[0:targetLen])
+	}
+}

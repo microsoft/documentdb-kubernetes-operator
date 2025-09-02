@@ -126,7 +126,7 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 						SelectorType: cnpgv1.ServiceSelectorTypeRW,
 						ServiceTemplate: cnpgv1.ServiceTemplateSpec{
 							ObjectMeta: cnpgv1.Metadata{
-								Name: self + "-" + other + "-rw",
+								Name: util.GenerateServiceName(self, other, documentdb.Namespace),
 							},
 						},
 					})
@@ -198,7 +198,7 @@ func (r *DocumentDBReconciler) GetSelfName(ctx context.Context) (string, error) 
 func (r *DocumentDBReconciler) CreateServiceImportAndExport(ctx context.Context, others []string, source, self string, documentdb dbpreview.DocumentDB) error {
 
 	for _, other := range others {
-		serviceName := self + "-" + other + "-rw"
+		serviceName := util.GenerateServiceName(self, other, documentdb.Namespace)
 		foundServiceExport := &fleetv1alpha1.ServiceExport{}
 		err := r.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: documentdb.Namespace}, foundServiceExport)
 		if err != nil && errors.IsNotFound(err) {
@@ -218,7 +218,7 @@ func (r *DocumentDBReconciler) CreateServiceImportAndExport(ctx context.Context,
 		}
 	}
 
-	sourceServiceName := source + "-" + self + "-rw"
+	sourceServiceName := util.GenerateServiceName(source, self, documentdb.Namespace)
 	foundMCS := &fleetv1alpha1.MultiClusterService{}
 	err := r.Get(ctx, types.NamespacedName{Name: sourceServiceName, Namespace: documentdb.Namespace}, foundMCS)
 	if err != nil && errors.IsNotFound(err) {

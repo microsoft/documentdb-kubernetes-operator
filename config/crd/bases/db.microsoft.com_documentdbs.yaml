@@ -48,6 +48,52 @@ spec:
           spec:
             description: DocumentDBSpec defines the desired state of DocumentDB.
             properties:
+              tls:
+                description: TLS configures gateway TLS certificate management.
+                type: object
+                properties:
+                  mode:
+                    description: Mode selects TLS management strategy.
+                    type: string
+                    enum:
+                      - Disabled
+                      - SelfSigned
+                      - CertManager
+                      - Provided
+                  certManager:
+                    description: cert-manager driven certificate parameters.
+                    type: object
+                    properties:
+                      issuerRef:
+                        description: Reference to cert-manager Issuer or ClusterIssuer.
+                        type: object
+                        properties:
+                          name:
+                            type: string
+                          kind:
+                            type: string
+                          group:
+                            type: string
+                        required:
+                          - name
+                      dnsNames:
+                        description: Additional DNS SANs for the certificate.
+                        type: array
+                        items:
+                          type: string
+                      secretName:
+                        description: Override target secret name.
+                        type: string
+                    required:
+                      - issuerRef
+                  provided:
+                    description: Reference to existing secret with tls.crt/tls.key.
+                    type: object
+                    properties:
+                      secretName:
+                        type: string
+                    required:
+                      - secretName
               clusterReplication:
                 description: ClusterReplication configures cross-cluster replication
                   for DocumentDB.
@@ -141,6 +187,16 @@ spec:
                 description: Status reflects the status field from the underlying
                   CNPG Cluster.
                 type: string
+              tls:
+                description: TLS reports gateway TLS provisioning status.
+                type: object
+                properties:
+                  ready:
+                    type: boolean
+                  secretName:
+                    type: string
+                  message:
+                    type: string
             type: object
         type: object
     served: true

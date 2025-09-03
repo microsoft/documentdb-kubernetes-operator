@@ -40,6 +40,9 @@ type DocumentDBSpec struct {
 	ExposeViaService ExposeViaService `json:"exposeViaService,omitempty"`
 
 	Timeouts Timeouts `json:"timeouts,omitempty"`
+
+	// TLS configures (future) gateway TLS certificate management. Phase 1: create cert-manager resources and status tracking only.
+	TLS *GatewayTLS `json:"tls,omitempty"`
 }
 
 type Resource struct {
@@ -68,11 +71,57 @@ type Timeouts struct {
 	StopDelay int32 `json:"stopDelay,omitempty"`
 }
 
+// GatewayTLS defines TLS configuration for the gateway sidecar (Phase 1: certificate provisioning only)
+type GatewayTLS struct {
+	// Mode selects the TLS management strategy.
+	// +kubebuilder:validation:Enum=Disabled;SelfSigned;CertManager;Provided
+	Mode string `json:"mode,omitempty"`
+
+	// CertManager config when Mode=CertManager.
+	CertManager *CertManagerTLS `json:"certManager,omitempty"`
+
+	// Provided secret reference when Mode=Provided.
+	Provided *ProvidedTLS `json:"provided,omitempty"`
+}
+
+// CertManagerTLS holds parameters for cert-manager driven certificates.
+type CertManagerTLS struct {
+	IssuerRef IssuerRef `json:"issuerRef"`
+	// DNSNames for the certificate SANs. If empty, operator will add Service DNS names.
+	DNSNames []string `json:"dnsNames,omitempty"`
+	// SecretName optional explicit name for the target secret. If empty a default is chosen.
+	SecretName string `json:"secretName,omitempty"`
+}
+
+// ProvidedTLS references an existing secret that contains tls.crt/tls.key (and optional ca.crt).
+type ProvidedTLS struct {
+	SecretName string `json:"secretName"`
+}
+
+// IssuerRef references a cert-manager Issuer or ClusterIssuer.
+type IssuerRef struct {
+	Name string `json:"name"`
+	// Kind of issuer (Issuer or ClusterIssuer). Defaults to Issuer.
+	Kind string `json:"kind,omitempty"`
+	// Group defaults to cert-manager.io
+	Group string `json:"group,omitempty"`
+}
+
 // DocumentDBStatus defines the observed state of DocumentDB.
 type DocumentDBStatus struct {
 	// Status reflects the status field from the underlying CNPG Cluster.
 	Status           string `json:"status,omitempty"`
 	ConnectionString string `json:"connectionString,omitempty"`
+
+	// TLS reports gateway TLS provisioning status (Phase 1).
+	TLS *TLSStatus `json:"tls,omitempty"`
+}
+
+// TLSStatus captures readiness and secret information.
+type TLSStatus struct {
+	Ready      bool   `json:"ready,omitempty"`
+	SecretName string `json:"secretName,omitempty"`
+	Message    string `json:"message,omitempty"`
 }
 
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.status",description="CNPG Cluster Status"

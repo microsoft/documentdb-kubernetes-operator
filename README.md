@@ -101,7 +101,7 @@ If you prefer to use port forwarding, you can connect as follows:
 kubectl port-forward pod/documentdb-preview-1 10260:10260 -n documentdb-preview-ns
 ```
 
-Connect using [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/). Use the username and password from the `documentdb-credentials` secret you created earlier:
+Connect using [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/). Use the username and password from the credentials secret (defaults to `documentdb-credentials`, or the value you set in `spec.documentDbCredentialSecret`):
 
 ```sh
 mongosh 127.0.0.1:10260 -u k8s_secret_user -p K8sSecret100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates

@@ -29,6 +29,11 @@ type DocumentDBSpec struct {
 	// If not specified, defaults to a version that matches the DocumentDB operator version.
 	GatewayImage string `json:"gatewayImage,omitempty"`
 
+	// DocumentDbCredentialSecret is the name of the Kubernetes Secret containing credentials
+	// for the DocumentDB gateway (expects keys `username` and `password`). If omitted,
+	// a default secret name `documentdb-credentials` is used.
+	DocumentDbCredentialSecret string `json:"documentDbCredentialSecret,omitempty"`
+
 	// ClusterReplication configures cross-cluster replication for DocumentDB.
 	ClusterReplication *ClusterReplication `json:"clusterReplication,omitempty"`
 

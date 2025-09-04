@@ -72,6 +72,12 @@ spec:
               documentDBImage:
                 description: DocumentDBImage is the container image to use for DocumentDB.
                 type: string
+              documentDbCredentialSecret:
+                description: |-
+                  DocumentDbCredentialSecret is the name of the Kubernetes Secret containing credentials
+                  for the DocumentDB gateway (expects keys `username` and `password`). If omitted,
+                  a default secret name `documentdb-credentials` is used.
+                type: string
               exposeViaService:
                 description: |-
                   ExposeViaService configures how to expose DocumentDB via a Kubernetes service.

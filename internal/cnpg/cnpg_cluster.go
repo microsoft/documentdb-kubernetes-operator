@@ -23,6 +23,11 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 	gatewayImage := util.GetGatewayImageForDocumentDB(&documentdb)
 	log.Info("Creating CNPG cluster with gateway image", "gatewayImage", gatewayImage, "documentdbName", documentdb.Name, "specGatewayImage", documentdb.Spec.GatewayImage)
 
+	credentialSecretName := documentdb.Spec.DocumentDbCredentialSecret
+	if credentialSecretName == "" {
+		credentialSecretName = util.DEFAULT_DOCUMENTDB_CREDENTIALS_SECRET
+	}
+
 	return &cnpgv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      req.Name,
@@ -41,7 +46,8 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 					{
 						Name: sidecarPluginName,
 						Parameters: map[string]string{
-							"gatewayImage": gatewayImage,
+							"gatewayImage":               gatewayImage,
+							"documentDbCredentialSecret": credentialSecretName,
 						},
 					},
 				},

@@ -12,8 +12,9 @@ const (
 	DOCUMENTDB_SIDECAR_IMAGE_ENV  = "DOCUMENTDB_SIDECAR_IMAGE"
 	ENABLE_SCALING_CONTROLLER_ENV = "ENABLE_SCALING_CONTROLLER"
 
-	DEFAULT_DOCUMENTDB_IMAGE = "ghcr.io/microsoft/documentdb/documentdb-local:16"
-	DEFAULT_GATEWAY_IMAGE    = "ghcr.io/microsoft/documentdb/documentdb-local:16"
+	DEFAULT_DOCUMENTDB_IMAGE              = "ghcr.io/microsoft/documentdb/documentdb-local:16"
+	DEFAULT_GATEWAY_IMAGE                 = "ghcr.io/microsoft/documentdb/documentdb-local:16"
+	DEFAULT_DOCUMENTDB_CREDENTIALS_SECRET = "documentdb-credentials"
 
 	LABEL_APP                      = "app"
 	LABEL_REPLICA_TYPE             = "replica_type"

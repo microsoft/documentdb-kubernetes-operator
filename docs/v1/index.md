@@ -140,7 +140,7 @@ NAME                     TYPE     DATA   AGE
 documentdb-credentials   Opaque   2      10s
 ```
 
-> **Note:** The sidecar injector plugin requires the secret to be named `documentdb-credentials` and must contain `username` and `password` keys. The plugin will automatically inject these as `USERNAME` and `PASSWORD` environment variables into the DocumentDB gateway container.
+> **Note:** By default the operator expects a credentials secret named `documentdb-credentials` containing `username` and `password` keys. You can override the secret name by setting `spec.documentDbCredentialSecret` in your `DocumentDB` resource. Whatever name you configure (or the default) will be used by the sidecar injector to project the values as `USERNAME` and `PASSWORD` environment variables into the gateway sidecar container.
 
 
 ### Deploy a DocumentDB cluster

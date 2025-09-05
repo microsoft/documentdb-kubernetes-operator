@@ -1,0 +1,16 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cluster-example
+spec:
+  instances: 1
+
+  plugins:
+  - name: cnpg-i-wal-replica.documentdb.io
+    parameters:
+      replicationHost: cluster-example-rw
+
+  storage:
+    size: 1Gi
+  
+  logLevel: "debug"

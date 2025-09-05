@@ -111,7 +111,7 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 
 	sourceHost := source + "-rw." + documentdb.Namespace + ".svc"
 	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
-		sourceHost = documentdb.Namespace + "-" + source + "-" + self + "-rw.fleet-system.svc"
+		sourceHost = documentdb.Namespace + "-" + util.GenerateServiceName(source, self, documentdb.Namespace) + ".fleet-system.svc"
 
 		// also need to create services for each of the other clusters
 		cnpgCluster.Spec.Managed = &cnpgv1.ManagedConfiguration{

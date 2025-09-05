@@ -17,6 +17,7 @@ import (
 	fleetv1alpha1 "go.goms.io/fleet-networking/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -32,21 +33,44 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 		return nil
 	}
 
-	self, source, err := r.GetSelfAndSource(ctx, documentdb)
+	self, others, err := r.SplitSelfAndOthers(ctx, documentdb)
 	if err != nil {
 		return err
 	}
+	if len(others) == 0 {
+		return fmt.Errorf("Must have at least one remote cluster")
+	}
+
+	isPrimary := documentdb.Spec.ClusterReplication.Primary == self
+
+	source := documentdb.Spec.ClusterReplication.Primary
+	if isPrimary {
+		source = others[0]
+	}
 
 	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
-		err = r.CreateServiceImportAndExport(ctx, source, self, documentdb)
+		err = r.CreateServiceImportAndExport(ctx, others, source, self, documentdb)
 		if err != nil {
 			return err
 		}
 	}
 
-	// No more errors possible, so we can edit the spec
-	isPrimary := documentdb.Spec.ClusterReplication.Primary == self
+	if documentdb.Spec.ClusterReplication.HighAvailability && isPrimary {
+		// If we are failing over, stop the WAL replica
+		if documentdb.Status.TargetPrimary == documentdb.Status.LocalPrimary {
+			err = r.CreateWALReplica(ctx, documentdb, self)
+			if err != nil {
+				return err
+			}
+		} else {
+			err = r.StopWALReplica(ctx, documentdb, self)
+			if err != nil {
+				return err
+			}
+		}
+	}
 
+	// No more errors possible, so we can safely edit the spec
 	cnpgCluster.Name = self
 
 	if !isPrimary {
@@ -56,6 +80,25 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 				Source:   documentdb.Spec.ClusterReplication.Primary,
 				Database: "postgres",
 				Owner:    "postgres",
+			},
+		}
+	} else if documentdb.Spec.ClusterReplication.HighAvailability {
+		// If primary and HA we want a local standby and a slot for the WAL replica
+		cnpgCluster.Spec.Instances = 2
+		cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL =
+			append(cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL,
+				"select * from pg_create_physical_replication_slot('wal_replica');")
+		// Also need to configure quorum writes
+		cnpgCluster.Spec.PostgresConfiguration.Synchronous = &cnpgv1.SynchronousReplicaConfiguration{
+			Method:          cnpgv1.SynchronousReplicaConfigurationMethodAny,
+			Number:          3,
+			StandbyNamesPre: append(others, "pg_receivewal"), // If we use `others` again later this will be a problem
+			DataDurability:  cnpgv1.DataDurabilityLevelRequired,
+		}
+		trueVal := true
+		cnpgCluster.Spec.ReplicationSlots = &cnpgv1.ReplicationSlotsConfiguration{
+			SynchronizeReplicas: &cnpgv1.SynchronizeReplicasConfiguration{
+				Enabled: &trueVal,
 			},
 		}
 	}
@@ -68,7 +111,27 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 
 	sourceHost := source + "-rw." + documentdb.Namespace + ".svc"
 	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
-		sourceHost = documentdb.Namespace + "-" + source + "-rw.fleet-system.svc"
+		sourceHost = documentdb.Namespace + "-" + util.GenerateServiceName(source, self, documentdb.Namespace) + ".fleet-system.svc"
+
+		// also need to create services for each of the other clusters
+		cnpgCluster.Spec.Managed = &cnpgv1.ManagedConfiguration{
+			Services: &cnpgv1.ManagedServices{
+				Additional: []cnpgv1.ManagedService{},
+			},
+		}
+		for _, other := range documentdb.Spec.ClusterReplication.ClusterList {
+			if other != self {
+				cnpgCluster.Spec.Managed.Services.Additional = append(cnpgCluster.Spec.Managed.Services.Additional,
+					cnpgv1.ManagedService{
+						SelectorType: cnpgv1.ServiceSelectorTypeRW,
+						ServiceTemplate: cnpgv1.ServiceTemplateSpec{
+							ObjectMeta: cnpgv1.Metadata{
+								Name: util.GenerateServiceName(self, other, documentdb.Namespace),
+							},
+						},
+					})
+			}
+		}
 	}
 	selfHost := documentdb.Name + "-rw." + documentdb.Namespace + ".svc"
 	cnpgCluster.Spec.ExternalClusters = []cnpgv1.ExternalCluster{
@@ -95,59 +158,69 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 	return nil
 }
 
-func (r *DocumentDBReconciler) GetSelfAndSource(ctx context.Context, documentdb dbpreview.DocumentDB) (string, string, error) {
-	clusterMapName := "cluster-name"
+func (r *DocumentDBReconciler) SplitSelfAndOthers(ctx context.Context, documentdb dbpreview.DocumentDB) (string, []string, error) {
 
 	self := documentdb.Name
+	var err error
 
 	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
-		clusterNameConfigMap := &corev1.ConfigMap{}
-		err := r.Get(ctx, types.NamespacedName{Name: clusterMapName, Namespace: "kube-system"}, clusterNameConfigMap)
+		self, err = r.GetSelfName(ctx)
 		if err != nil {
-			return "", "", err
-		}
-
-		self = clusterNameConfigMap.Data["name"]
-		if self == "" {
-			return "", "", fmt.Errorf("name key not found in kube-system:cluster-name configmap")
+			return "", nil, err
 		}
 	}
 
 	// Set the source to be the first cluster in the list that isn't self
-	source := documentdb.Spec.ClusterReplication.ClusterList[0]
+	others := []string{}
 	for _, c := range documentdb.Spec.ClusterReplication.ClusterList {
 		if c != self {
-			source = c
-			break
+			others = append(others, c)
 		}
 	}
-	return self, source, nil
+	return self, others, nil
 }
 
-func (r *DocumentDBReconciler) CreateServiceImportAndExport(ctx context.Context, source string, self string, documentdb dbpreview.DocumentDB) error {
+func (r *DocumentDBReconciler) GetSelfName(ctx context.Context) (string, error) {
+	clusterMapName := "cluster-name"
+	clusterNameConfigMap := &corev1.ConfigMap{}
+	err := r.Get(ctx, types.NamespacedName{Name: clusterMapName, Namespace: "kube-system"}, clusterNameConfigMap)
+	if err != nil {
+		return "", err
+	}
 
-	selfServiceName := self + "-rw"
-	foundServiceExport := &fleetv1alpha1.ServiceExport{}
-	err := r.Get(ctx, types.NamespacedName{Name: selfServiceName, Namespace: documentdb.Namespace}, foundServiceExport)
-	if err != nil && errors.IsNotFound(err) {
-		log.Log.Info("Service Export not found. Creating a new Service Export")
+	self := clusterNameConfigMap.Data["name"]
+	if self == "" {
+		return "", fmt.Errorf("name key not found in kube-system:cluster-name configmap")
+	}
+	return self, nil
+}
 
-		// Service Export
-		ringServiceExport := &fleetv1alpha1.ServiceExport{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      selfServiceName,
-				Namespace: documentdb.Namespace,
-			},
-		}
-		err = r.Create(ctx, ringServiceExport)
-		if err != nil {
-			return err
+func (r *DocumentDBReconciler) CreateServiceImportAndExport(ctx context.Context, others []string, source, self string, documentdb dbpreview.DocumentDB) error {
+
+	for _, other := range others {
+		serviceName := util.GenerateServiceName(self, other, documentdb.Namespace)
+		foundServiceExport := &fleetv1alpha1.ServiceExport{}
+		err := r.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: documentdb.Namespace}, foundServiceExport)
+		if err != nil && errors.IsNotFound(err) {
+			log.Log.Info("Service Export not found. Creating a new Service Export for " + other)
+
+			// Service Export
+			ringServiceExport := &fleetv1alpha1.ServiceExport{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      serviceName,
+					Namespace: documentdb.Namespace,
+				},
+			}
+			err = r.Create(ctx, ringServiceExport)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
-	sourceServiceName := source + "-rw"
+	sourceServiceName := util.GenerateServiceName(source, self, documentdb.Namespace)
 	foundMCS := &fleetv1alpha1.MultiClusterService{}
-	err = r.Get(ctx, types.NamespacedName{Name: sourceServiceName, Namespace: documentdb.Namespace}, foundMCS)
+	err := r.Get(ctx, types.NamespacedName{Name: sourceServiceName, Namespace: documentdb.Namespace}, foundMCS)
 	if err != nil && errors.IsNotFound(err) {
 		log.Log.Info("Multi Cluster Service not found. Creating a new Multi Cluster Service")
 		// Multi Cluster Service
@@ -427,6 +500,134 @@ func (r *DocumentDBReconciler) CreateTokenService(ctx context.Context, token str
 	err = r.Client.Create(ctx, serviceExport)
 	if err != nil && !errors.IsAlreadyExists(err) {
 		return fmt.Errorf("failed to create ServiceExport: %w", err)
+	}
+
+	return nil
+}
+
+func (r *DocumentDBReconciler) CreateWALReplica(ctx context.Context, documentdb dbpreview.DocumentDB, self string) error {
+	walReplicaName := self + "-wal-replica"
+
+	// Needs a PVC to store the wal data
+	existingPVC := &corev1.PersistentVolumeClaim{}
+	err := r.Get(ctx, types.NamespacedName{Name: walReplicaName, Namespace: documentdb.Namespace}, existingPVC)
+	if err != nil && errors.IsNotFound(err) {
+		log.Log.Info("WAL replica PVC not found. Creating a new WAL replica PVC")
+
+		walReplicaPVC := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      walReplicaName,
+				Namespace: documentdb.Namespace,
+			},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{
+					corev1.ReadWriteOnce,
+				},
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceStorage: resource.MustParse("10Gi"),
+					},
+				},
+			},
+		}
+
+		err = r.Create(ctx, walReplicaPVC)
+		if err != nil {
+			return fmt.Errorf("failed to create WAL replica PVC: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("failed to check for existing WAL replica PVC: %w", err)
+	}
+
+	// Check if the WAL replica pod already exists
+	existingPod := &corev1.Pod{}
+	err = r.Get(ctx, types.NamespacedName{Name: walReplicaName, Namespace: documentdb.Namespace}, existingPod)
+	if err != nil && errors.IsNotFound(err) {
+		// Pod doesn't exist, create it
+		log.Log.Info("WAL replica pod not found. Creating a new WAL replica pod")
+
+		walReplicaPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      walReplicaName,
+				Namespace: documentdb.Namespace,
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{
+						Name:  "wal-replica",
+						Image: util.DEFAULT_DOCUMENTDB_IMAGE,
+						Command: []string{
+							"/usr/lib/postgresql/16/bin/pg_receivewal",
+						},
+						Args: []string{
+							"--directory=/var/lib/postgresql/wal",
+							"--slot=wal_replica",
+							"--compress=0",
+							"--host=" + self + "-rw",
+							"--port=5432",
+							"--username=postgres",
+							"--no-password",
+							"--verbose",
+							"--synchronous",
+						},
+						VolumeMounts: []corev1.VolumeMount{
+							{
+								Name:      walReplicaName,
+								MountPath: "/var/lib/postgresql/wal",
+							},
+						},
+					},
+				},
+				Volumes: []corev1.Volume{
+					{
+						Name: walReplicaName,
+						VolumeSource: corev1.VolumeSource{
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: walReplicaName,
+							},
+						},
+					},
+				},
+				SecurityContext: &corev1.PodSecurityContext{
+					RunAsUser:  int64Ptr(105),
+					RunAsGroup: int64Ptr(103),
+					FSGroup:    int64Ptr(103),
+				},
+				RestartPolicy: corev1.RestartPolicyAlways,
+			},
+		}
+
+		err = r.Create(ctx, walReplicaPod)
+		if err != nil {
+			return fmt.Errorf("failed to create WAL replica pod: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("failed to check for existing WAL replica pod: %w", err)
+	}
+
+	return nil
+}
+func int64Ptr(i int64) *int64 {
+	return &i
+}
+
+func (r *DocumentDBReconciler) StopWALReplica(ctx context.Context, documentdb dbpreview.DocumentDB, self string) error {
+	walReplicaName := self + "-wal-replica"
+
+	// Check if the WAL replica pod already exists
+	existingPod := &corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Name: walReplicaName, Namespace: documentdb.Namespace}, existingPod)
+
+	if err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("failed to check for existing WAL replica pod: %w", err)
+	} else if err == nil {
+		// Pod exists, delete it
+		log.Log.Info("Deleting the WAL replica pod")
+
+		err = r.Delete(ctx, existingPod)
+		if err != nil {
+			return fmt.Errorf("failed to delete WAL replica pod: %w", err)
+		}
 	}
 
 	return nil

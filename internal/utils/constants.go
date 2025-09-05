@@ -18,6 +18,7 @@ const (
 
 	LABEL_APP                      = "app"
 	LABEL_REPLICA_TYPE             = "replica_type"
+	LABEL_ROLE                     = "role"
 	LABEL_NODE_INDEX               = "node_index"
 	LABEL_SERVICE_TYPE             = "service_type"
 	LABEL_REPLICATION_CLUSTER_TYPE = "replication_cluster_type"

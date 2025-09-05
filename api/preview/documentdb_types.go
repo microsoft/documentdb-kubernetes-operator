@@ -45,6 +45,9 @@ type DocumentDBSpec struct {
 	ExposeViaService ExposeViaService `json:"exposeViaService,omitempty"`
 
 	Timeouts Timeouts `json:"timeouts,omitempty"`
+
+	// Overrides default log level for the DocumentDB cluster.
+	LogLevel string `json:"logLevel,omitempty"`
 }
 
 type Resource struct {
@@ -59,6 +62,8 @@ type ClusterReplication struct {
 	Primary string `json:"primary"`
 	// ClusterList is the list of clusters participating in replication.
 	ClusterList []string `json:"clusterList"`
+	// Whether or not to have replicas on the primary cluster.
+	HighAvailability bool `json:"highAvailability,omitempty"`
 }
 
 type ExposeViaService struct {
@@ -78,6 +83,8 @@ type DocumentDBStatus struct {
 	// Status reflects the status field from the underlying CNPG Cluster.
 	Status           string `json:"status,omitempty"`
 	ConnectionString string `json:"connectionString,omitempty"`
+	TargetPrimary    string `json:"targetPrimary,omitempty"`
+	LocalPrimary     string `json:"localPrimary,omitempty"`
 }
 
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.status",description="CNPG Cluster Status"

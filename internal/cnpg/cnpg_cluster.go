@@ -4,6 +4,8 @@
 package cnpg
 
 import (
+	"cmp"
+
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,6 +69,7 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 					},
 				},
 				Bootstrap: getBootstrapConfiguration(documentdb),
+				LogLevel:  cmp.Or(documentdb.Spec.LogLevel, "info"),
 			}
 			spec.MaxStopDelay = getMaxStopDelayOrDefault(documentdb)
 			return spec

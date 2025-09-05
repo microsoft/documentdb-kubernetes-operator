@@ -5,11 +5,16 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	"github.com/cloudnative-pg/cloudnative-pg/pkg/resources/status"
+	pgTime "github.com/cloudnative-pg/machinery/pkg/postgres/time"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -74,7 +79,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		ddbService := util.GetDocumentDBServiceDefinition(documentdb, req.Namespace, serviceType)
 
 		// Check if the DocumentDB Service already exists for this instance
-		foundService, err := util.GetOrCreateService(ctx, r.Client, ddbService)
+		foundService, err := util.UpsertService(ctx, r.Client, ddbService)
 		if err != nil {
 			log.Info("Failed to create DocumentDB Service; Requeuing.")
 			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
@@ -138,6 +143,44 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			}
 			if err := r.Status().Update(ctx, documentdb); err != nil {
 				log.Error(err, "Failed to update DocumentDB status and connection string")
+			}
+		}
+	}
+
+	// TODO make this only happen on primary cluster, for now just edit the primary cluster's spec
+	self, err := r.GetSelfName(ctx)
+	if err != nil {
+		log.Error(err, "Failed to get self name for DocumentDB")
+		return ctrl.Result{RequeueAfter: RequeueAfterShort}, err
+	}
+	isPrimary := documentdb.Spec.ClusterReplication.Primary == self
+
+	// TODO make this only run once
+	if currentCnpgCluster.Status.Phase == "Cluster in healthy state" && isPrimary {
+		grantCommand := "GRANT documentdb_admin_role TO streaming_replica;"
+
+		if err := r.executeSQLCommand(ctx, documentdb.Name, req.Namespace, self, grantCommand, "grant-permissions"); err != nil {
+			log.Error(err, "Failed to grant permissions to streaming_replica")
+			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+		}
+	}
+
+	if isPrimary && documentdb.Status.TargetPrimary != "" {
+		// If these are different, we need to initiate a failover
+		if documentdb.Status.TargetPrimary != currentCnpgCluster.Status.TargetPrimary {
+
+			if err = Promote(ctx, r.Client, currentCnpgCluster.Namespace, currentCnpgCluster.Name, documentdb.Status.TargetPrimary); err != nil {
+				log.Error(err, "Failed to promote standby cluster to primary")
+				return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+			}
+		} else if documentdb.Status.TargetPrimary != documentdb.Status.LocalPrimary &&
+			documentdb.Status.TargetPrimary == currentCnpgCluster.Status.CurrentPrimary {
+
+			log.Info("Marking failover as complete")
+			documentdb.Status.LocalPrimary = currentCnpgCluster.Status.CurrentPrimary
+			if err := r.Status().Update(ctx, documentdb); err != nil {
+				log.Error(err, "Failed to update DocumentDB status")
+				return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 			}
 		}
 	}
@@ -225,4 +268,92 @@ func (r *DocumentDBReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&cnpgv1.Subscription{}).
 		Named("documentdb-controller").
 		Complete(r)
+}
+
+// COPIED FROM https://github.com/cloudnative-pg/cloudnative-pg/blob/release-1.25/internal/cmd/plugin/promote/promote.go
+func Promote(ctx context.Context, cli client.Client,
+	namespace, clusterName, serverName string,
+) error {
+	var cluster cnpgv1.Cluster
+
+	log := log.FromContext(ctx)
+
+	// Get the Cluster object
+	err := cli.Get(ctx, client.ObjectKey{Namespace: namespace, Name: clusterName}, &cluster)
+	if err != nil {
+		return fmt.Errorf("cluster %s not found in namespace %s: %w", clusterName, namespace, err)
+	}
+
+	log.Info("Promoting new primary node", "serverName", serverName, "clusterName", clusterName)
+
+	// If server name is equal to target primary, there is no need to promote
+	// that instance
+	if cluster.Status.TargetPrimary == serverName {
+		fmt.Printf("%s is already the primary node in the cluster\n", serverName)
+		return nil
+	}
+
+	// Check if the Pod exist
+	var pod v1.Pod
+	err = cli.Get(ctx, client.ObjectKey{Namespace: namespace, Name: serverName}, &pod)
+	if err != nil {
+		return fmt.Errorf("new primary node %s not found in namespace %s: %w", serverName, namespace, err)
+	}
+
+	// The Pod exists, let's update the cluster's status with the new target primary
+	reconcileTargetPrimaryFunc := func(cluster *cnpgv1.Cluster) {
+		cluster.Status.TargetPrimary = serverName
+		cluster.Status.TargetPrimaryTimestamp = pgTime.GetCurrentTimestamp()
+		cluster.Status.Phase = cnpgv1.PhaseSwitchover
+		cluster.Status.PhaseReason = fmt.Sprintf("Switching over to %v", serverName)
+	}
+	if err := status.PatchWithOptimisticLock(ctx, cli, &cluster,
+		reconcileTargetPrimaryFunc,
+		status.SetClusterReadyConditionTX,
+	); err != nil {
+		return err
+	}
+	log.Info("Promotion in progress for ", "New primary", serverName, "cluster name", clusterName)
+	return nil
+}
+
+// executeSQLCommand creates a pod to execute SQL commands against the azure-cluster-rw service
+func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdbName, namespace, self, sqlCommand, uniqueName string) error {
+	zero := int32(0)
+	host := self + "-rw"
+	sqlPod := &batchv1.Job{
+		ObjectMeta: ctrl.ObjectMeta{
+			Name:      fmt.Sprintf("%s-%s-sql-executor", documentdbName, uniqueName),
+			Namespace: namespace,
+		},
+		Spec: batchv1.JobSpec{
+			Template: v1.PodTemplateSpec{
+				Spec: v1.PodSpec{
+					RestartPolicy: v1.RestartPolicyNever,
+					Containers: []v1.Container{
+						{
+							Name:  "sql-executor",
+							Image: "postgres:15",
+							Command: []string{
+								"psql",
+								"-h", host,
+								"-U", "postgres",
+								"-d", "postgres",
+								"-c", sqlCommand,
+							},
+						},
+					},
+				},
+			},
+			TTLSecondsAfterFinished: &zero,
+		},
+	}
+
+	if err := r.Client.Create(ctx, sqlPod); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return err
+		}
+	}
+
+	return nil
 }

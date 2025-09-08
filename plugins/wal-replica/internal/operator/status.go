@@ -53,6 +53,11 @@ func (Implementation) SetStatusInCluster(
 		return nil, errors.New("plugin entry not found")
 	}
 
+	if plg.PluginIndex < 0 {
+		logger.Info("Plugin not being used, setting disabled status")
+		return clusterstatus.NewSetStatusInClusterResponseBuilder().JSONStatusResponse(Status{Enabled: false})
+	}
+
 	var status Status
 	if pluginEntry.Status != "" {
 		if err := json.Unmarshal([]byte(pluginEntry.Status), &status); err != nil {
@@ -62,13 +67,21 @@ func (Implementation) SetStatusInCluster(
 		}
 	}
 
+	logger.Info("debug status snapshot",
+		"resourceVersion", cluster.ResourceVersion,
+		"pluginIndex", plg.PluginIndex,
+		"rawPluginStatus", pluginEntry.Status,
+		"decodedEnabled", status.Enabled,
+	)
+
 	if status.Enabled {
-		logger.Debug("plugin is enabled, no action taken")
-		return clusterstatus.NewSetStatusInClusterResponseBuilder().NoOpResponse(), nil
+		logger.Info("plugin is enabled, no action taken")
+		//return clusterstatus.NewSetStatusInClusterResponseBuilder().NoOpResponse(), nil
+		return clusterstatus.NewSetStatusInClusterResponseBuilder().JSONStatusResponse(Status{Enabled: true})
 	}
 
 	// TODO uncomment this line when the `enabled` field stops alternating constantly
-	//logger.Info("setting enabled plugin status")
+	logger.Info("setting enabled plugin status")
 
 	return clusterstatus.NewSetStatusInClusterResponseBuilder().JSONStatusResponse(Status{Enabled: true})
 }

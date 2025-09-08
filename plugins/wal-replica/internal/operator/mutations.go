@@ -10,17 +10,19 @@ import (
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/decoder"
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/object"
 	"github.com/cloudnative-pg/cnpg-i/pkg/operator"
+	"github.com/cloudnative-pg/machinery/pkg/log"
 
 	"github.com/documentdb/cnpg-i-wal-replica/internal/config"
 	"github.com/documentdb/cnpg-i-wal-replica/pkg/metadata"
 )
 
 // MutateCluster is called to mutate a cluster with the defaulting webhook.
-// This function is defaulting the "imagePullPolicy" plugin parameter
 func (Implementation) MutateCluster(
-	_ context.Context,
+	ctx context.Context,
 	request *operator.OperatorMutateClusterRequest,
 ) (*operator.OperatorMutateClusterResult, error) {
+	logger := log.FromContext(ctx).WithName("MutateCluster")
+	logger.Warning("MutateCluster hook invoked")
 	cluster, err := decoder.DecodeClusterLenient(request.GetDefinition())
 	if err != nil {
 		return nil, err
@@ -33,7 +35,7 @@ func (Implementation) MutateCluster(
 
 	config := config.FromParameters(helper)
 	mutatedCluster := cluster.DeepCopy()
-	if helper.PluginIndex < 0 {
+	if helper.PluginIndex >= 0 {
 		if mutatedCluster.Spec.Plugins[helper.PluginIndex].Parameters == nil {
 			mutatedCluster.Spec.Plugins[helper.PluginIndex].Parameters = make(map[string]string)
 		}
@@ -43,8 +45,11 @@ func (Implementation) MutateCluster(
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		logger.Info("Plugin not found in the cluster, skipping mutation", "plugin", metadata.PluginName)
 	}
 
+	logger.Info("Mutated cluster", "cluster", mutatedCluster)
 	patch, err := object.CreatePatch(cluster, mutatedCluster)
 	if err != nil {
 		return nil, err

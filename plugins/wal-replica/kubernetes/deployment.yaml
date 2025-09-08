@@ -24,7 +24,7 @@ spec:
         - containerPort: 9090
           protocol: TCP
         args:
-        - plugin
+        - receivewal
         - --server-cert=/server/tls.crt
         - --server-key=/server/tls.key
         - --client-cert=/client/tls.crt

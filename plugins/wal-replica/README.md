@@ -15,24 +15,16 @@ spec:
 	plugins:
 		- name: cnpg-i-wal-replica.documentdb.io
 			parameters:
-				enabled: "true"
 				image: "ghcr.io/cloudnative-pg/postgresql:16"
-				replicationUser: streaming_replica
-				replicationPasswordSecretName: cluster-replication
-				replicationPasswordSecretKey: password # optional (default: password)
-				synchronous: "true"            # optional (default true)
+				replicationHost: cluster-name-rw
+				synchronous: "enabled"            # optional (default true)
 				walDirectory: /var/lib/wal     # optional (default /var/lib/wal)
-				# replicationHost: override-host.example # optional
 ```
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| enabled | bool | false | Enable or disable the plugin |
 | image | string | ghcr.io/cloudnative-pg/postgresql:16 | Image providing pg_receivewal |
 | replicationHost | string | <cluster>-rw | Host to connect for streaming |
-| replicationUser | string | streaming_replica | Replication user |
-| replicationPasswordSecretName | string | (required when enabled) | Secret containing replication password |
-| replicationPasswordSecretKey | string | password | Key in the secret |
 | synchronous | bool | true | Add --synchronous flag to pg_receivewal |
 | walDirectory | string | /var/lib/wal | Local directory to store WAL |
 

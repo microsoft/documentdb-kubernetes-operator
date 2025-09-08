@@ -43,6 +43,7 @@ type Configuration struct {
 	ReplicationHost string
 	Synchronous     SynchronousMode
 	WalDirectory    string
+	WalPVCSize      string
 }
 
 // FromParameters builds a plugin configuration from the configuration parameters
@@ -52,6 +53,7 @@ func FromParameters(helper *common.Plugin) *Configuration {
 	cfg.ReplicationHost = helper.Parameters[ReplicationHostParam]
 	cfg.Synchronous = SynchronousMode(strings.ToLower(helper.Parameters[SynchronousParam]))
 	cfg.WalDirectory = helper.Parameters[WalDirectoryParam]
+	cfg.WalPVCSize = helper.Parameters[WalPVCSize]
 	return cfg
 }
 
@@ -67,6 +69,7 @@ func (c *Configuration) ToParameters() (map[string]string, error) {
 	params[ReplicationHostParam] = c.ReplicationHost
 	params[SynchronousParam] = string(c.Synchronous)
 	params[WalDirectoryParam] = c.WalDirectory
+	params[WalPVCSize] = c.WalPVCSize
 	return params, nil
 }
 
@@ -111,5 +114,8 @@ func (c *Configuration) ApplyDefaults() {
 	}
 	if c.Synchronous == SynchronousUnset {
 		c.Synchronous = defaultSynchronousMode
+	}
+	if c.WalPVCSize == "" {
+		c.WalPVCSize = "10Gi"
 	}
 }

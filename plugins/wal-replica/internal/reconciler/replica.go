@@ -45,9 +45,12 @@ func CreateWalReplica(
 
 	configuration := config.FromParameters(helper)
 
+	// TODO remove this once the operator functions are fixed
+	configuration.ApplyDefaults()
+
 	walDir := configuration.WalDirectory
 	cmd := []string{
-		"/usr/bin/postgresql/16/bin/pg_receivewal", // TODO find the actual path
+		"pg_receivewal", // TODO what do we do if it's not on the path?
 		"--slot", "wal_replica",
 		"--compress", "0",
 		"--directory", walDir,

@@ -35,6 +35,7 @@ func (Implementation) GetCapabilities(
 					},
 				},
 			},
+			/* TODO re-add if we need status or can figure out the oscillation bug
 			{
 				Type: &operator.OperatorCapability_Rpc{
 					Rpc: &operator.OperatorCapability_RPC{
@@ -42,10 +43,14 @@ func (Implementation) GetCapabilities(
 					},
 				},
 			},
+			*/
+			{
+				Type: &operator.OperatorCapability_Rpc{
+					Rpc: &operator.OperatorCapability_RPC{
+						Type: operator.OperatorCapability_RPC_TYPE_MUTATE_CLUSTER,
+					},
+				},
+			},
 		},
 	}, nil
-}
-
-func (Implementation) Deregister(context.Context, *operator.DeregisterRequest) (*operator.DeregisterResponse, error) {
-	return &operator.DeregisterResponse{}, nil
 }

@@ -24,3 +24,7 @@ spec:
         env:
         - name: GATEWAY_PORT
           value: "10260"
+        {{- if .Values.documentDbVersion }}
+        - name: DOCUMENTDB_VERSION
+          value: "{{ .Values.documentDbVersion }}"
+        {{- end }}

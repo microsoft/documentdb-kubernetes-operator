@@ -12,9 +12,16 @@ const (
 	DOCUMENTDB_SIDECAR_IMAGE_ENV  = "DOCUMENTDB_SIDECAR_IMAGE"
 	ENABLE_SCALING_CONTROLLER_ENV = "ENABLE_SCALING_CONTROLLER"
 
-	DEFAULT_DOCUMENTDB_IMAGE              = "ghcr.io/microsoft/documentdb/documentdb-local:16"
-	DEFAULT_GATEWAY_IMAGE                 = "ghcr.io/microsoft/documentdb/documentdb-local:16"
+	// DocumentDB versioning environment variable
+	DOCUMENTDB_VERSION_ENV = "DOCUMENTDB_VERSION"
+
+	// DocumentDB image repository
+	DOCUMENTDB_IMAGE_REPOSITORY = "ghcr.io/microsoft/documentdb/documentdb-local"
+
+	DEFAULT_DOCUMENTDB_IMAGE              = DOCUMENTDB_IMAGE_REPOSITORY + ":16"
+	DEFAULT_GATEWAY_IMAGE                 = DOCUMENTDB_IMAGE_REPOSITORY + ":16"
 	DEFAULT_DOCUMENTDB_CREDENTIALS_SECRET = "documentdb-credentials"
+	DEFAULT_VERSION                       = "v0.1.0"
 
 	LABEL_APP                      = "app"
 	LABEL_REPLICA_TYPE             = "replica_type"

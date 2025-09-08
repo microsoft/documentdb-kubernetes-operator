@@ -10,6 +10,7 @@ import (
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/common"
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/validation"
 	"github.com/cloudnative-pg/cnpg-i/pkg/operator"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // Plugin parameter keys
@@ -18,6 +19,7 @@ const (
 	ReplicationHostParam = "replicationHost" // Required: primary host
 	SynchronousParam     = "synchronous"     // enum: Active, Inactive, Unset
 	WalDirectoryParam    = "walDirectory"    // directory where WAL is stored
+	WalPVCSize           = "walPVCSize"      // Size of the PVC for WAL storage
 )
 
 // SynchronousMode represents the synchronous replication mode
@@ -87,6 +89,14 @@ func ValidateParams(helper *common.Plugin) []*operator.ValidationError {
 				fmt.Sprintf("Invalid value '%s'. Must be 'active' or 'inactive'", raw)))
 		}
 	}
+
+	// If present, Wal size must be valid
+	if raw, present := helper.Parameters[WalPVCSize]; present && raw != "" {
+		if _, err := resource.ParseQuantity(raw); err != nil {
+			validationErrors = append(validationErrors, validation.BuildErrorForParameter(helper, WalPVCSize, err.Error()))
+		}
+	}
+
 	return validationErrors
 }
 

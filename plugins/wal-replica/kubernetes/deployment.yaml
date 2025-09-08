@@ -16,6 +16,7 @@ spec:
       labels:
         app: wal-replica
     spec:
+      serviceAccountName: wal-replica-manager
       containers:
       - image: cnpg-i-wal-replica:latest
         name: cnpg-i-wal-replica

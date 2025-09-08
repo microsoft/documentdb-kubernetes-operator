@@ -5,7 +5,10 @@ resources:
 - certificate-issuer.yaml
 - client-certificate.yaml
 - deployment.yaml
+- role-binding.yaml
+- role.yaml
 - server-certificate.yaml
+- service-account.yaml
 - service.yaml
 images:
 - name: cnpg-i-wal-replica

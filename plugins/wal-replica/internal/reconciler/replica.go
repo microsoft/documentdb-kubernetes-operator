@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 package reconciler
 
 import (
@@ -52,7 +55,11 @@ func CreateWalReplica(
 		"--port", "5432",
 		"--username", "postgres",
 		"--no-password",
-		"--verbose",
+	}
+
+	// TODO have a real check here
+	if true {
+		cmd = append(cmd, "--verbose")
 	}
 
 	// Add synchronous flag if requested

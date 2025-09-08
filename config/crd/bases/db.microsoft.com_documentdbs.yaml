@@ -72,6 +72,7 @@ spec:
               documentDBImage:
                 description: |-
                   DocumentDBImage is the container image to use for DocumentDB.
+                  Changing this is not recommended for most users.
                   If not specified, defaults based on documentDBVersion or operator defaults.
                 type: string
               documentDBVersion:
@@ -104,6 +105,7 @@ spec:
               gatewayImage:
                 description: |-
                   GatewayImage is the container image to use for the DocumentDB Gateway sidecar.
+                  Changing this is not recommended for most users.
                   If not specified, defaults to a version that matches the DocumentDB operator version.
                 type: string
               instancesPerNode:

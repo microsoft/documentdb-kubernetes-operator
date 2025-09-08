@@ -28,10 +28,12 @@ type DocumentDBSpec struct {
 	DocumentDBVersion string `json:"documentDBVersion,omitempty"`
 
 	// DocumentDBImage is the container image to use for DocumentDB.
+	// Changing this is not recommended for most users.
 	// If not specified, defaults based on documentDBVersion or operator defaults.
 	DocumentDBImage string `json:"documentDBImage,omitempty"`
 
 	// GatewayImage is the container image to use for the DocumentDB Gateway sidecar.
+	// Changing this is not recommended for most users.
 	// If not specified, defaults to a version that matches the DocumentDB operator version.
 	GatewayImage string `json:"gatewayImage,omitempty"`
 

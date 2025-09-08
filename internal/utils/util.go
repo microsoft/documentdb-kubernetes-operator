@@ -259,18 +259,53 @@ func GenerateConnectionString(documentdb *dbpreview.DocumentDB, serviceIp string
 }
 
 // GetGatewayImageForDocumentDB returns the gateway image for a DocumentDB instance.
-// If GatewayImage is specified in the spec, it uses that; otherwise it returns a default
-// based on the unified versioning strategy.
+// Priority: spec.gatewayImage > spec.documentDBVersion > env.DOCUMENTDB_GATEWAY_IMAGE > env.DOCUMENTDB_VERSION > default
 func GetGatewayImageForDocumentDB(documentdb *dbpreview.DocumentDB) string {
 	if documentdb.Spec.GatewayImage != "" {
 		return documentdb.Spec.GatewayImage
 	}
 
-	// Use environment variable if set (for unified versioning)
+	// Use spec-level documentDBVersion if set
+	if documentdb.Spec.DocumentDBVersion != "" {
+		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, documentdb.Spec.DocumentDBVersion)
+	}
+
+	// Use environment variable if set (for documentDbVersion)
 	if gatewayImage := os.Getenv("DOCUMENTDB_GATEWAY_IMAGE"); gatewayImage != "" {
 		return gatewayImage
 	}
 
+	// Use global documentDbVersion if set
+	if version := os.Getenv(DOCUMENTDB_VERSION_ENV); version != "" {
+		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, version)
+	}
+
 	// Fall back to default
 	return DEFAULT_GATEWAY_IMAGE
+}
+
+// GetDocumentDBImageForInstance returns the documentdb engine image.
+// Priority: spec.documentDBImage > spec.documentDBVersion > env.DOCUMENTDB_IMAGE > env.DOCUMENTDB_VERSION > default
+func GetDocumentDBImageForInstance(documentdb *dbpreview.DocumentDB) string {
+	if documentdb.Spec.DocumentDBImage != "" {
+		return documentdb.Spec.DocumentDBImage
+	}
+
+	// Use spec-level documentDBVersion if set
+	if documentdb.Spec.DocumentDBVersion != "" {
+		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, documentdb.Spec.DocumentDBVersion)
+	}
+
+	// Use environment variable if set
+	if dbImage := os.Getenv(COSMOSDB_IMAGE_ENV); dbImage != "" {
+		return dbImage
+	}
+
+	// Use global documentDbVersion if set
+	if version := os.Getenv(DOCUMENTDB_VERSION_ENV); version != "" {
+		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, version)
+	}
+
+	// Fall back to default
+	return DEFAULT_DOCUMENTDB_IMAGE
 }

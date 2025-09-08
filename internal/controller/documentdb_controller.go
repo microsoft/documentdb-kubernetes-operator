@@ -95,10 +95,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// create the CNPG Cluster
-	documentdbImage := documentdb.Spec.DocumentDBImage
-	if documentdbImage == "" {
-		documentdbImage = util.DEFAULT_DOCUMENTDB_IMAGE
-	}
+	documentdbImage := util.GetDocumentDBImageForInstance(documentdb)
 
 	currentCnpgCluster := &cnpgv1.Cluster{}
 	desiredCnpgCluster := cnpg.GetCnpgClusterSpec(req, *documentdb, documentdbImage, documentdb.Name, log)

@@ -70,7 +70,15 @@ spec:
                 - primary
                 type: object
               documentDBImage:
-                description: DocumentDBImage is the container image to use for DocumentDB.
+                description: |-
+                  DocumentDBImage is the container image to use for DocumentDB.
+                  If not specified, defaults based on documentDBVersion or operator defaults.
+                type: string
+              documentDBVersion:
+                description: |-
+                  DocumentDBVersion specifies the version for all DocumentDB components (engine, gateway).
+                  When set, this overrides the default versions for documentDBImage and gatewayImage.
+                  Individual image fields take precedence over this version.
                 type: string
               documentDbCredentialSecret:
                 description: |-
@@ -133,7 +141,6 @@ spec:
                     type: integer
                 type: object
             required:
-            - documentDBImage
             - instancesPerNode
             - nodeCount
             - resource

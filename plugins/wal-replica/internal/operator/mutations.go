@@ -39,7 +39,7 @@ func (Implementation) MutateCluster(
 		if mutatedCluster.Spec.Plugins[helper.PluginIndex].Parameters == nil {
 			mutatedCluster.Spec.Plugins[helper.PluginIndex].Parameters = make(map[string]string)
 		}
-		config.ApplyDefaults()
+		config.ApplyDefaults(cluster)
 
 		mutatedCluster.Spec.Plugins[helper.PluginIndex].Parameters, err = config.ToParameters()
 		if err != nil {

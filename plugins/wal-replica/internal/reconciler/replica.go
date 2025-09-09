@@ -7,7 +7,7 @@ import (
 	"context"
 	"fmt"
 
-	apiv1 "github.com/cloudnative-pg/api/pkg/api/v1"
+	cnpgv1 "github.com/cloudnative-pg/api/pkg/api/v1"
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/common"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/documentdb/cnpg-i-wal-replica/internal/config"
@@ -19,12 +19,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 func CreateWalReplica(
 	ctx context.Context,
-	cluster *apiv1.Cluster,
+	cluster *cnpgv1.Cluster,
 ) error {
 	logger := log.FromContext(ctx).WithName("CreateWalReplica")
 
@@ -46,7 +45,7 @@ func CreateWalReplica(
 	configuration := config.FromParameters(helper)
 
 	// TODO remove this once the operator functions are fixed
-	configuration.ApplyDefaults()
+	configuration.ApplyDefaults(cluster)
 
 	walDir := configuration.WalDirectory
 	cmd := []string{
@@ -54,10 +53,7 @@ func CreateWalReplica(
 		"--slot", "wal_replica",
 		"--compress", "0",
 		"--directory", walDir,
-		"--host", configuration.ReplicationHost,
-		"--port", "5432",
-		"--username", "postgres",
-		"--no-password",
+		"--dbname", GetConnectionString(configuration.ReplicationHost),
 	}
 
 	// TODO have a real check here
@@ -75,12 +71,24 @@ func CreateWalReplica(
 	existingPVC := &corev1.PersistentVolumeClaim{}
 	err := client.Get(ctx, types.NamespacedName{Name: deploymentName, Namespace: namespace}, existingPVC)
 	if err != nil && errors.IsNotFound(err) {
-		log.Info("WAL replica PVC not found. Creating a new WAL replica PVC")
+		logger.Info("WAL replica PVC not found. Creating a new WAL replica PVC")
 
 		walReplicaPVC := &corev1.PersistentVolumeClaim{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      deploymentName,
 				Namespace: namespace,
+				Labels: map[string]string{
+					"app":             deploymentName,
+					"cnpg.io/cluster": cluster.Name,
+				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: cluster.APIVersion,
+						Kind:       cluster.Kind,
+						Name:       cluster.Name,
+						UID:        cluster.UID,
+					},
+				},
 			},
 			Spec: corev1.PersistentVolumeClaimSpec{
 				AccessModes: []corev1.PersistentVolumeAccessMode{
@@ -114,6 +122,14 @@ func CreateWalReplica(
 					"app":             deploymentName,
 					"cnpg.io/cluster": cluster.Name,
 				},
+				OwnerReferences: []metav1.OwnerReference{
+					{
+						APIVersion: cluster.APIVersion,
+						Kind:       cluster.Kind,
+						Name:       cluster.Name,
+						UID:        cluster.UID,
+					},
+				},
 			},
 			Spec: appsv1.DeploymentSpec{
 				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": deploymentName}},
@@ -129,6 +145,16 @@ func CreateWalReplica(
 									Name:      deploymentName,
 									MountPath: walDir,
 								},
+								{
+									Name:      "ca",
+									MountPath: "/var/lib/postgresql/rootcert",
+									ReadOnly:  true,
+								},
+								{
+									Name:      "tls",
+									MountPath: "/var/lib/postgresql/cert",
+									ReadOnly:  true,
+								},
 							},
 						}},
 						Volumes: []corev1.Volume{
@@ -137,6 +163,24 @@ func CreateWalReplica(
 								VolumeSource: corev1.VolumeSource{
 									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 										ClaimName: deploymentName,
+									},
+								},
+							},
+							{
+								Name: "ca",
+								VolumeSource: corev1.VolumeSource{
+									Secret: &corev1.SecretVolumeSource{
+										SecretName:  cluster.Status.Certificates.ServerCASecret,
+										DefaultMode: int32Ptr(0600),
+									},
+								},
+							},
+							{
+								Name: "tls",
+								VolumeSource: corev1.VolumeSource{
+									Secret: &corev1.SecretVolumeSource{
+										SecretName:  cluster.Status.Certificates.ReplicationTLSSecret,
+										DefaultMode: int32Ptr(0600),
 									},
 								},
 							},
@@ -151,13 +195,10 @@ func CreateWalReplica(
 				},
 			},
 		}
-		// optional service for metrics
-		svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: deploymentName, Namespace: namespace, Labels: map[string]string{"app": deploymentName}}, Spec: corev1.ServiceSpec{Selector: map[string]string{"app": deploymentName}, Ports: []corev1.ServicePort{{Name: "metrics", Port: 9187, TargetPort: intstr.FromInt(9187)}}}}
 		if createErr := client.Create(ctx, dep); createErr != nil {
 			logger.Error(createErr, "creating wal receiver deployment")
 			return createErr
 		}
-		_ = client.Create(ctx, svc) // ignore error if exists
 		logger.Info("created wal receiver deployment", "name", deploymentName)
 	} else {
 		// TODO handle patch
@@ -165,11 +206,23 @@ func CreateWalReplica(
 
 	return nil
 }
+
+func GetConnectionString(host string) string {
+	return fmt.Sprintf("postgres://%s@%s/postgres?sslmode=verify-full&sslrootcert=%s&sslcert=%s&sslkey=%s",
+		"streaming_replica", // user
+		host,
+		"/var/lib/postgresql/rootcert/ca.crt", // root cert
+		"/var/lib/postgresql/cert/tls.crt",    // cert
+		"/var/lib/postgresql/cert/tls.key")    // key
+}
 func int64Ptr(i int64) *int64 {
 	return &i
 }
+func int32Ptr(i int32) *int32 {
+	return &i
+}
 
-func IsPrimaryCluster(cluster *apiv1.Cluster) bool {
+func IsPrimaryCluster(cluster *cnpgv1.Cluster) bool {
 	// TODO implement
 	return true
 }

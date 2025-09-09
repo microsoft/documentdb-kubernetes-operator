@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	cnpgv1 "github.com/cloudnative-pg/api/pkg/api/v1"
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/common"
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/validation"
 	"github.com/cloudnative-pg/cnpg-i/pkg/operator"
@@ -32,8 +33,7 @@ const (
 )
 
 const (
-	defaultImage           = "ghcr.io/cloudnative-pg/postgresql:16"
-	defaultWalDir          = "/var/lib/postgres/wal"
+	defaultWalDir          = "/var/lib/postgresql/wal"
 	defaultSynchronousMode = SynchronousInactive
 )
 
@@ -77,11 +77,6 @@ func (c *Configuration) ToParameters() (map[string]string, error) {
 func ValidateParams(helper *common.Plugin) []*operator.ValidationError {
 	validationErrors := make([]*operator.ValidationError, 0)
 
-	// Must be present
-	if raw, present := helper.Parameters[ReplicationHostParam]; !present || raw == "" {
-		validationErrors = append(validationErrors, validation.BuildErrorForParameter(helper, ReplicationHostParam, "No replication host provided"))
-	}
-
 	// If present, must be valid
 	if raw, present := helper.Parameters[SynchronousParam]; present && raw != "" {
 		switch SynchronousMode(strings.ToLower(raw)) {
@@ -105,9 +100,13 @@ func ValidateParams(helper *common.Plugin) []*operator.ValidationError {
 
 // applyDefaults fills the configuration with the defaults
 // We know that replicationhost and sync are valid already
-func (c *Configuration) ApplyDefaults() {
+func (c *Configuration) ApplyDefaults(cluster *cnpgv1.Cluster) {
 	if c.Image == "" {
-		c.Image = defaultImage
+		c.Image = cluster.Status.Image
+	}
+	if c.ReplicationHost == "" {
+		// Only doing reads, but want to make sure we get a primary
+		c.ReplicationHost = cluster.Status.WriteService
 	}
 	if c.WalDirectory == "" {
 		c.WalDirectory = defaultWalDir

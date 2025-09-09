@@ -31,7 +31,7 @@ func (Implementation) GetPluginCapabilities(
 ) (*identity.GetPluginCapabilitiesResponse, error) {
 	return &identity.GetPluginCapabilitiesResponse{
 		Capabilities: []*identity.PluginCapability{
-			{
+			{ // TODO find out why this does nothing
 				Type: &identity.PluginCapability_Service_{
 					Service: &identity.PluginCapability_Service{
 						Type: identity.PluginCapability_Service_TYPE_OPERATOR_SERVICE,

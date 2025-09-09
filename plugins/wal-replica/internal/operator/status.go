@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	apiv1 "github.com/cloudnative-pg/api/pkg/api/v1"
+	cnpgv1 "github.com/cloudnative-pg/api/pkg/api/v1"
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/clusterstatus"
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/common"
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/decoder"
@@ -39,7 +39,7 @@ func (Implementation) SetStatusInCluster(
 	plg := common.NewPlugin(*cluster, metadata.PluginName)
 
 	// Find the status for our plugin
-	var pluginEntry *apiv1.PluginStatus
+	var pluginEntry *cnpgv1.PluginStatus
 	for idx, entry := range plg.Cluster.Status.PluginStatus {
 		if metadata.PluginName == entry.Name {
 			pluginEntry = &plg.Cluster.Status.PluginStatus[idx]

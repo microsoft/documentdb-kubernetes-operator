@@ -7,7 +7,7 @@ import (
 	"context"
 	"encoding/json"
 
-	apiv1 "github.com/cloudnative-pg/api/pkg/api/v1"
+	cnpgv1 "github.com/cloudnative-pg/api/pkg/api/v1"
 	"github.com/cloudnative-pg/cnpg-i/pkg/reconciler"
 	"github.com/cloudnative-pg/machinery/pkg/log"
 )
@@ -33,7 +33,7 @@ func (Implementation) GetCapabilities(
 
 func (Implementation) Post(ctx context.Context, req *reconciler.ReconcilerHooksRequest) (*reconciler.ReconcilerHooksResult, error) {
 	logger := log.FromContext(ctx).WithName("PostReconcilerHook")
-	cluster := &apiv1.Cluster{}
+	cluster := &cnpgv1.Cluster{}
 	if err := json.Unmarshal(req.GetResourceDefinition(), cluster); err != nil {
 		logger.Error(err, "while decoding the cluster")
 		return nil, err

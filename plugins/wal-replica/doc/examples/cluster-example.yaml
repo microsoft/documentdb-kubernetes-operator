@@ -7,8 +7,15 @@ spec:
 
   plugins:
   - name: cnpg-i-wal-replica.documentdb.io
-    parameters:
-      replicationHost: cluster-example-rw
+
+  replicationSlots:
+    synchronizeReplicas: 
+      enabled: true
+
+  bootstrap:
+    initdb:
+      postInitSQL:
+        "select * from pg_create_physical_replication_slot('wal_replica');
 
   storage:
     size: 1Gi

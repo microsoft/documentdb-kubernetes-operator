@@ -66,7 +66,6 @@ func CreateWalReplica(
 		cmd = append(cmd, "--synchronous")
 	}
 
-	// Create a pVC
 	// Needs a PVC to store the wal data
 	existingPVC := &corev1.PersistentVolumeClaim{}
 	err := client.Get(ctx, types.NamespacedName{Name: deploymentName, Namespace: namespace}, existingPVC)
@@ -109,6 +108,8 @@ func CreateWalReplica(
 	} else if err != nil {
 		return err
 	}
+
+	// Create replica slot
 
 	// Create or patch Deployment
 	existing := &appsv1.Deployment{}

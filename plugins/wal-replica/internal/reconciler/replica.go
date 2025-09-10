@@ -6,6 +6,7 @@ package reconciler
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	cnpgv1 "github.com/cloudnative-pg/api/pkg/api/v1"
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/common"
@@ -46,25 +47,6 @@ func CreateWalReplica(
 
 	// TODO remove this once the operator functions are fixed
 	configuration.ApplyDefaults(cluster)
-
-	walDir := configuration.WalDirectory
-	cmd := []string{
-		"pg_receivewal", // TODO what do we do if it's not on the path?
-		"--slot", "wal_replica",
-		"--compress", "0",
-		"--directory", walDir,
-		"--dbname", GetConnectionString(configuration.ReplicationHost),
-	}
-
-	// TODO have a real check here
-	if true {
-		cmd = append(cmd, "--verbose")
-	}
-
-	// Add synchronous flag if requested
-	if configuration.Synchronous == config.SynchronousActive {
-		cmd = append(cmd, "--synchronous")
-	}
 
 	// Needs a PVC to store the wal data
 	existingPVC := &corev1.PersistentVolumeClaim{}
@@ -109,7 +91,17 @@ func CreateWalReplica(
 		return err
 	}
 
-	// Create replica slot
+	walDir := configuration.WalDirectory
+
+	// Put the strings together so they run as separate commands, then rewrap
+	// them in a single arg
+	args := []string{
+		strings.Join([]string{
+			GetCommandForWalReceiver(configuration, walDir, true),
+			"&&",
+			GetCommandForWalReceiver(configuration, walDir, false),
+		}, " "),
+	}
 
 	// Create or patch Deployment
 	existing := &appsv1.Deployment{}
@@ -138,9 +130,10 @@ func CreateWalReplica(
 					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": deploymentName}},
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{{
-							Name:  "wal-receiver",
-							Image: configuration.Image,
-							Args:  cmd,
+							Name:    "wal-receiver",
+							Image:   configuration.Image,
+							Command: []string{"/bin/bash", "-c"},
+							Args:    args,
 							VolumeMounts: []corev1.VolumeMount{
 								{
 									Name:      deploymentName,
@@ -208,14 +201,39 @@ func CreateWalReplica(
 	return nil
 }
 
-func GetConnectionString(host string) string {
-	return fmt.Sprintf("postgres://%s@%s/postgres?sslmode=verify-full&sslrootcert=%s&sslcert=%s&sslkey=%s",
+// TODO change this to just use a custom image that creates the slot and the replica
+func GetCommandForWalReceiver(configuration *config.Configuration, walDir string, createSlot bool) string {
+	connectionString := fmt.Sprintf("postgres://%s@%s/postgres?sslmode=verify-full&sslrootcert=%s&sslcert=%s&sslkey=%s",
 		"streaming_replica", // user
-		host,
+		configuration.ReplicationHost,
 		"/var/lib/postgresql/rootcert/ca.crt", // root cert
 		"/var/lib/postgresql/cert/tls.crt",    // cert
 		"/var/lib/postgresql/cert/tls.key")    // key
+	createSlotFlag := ""
+	if createSlot {
+		createSlotFlag = "--create-slot --if-not-exists"
+	}
+
+	// TODO have a real check here
+	verboseFlag := ""
+	if true {
+		verboseFlag = "--verbose"
+	}
+
+	synchronousFlag := ""
+	if configuration.Synchronous == config.SynchronousActive {
+		synchronousFlag = "--synchronous"
+	}
+
+	return fmt.Sprintf("pg_receivewal --slot wal_replica --compress 0 --directory %s --dbname \"%s\" %s %s %s",
+		walDir,
+		connectionString,
+		createSlotFlag,
+		verboseFlag,
+		synchronousFlag,
+	)
 }
+
 func int64Ptr(i int64) *int64 {
 	return &i
 }

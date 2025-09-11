@@ -17,7 +17,7 @@ import (
 // Plugin parameter keys
 const (
 	ImageParam           = "image"           // string
-	ReplicationHostParam = "replicationHost" // Required: primary host
+	ReplicationHostParam = "replicationHost" // primary host
 	SynchronousParam     = "synchronous"     // enum: Active, Inactive, Unset
 	WalDirectoryParam    = "walDirectory"    // directory where WAL is stored
 	WalPVCSize           = "walPVCSize"      // Size of the PVC for WAL storage

@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: documentdb-test-ns
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: documentdb-credentials
+  namespace: documentdb-test-ns
+type: Opaque
+stringData:
+  username: docdb
+  password: TestPassword123
+---
+apiVersion: db.microsoft.com/preview
+kind: DocumentDB
+metadata:
+  name: documentdb-cluster
+  namespace: documentdb-test-ns
+spec:
+  nodeCount: 1
+  instancesPerNode: 1
+  resource:
+    pvcSize: 10Gi
+  # No explicit versions - should use operator defaults/env vars
+  exposeViaService:
+    serviceType: LoadBalancer

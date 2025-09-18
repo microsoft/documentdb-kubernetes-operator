@@ -44,12 +44,12 @@ spec:
         - --server-key=/server/tls.key
         - --client-cert=/client/tls.crt
         - --server-address=:9090
-        image: "{{ .Values.image.sidecarinjector.repository }}:{{ .Values.documentDbVersion | default .Values.image.sidecarinjector.tag }}"
+        image: "{{ .Values.image.sidecarinjector.repository }}:{{ .Values.image.sidecarinjector.tag | default .Values.documentDbVersion | default .Chart.AppVersion }}"
         name: cnpg-i-sidecar-injector
         env:
-        {{- if .Values.documentDbVersion }}
+        {{- if .Values.documentDbVersion | default .Chart.AppVersion }}
         - name: DOCUMENTDB_VERSION
-          value: "{{ .Values.documentDbVersion }}"
+          value: "{{ .Values.documentDbVersion | default .Chart.AppVersion }}"
         {{- end }}
         ports:
         - containerPort: 9090

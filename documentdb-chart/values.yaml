@@ -1,7 +1,9 @@
 namespace: documentdb-operator
 replicaCount: 1
 
-# DocumentDB version - when set, overrides individual component versions  
+# DocumentDB version - global default for all components when individual tags are not set
+# Priority: individual component tag > documentDbVersion > Chart.appVersion
+# Defaults to Chart.appVersion if not specified  
 documentDbVersion: ""
 
 serviceAccount:

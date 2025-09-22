@@ -569,6 +569,7 @@ runs:
           nodeCount: ${{ inputs.node-count }}
           instancesPerNode: ${{ inputs.instances-per-node }}
           documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+          gatewayImage: ghcr.io/microsoft/documentdb/documentdb-local:16
           resource:
             pvcSize: 5Gi
           exposeViaService:

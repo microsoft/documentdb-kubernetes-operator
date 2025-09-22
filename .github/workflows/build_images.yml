@@ -35,6 +35,10 @@ jobs:
           - name: sidecar
             dockerfile: plugins/sidecar-injector/Dockerfile
             context: plugins/sidecar-injector/
+          - name: documentdb
+            dockerfile: .github/dockerfiles/Dockerfile_docdb
+          - name: gateway
+            dockerfile: .github/dockerfiles/Dockerfile_gateway
         include:
           - arch: amd64
             base_arch: AMD64

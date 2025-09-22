@@ -47,14 +47,8 @@ spec:
     serviceType: "ClusterIP"
 ```
 
-**Global Default (Environment Variable):**
-```bash
-# Set globally for the operator deployment (unified versioning)
-export DOCUMENTDB_GATEWAY_IMAGE="ghcr.io/microsoft/documentdb/documentdb-local:17"
-```
-
 **Built-in Fallback:**
-If neither explicit spec nor environment variable is set, the system falls back to:
+If no explicit spec configuration is set, the system falls back to:
 ```
 ghcr.io/microsoft/documentdb/documentdb-local:16
 ```
@@ -138,23 +132,4 @@ spec:
     serviceType: "LoadBalancer"
 ```
 
-### Environment-Based Configuration (Unified Versioning)
-
-```bash
-# Set globally for unified versioning
-export DOCUMENTDB_GATEWAY_IMAGE="ghcr.io/microsoft/documentdb/documentdb-local:17"
-
-# Deploy without explicit gateway image - uses environment default
-kubectl apply -f - <<EOF
-apiVersion: db.microsoft.com/v1
-kind: DocumentDB
-metadata:
-  name: env-configured-documentdb
-spec:
-  nodeCount: 1
-  instancesPerNode: 1
-  resource:
-    pvcSize: "15Gi"
-EOF
-```
 

@@ -137,16 +137,16 @@ func (impl Implementation) reconcileMetadata(
 		},
 	}
 
-	// Add USERNAME and PASSWORD environment variables from secret defined in configuration
-	credentialSecretName := configuration.DocumentDbCredentialSecret
-	log.Printf("Adding USERNAME and PASSWORD environment variables from secret '%s'", credentialSecretName)
+	// Add USERNAME and PASSWORD environment variables from secret
+	// TODO: Make this configurable and expose it in the configuration
+	log.Printf("Adding USERNAME and PASSWORD environment variables from secret")
 	envVars = append(envVars,
 		corev1.EnvVar{
 			Name: "USERNAME",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: credentialSecretName,
+						Name: "documentdb-credentials",
 					},
 					Key: "username",
 				},
@@ -157,7 +157,7 @@ func (impl Implementation) reconcileMetadata(
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: credentialSecretName,
+						Name: "documentdb-credentials",
 					},
 					Key: "password",
 				},
@@ -181,8 +181,6 @@ func (impl Implementation) reconcileMetadata(
 			RunAsGroup: pointer.Int64(1000),
 		},
 	}
-
-	log.Printf("Labels before mutation: %v", mutatedPod.Labels)
 
 	// Check if the pod has the label replication_cluster_type=replica or is not a primary by number
 	if mutatedPod.Labels["replication_cluster_type"] == "replica" || mutatedPod.Labels["role"] == "replica" {

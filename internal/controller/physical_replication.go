@@ -76,21 +76,18 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 		}
 		cnpgCluster.Spec.Plugins = append(cnpgCluster.Spec.Plugins,
 			cnpgv1.PluginConfiguration{
-				Name: util.DEFAULT_WAL_REPLICA_PLUGIN,
+				Name: walReplicaPluginName,
 			})
 	}
 
 	cnpgCluster.Spec.ReplicaCluster = &cnpgv1.ReplicaClusterConfiguration{
-		Source:  replicationContext.Source,
+		Source:  replicationContext.GetReplicationSource(),
 		Primary: documentdb.Spec.ClusterReplication.Primary,
 		Self:    replicationContext.Self,
 	}
 
-	sourceHost := replicationContext.Self + "-rw." + documentdb.Namespace + ".svc"
 	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
-		sourceHost = documentdb.Namespace + "-" + replicationContext.GenerateIncomingServiceName(documentdb.Namespace) + ".fleet-system.svc"
-
-		// also need to create services for each of the other clusters
+		// need to create services for each of the other clusters
 		cnpgCluster.Spec.Managed = &cnpgv1.ManagedConfiguration{
 			Services: &cnpgv1.ManagedServices{
 				Additional: []cnpgv1.ManagedService{},
@@ -111,15 +108,6 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 	selfHost := documentdb.Name + "-rw." + documentdb.Namespace + ".svc"
 	cnpgCluster.Spec.ExternalClusters = []cnpgv1.ExternalCluster{
 		{
-			Name: replicationContext.Source,
-			ConnectionParameters: map[string]string{
-				"host":   sourceHost,
-				"port":   "5432",
-				"dbname": "postgres",
-				"user":   "postgres",
-			},
-		},
-		{
 			Name: replicationContext.Self,
 			ConnectionParameters: map[string]string{
 				"host":   selfHost,
@@ -128,6 +116,17 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 				"user":   "postgres",
 			},
 		},
+	}
+	for clusterName, serviceName := range replicationContext.GenerateExternalClusterServices(documentdb.Namespace, documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud) {
+		cnpgCluster.Spec.ExternalClusters = append(cnpgCluster.Spec.ExternalClusters, cnpgv1.ExternalCluster{
+			Name: clusterName,
+			ConnectionParameters: map[string]string{
+				"host":   serviceName,
+				"port":   "5432",
+				"dbname": "postgres",
+				"user":   "postgres",
+			},
+		})
 	}
 
 	return nil
@@ -154,26 +153,28 @@ func (r *DocumentDBReconciler) CreateServiceImportAndExport(ctx context.Context,
 		}
 	}
 
-	sourceServiceName := replicationContext.GenerateIncomingServiceName(documentdb.Namespace)
-	foundMCS := &fleetv1alpha1.MultiClusterService{}
-	err := r.Get(ctx, types.NamespacedName{Name: sourceServiceName, Namespace: documentdb.Namespace}, foundMCS)
-	if err != nil && errors.IsNotFound(err) {
-		log.Log.Info("Multi Cluster Service not found. Creating a new Multi Cluster Service")
-		// Multi Cluster Service
-		foundMCS = &fleetv1alpha1.MultiClusterService{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      sourceServiceName,
-				Namespace: documentdb.Namespace,
-			},
-			Spec: fleetv1alpha1.MultiClusterServiceSpec{
-				ServiceImport: fleetv1alpha1.ServiceImportRef{
-					Name: sourceServiceName,
+	// Below is true because this function is only called if we are fleet enabled
+	for sourceServiceName := range replicationContext.GenerateIncomingServiceNames(documentdb.Namespace) {
+		foundMCS := &fleetv1alpha1.MultiClusterService{}
+		err := r.Get(ctx, types.NamespacedName{Name: sourceServiceName, Namespace: documentdb.Namespace}, foundMCS)
+		if err != nil && errors.IsNotFound(err) {
+			log.Log.Info("Multi Cluster Service not found. Creating a new Multi Cluster Service")
+			// Multi Cluster Service
+			foundMCS = &fleetv1alpha1.MultiClusterService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      sourceServiceName,
+					Namespace: documentdb.Namespace,
 				},
-			},
-		}
-		err = r.Create(ctx, foundMCS)
-		if err != nil {
-			return err
+				Spec: fleetv1alpha1.MultiClusterServiceSpec{
+					ServiceImport: fleetv1alpha1.ServiceImportRef{
+						Name: sourceServiceName,
+					},
+				},
+			}
+			err = r.Create(ctx, foundMCS)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -192,10 +193,6 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 	tokenNeedsUpdate, err := r.PromotionTokenNeedsUpdate(ctx, current.Namespace)
 	if err != nil {
 		return err, time.Second * 10
-	}
-
-	if current.Spec.ReplicaCluster.Source != desired.Spec.ReplicaCluster.Source {
-		// TODO implement this for 3+ cluster situations
 	}
 
 	if current.Spec.ReplicaCluster.Self != desired.Spec.ReplicaCluster.Self {

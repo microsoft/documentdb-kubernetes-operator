@@ -48,39 +48,47 @@ fi
 # Install/upgrade operator using the packaged chart if available, otherwise fallback to OCI registry
 if [ -f "$CHART_PKG" ]; then
   echo "Installing operator from package $CHART_PKG into namespace documentdb-operator on context $HUB_CONTEXT"
-  run helm upgrade --install documentdb-operator "$CHART_PKG" \
-    --namespace documentdb-operator \
-    --kube-context "$HUB_CONTEXT" \
-    --create-namespace \
-    --values $VALUES_FILE
+  if [ -n "$VALUES_FILE" ] && [ -f "$VALUES_FILE" ]; then
+    echo "Using values file: $VALUES_FILE"
+    run helm upgrade --install documentdb-operator "$CHART_PKG" \
+      --namespace documentdb-operator \
+      --kube-context "$HUB_CONTEXT" \
+      --create-namespace \
+      --values "$VALUES_FILE"
+  else
+    run helm upgrade --install documentdb-operator "$CHART_PKG" \
+      --namespace documentdb-operator \
+      --kube-context "$HUB_CONTEXT" \
+      --create-namespace
+  fi
 else
   echo "Package not found. Installing from OCI registry (requires helm v3.8+)..."
-  run helm upgrade --install documentdb-operator \
-    oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator \
-    --version 0.0.1 \
-    --namespace documentdb-operator \
-    --kube-context "$HUB_CONTEXT" \
-    --create-namespace \
-    --values $VALUES_FILE
-fi
-
-# Wait for the operator deployment to become ready (graceful)
-echo "Waiting for documentdb-operator deployment rollout (timeout 5m)..."
-set +e
-kubectl --context "$HUB_CONTEXT" -n documentdb-operator rollout status deployment/documentdb-operator --timeout=300s
-rc=$?
-set -e
-if [ $rc -ne 0 ]; then
-  echo "Warning: operator rollout didn't complete within timeout. Check pods:"
+  if [ -n "$VALUES_FILE" ] && [ -f "$VALUES_FILE" ]; then
+    echo "Using values file: $VALUES_FILE"
+    run helm upgrade --install documentdb-operator \
+      oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator \
+      --version 0.0.1 \
+      --namespace documentdb-operator \
+      --kube-context "$HUB_CONTEXT" \
+      --create-namespace \
+      --values "$VALUES_FILE"
+  else
+    run helm upgrade --install documentdb-operator \
+      oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator \
+      --version 0.0.1 \
+      --namespace documentdb-operator \
+      --kube-context "$HUB_CONTEXT" \
+      --create-namespace
+  fi
 fi
 
 kubectl --context "$HUB_CONTEXT"  apply -f ./documentdb-base.yaml
 
-# Show status on all member clusters
-echo "Checking operator status on all member clusters..."
-
 # Get all member clusters
 MEMBER_CLUSTERS=$(az aks list -g "$RESOURCE_GROUP" -o json | jq -r '.[] | select(.name|startswith("member-")) | .name')
+
+# Show status on all member clusters
+echo "Checking operator status on all member clusters..."
 
 for CLUSTER in $MEMBER_CLUSTERS; do
   echo ""
@@ -90,6 +98,19 @@ for CLUSTER in $MEMBER_CLUSTERS; do
   
   # Get the context name for this cluster
   CONTEXT="$CLUSTER"
+
+  echo "Checking rollout status on $CLUSTER..."
+  set +e
+  kubectl --context "$CONTEXT" -n documentdb-operator rollout status deployment/documentdb-operator --timeout=300s
+  rc=$?
+  set -e
+  if [ $rc -ne 0 ]; then
+    echo "Warning: operator rollout didn't complete within timeout on $CLUSTER. Check pods:"
+    kubectl --context "$CLUSTER" get pods -n documentdb-operator 2>/dev/null || echo "  Unable to get pods on $CLUSTER"
+  else
+    echo "✓ Operator rollout completed successfully on $CLUSTER"
+  fi
+  echo ""
   
   echo "Operator deployments in $CLUSTER:"
   kubectl --context "$CONTEXT" get deploy -n documentdb-operator -o wide 2>/dev/null || echo "  No deployments found or unable to connect"

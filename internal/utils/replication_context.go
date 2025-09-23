@@ -14,12 +14,12 @@ import (
 )
 
 type ReplicationContext struct {
-	Self           string
-	Others         []string
-	Source         string
-	currentPrimary string
-	targetPrimary  string
-	state          replicationState
+	Self                string
+	Others              []string
+	PrimaryRegion       string
+	currentLocalPrimary string
+	targetLocalPrimary  string
+	state               replicationState
 }
 
 type replicationState int32
@@ -56,18 +56,15 @@ func GetReplicationContext(ctx context.Context, client client.Client, documentdb
 		state = Primary
 	}
 
-	source := documentdb.Spec.ClusterReplication.Primary
-	if state == Primary {
-		source = others[0]
-	}
+	primaryRegion := documentdb.Spec.ClusterReplication.Primary
 
 	return &ReplicationContext{
-		Self:           self,
-		Others:         others,
-		Source:         source,
-		state:          state,
-		targetPrimary:  documentdb.Status.TargetPrimary,
-		currentPrimary: documentdb.Status.LocalPrimary,
+		Self:                self,
+		Others:              others,
+		PrimaryRegion:       primaryRegion,
+		state:               state,
+		targetLocalPrimary:  documentdb.Status.TargetPrimary,
+		currentLocalPrimary: documentdb.Status.LocalPrimary,
 	}, nil
 }
 
@@ -83,8 +80,8 @@ func (r ReplicationContext) String() string {
 		stateStr = "Replica"
 	}
 
-	return fmt.Sprintf("ReplicationContext{Self: %s, State: %s, Others: %v, Source: %s, CurrentPrimary: %s, TargetPrimary: %s}",
-		r.Self, stateStr, r.Others, r.Source, r.currentPrimary, r.targetPrimary)
+	return fmt.Sprintf("ReplicationContext{Self: %s, State: %s, Others: %v, PrimaryRegion: %s, CurrentLocalPrimary: %s, TargetLocalPrimary: %s}",
+		r.Self, stateStr, r.Others, r.PrimaryRegion, r.currentLocalPrimary, r.targetLocalPrimary)
 }
 
 // Returns true if this instance is the primary or if there is no replication configured.
@@ -96,6 +93,14 @@ func (r *ReplicationContext) IsReplicating() bool {
 	return r.state == Replica || r.state == Primary
 }
 
+// Gets the primary if you're a replica, otherwise returns the first other cluster
+func (r ReplicationContext) GetReplicationSource() string {
+	if r.state == Replica {
+		return r.PrimaryRegion
+	}
+	return r.Others[0]
+}
+
 // EndpointEnabled returns true if the endpoint should be enabled for this DocumentDB instance.
 // The endpoint is enabled when there is no replication configured or when the current primary
 // matches the target primary in a replication setup.
@@ -103,11 +108,34 @@ func (r ReplicationContext) EndpointEnabled() bool {
 	if r.state == NoReplication {
 		return true
 	}
-	return r.currentPrimary == r.targetPrimary
+	return r.currentLocalPrimary == r.targetLocalPrimary
 }
 
-func (r ReplicationContext) GenerateIncomingServiceName(resourceGroup string) string {
-	return generateServiceName(r.Source, r.Self, resourceGroup)
+func (r ReplicationContext) GenerateExternalClusterServices(namespace string, fleetEnabled bool) func(yield func(string, string) bool) {
+	return func(yield func(string, string) bool) {
+		for _, other := range r.Others {
+			serviceName := r.Self + "-rw." + namespace + ".svc"
+			if fleetEnabled {
+				serviceName = namespace + "-" + generateServiceName(other, r.Self, namespace) + ".fleet-system.svc"
+			}
+
+			if !yield(other, serviceName) {
+				break
+			}
+		}
+	}
+}
+
+// Create an iterator that yields outgoing service names, for use in a for each loop
+func (r ReplicationContext) GenerateIncomingServiceNames(resourceGroup string) func(yield func(string) bool) {
+	return func(yield func(string) bool) {
+		for _, other := range r.Others {
+			serviceName := generateServiceName(other, r.Self, resourceGroup)
+			if !yield(serviceName) {
+				break
+			}
+		}
+	}
 }
 
 // Create an iterator that yields outgoing service names, for use in a for each loop
@@ -155,7 +183,6 @@ func splitSelfAndOthers(ctx context.Context, client client.Client, documentdb db
 		}
 	}
 
-	// Set the source to be the first cluster in the list that isn't self
 	others := []string{}
 	for _, c := range documentdb.Spec.ClusterReplication.ClusterList {
 		if c != self {

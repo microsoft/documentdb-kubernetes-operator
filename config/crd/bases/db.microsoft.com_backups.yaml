@@ -1,0 +1,98 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: backups.db.microsoft.com
+spec:
+  group: db.microsoft.com
+  names:
+    kind: Backup
+    listKind: BackupList
+    plural: backups
+    singular: backup
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: Target DocumentDB cluster
+      jsonPath: .spec.cluster.name
+      name: Cluster
+      type: string
+    - description: Backup phase
+      jsonPath: .status.phase
+      name: Phase
+      type: string
+    - description: Backup start time
+      jsonPath: .status.startedAt
+      name: Started
+      type: date
+    - description: Backup completion time
+      jsonPath: .status.stoppedAt
+      name: Stopped
+      type: date
+    - description: Backup error information
+      jsonPath: .status.error
+      name: Error
+      type: string
+    name: preview
+    schema:
+      openAPIV3Schema:
+        description: Backup is the Schema for the backups API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BackupSpec defines the desired state of Backup.
+            properties:
+              cluster:
+                description: Cluster specifies the DocumentDB cluster to backup.
+                properties:
+                  name:
+                    description: Name of the referent.
+                    type: string
+                required:
+                - name
+                type: object
+            required:
+            - cluster
+            type: object
+          status:
+            description: BackupStatus defines the observed state of Backup.
+            properties:
+              error:
+                description: Error contains error information if the backup failed.
+                type: string
+              phase:
+                description: Phase represents the current phase of the backup operation.
+                type: string
+              startedAt:
+                description: StartedAt is the time when the backup operation started.
+                format: date-time
+                type: string
+              stoppedAt:
+                description: StoppedAt is the time when the backup operation completed
+                  or failed.
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -53,6 +53,8 @@ type DocumentDBSpec struct {
 	ExposeViaService ExposeViaService `json:"exposeViaService,omitempty"`
 
 	Timeouts Timeouts `json:"timeouts,omitempty"`
+
+	RestoreFromBackup string `json:"restoreFromBackup,omitempty"`
 }
 
 type Resource struct {

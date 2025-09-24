@@ -142,6 +142,10 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
+              restoreFromBackup:
+                description: RestoreFromBackup configures restoring DocumentDB
+                  from a backup.
+                type: string # name of the backup to restore from
             required:
             - instancesPerNode
             - nodeCount

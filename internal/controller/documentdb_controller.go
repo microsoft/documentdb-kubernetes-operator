@@ -130,6 +130,8 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		logger.Error(err, "Failed to get CNPG Cluster")
 		return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 	}
+
+	// Check if anything has changed in the generated cnpg spec
 	err, requeueTime := r.TryUpdateCluster(ctx, currentCnpgCluster, desiredCnpgCluster, documentdb)
 	if err != nil {
 		logger.Error(err, "Failed to update CNPG Cluster")

@@ -27,7 +27,7 @@ done
 
 # Verify we can talk to the hub API
 echo "Verifying API connectivity to hub context ($HUB_CONTEXT)..."
-if ! kubectl --context "$HUB_CONTEXT" get ns >/dev/null 2>&1; then
+if ! kubectl --context "$HUB_CONTEXT" get ns ; then
   echo "Error: unable to talk to cluster using context '$HUB_CONTEXT'. Check credentials and RBAC." >&2
   kubectl --context "$HUB_CONTEXT" config view --minify
   exit 1

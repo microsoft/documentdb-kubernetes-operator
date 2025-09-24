@@ -199,12 +199,11 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 		return fmt.Errorf("self cannot be changed"), time.Second * 60
 	}
 
-	// TODO update the external clusters
-
 	if tokenNeedsUpdate || primaryChanged && current.Spec.ReplicaCluster.Primary == current.Spec.ReplicaCluster.Self {
 		// Primary => replica
 		// demote
 		current.Spec.ReplicaCluster.Primary = desired.Spec.ReplicaCluster.Primary
+		current.Spec.ReplicaCluster.Source = desired.Spec.ReplicaCluster.Source
 		err := r.Client.Update(ctx, current)
 		if err != nil {
 			return err, time.Second * 10
@@ -215,7 +214,7 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 		if err != nil {
 			return err, time.Second * 10
 		}
-	} else if primaryChanged && current.Spec.ReplicaCluster.Primary != current.Spec.ReplicaCluster.Self {
+	} else if primaryChanged && desired.Spec.ReplicaCluster.Primary == current.Spec.ReplicaCluster.Self {
 		// Replica => primary
 		// Look for the token
 		oldPrimaryAvailable := slices.Contains(

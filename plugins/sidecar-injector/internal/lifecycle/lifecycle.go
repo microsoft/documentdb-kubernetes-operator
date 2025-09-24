@@ -182,8 +182,8 @@ func (impl Implementation) reconcileMetadata(
 		},
 	}
 
-	// Check if the pod has the label replication_cluster_type=replica or is not a primary by number
-	if mutatedPod.Labels["replication_cluster_type"] == "replica" || mutatedPod.Labels["role"] == "replica" {
+	// Check if the pod has the label replication_cluster_type=replica or is not a local primary
+	if mutatedPod.Labels["replication_cluster_type"] == "replica" || cluster.Status.TargetPrimary != mutatedPod.Name {
 		sidecar.Args = []string{"--create-user", "false", "--start-pg", "false", "--pg-port", "5432"}
 	} else {
 		sidecar.Args = []string{"--create-user", "true", "--start-pg", "false", "--pg-port", "5432"}
@@ -194,8 +194,6 @@ func (impl Implementation) reconcileMetadata(
 	if err != nil {
 		return nil, err
 	}
-
-	// Apply any custom logic needed here, in this example we just add some metadata to the pod
 
 	for key, value := range configuration.Labels {
 		mutatedPod.Labels[key] = value

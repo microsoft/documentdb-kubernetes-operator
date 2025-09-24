@@ -4,6 +4,7 @@
 package preview
 
 import (
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -64,6 +65,39 @@ type DocumentDBSpec struct {
 
 	// Overrides default log level for the DocumentDB cluster.
 	LogLevel string `json:"logLevel,omitempty"`
+
+	// Bootstrap configures the initialization of the DocumentDB cluster.
+	// +optional
+	Bootstrap *BootstrapConfiguration `json:"bootstrap,omitempty"`
+
+	// Backup configures backup settings for DocumentDB.
+	// +optional
+	Backup *BackupConfiguration `json:"backup,omitempty"`
+}
+
+// BootstrapConfiguration defines how to bootstrap a DocumentDB cluster.
+type BootstrapConfiguration struct {
+	// Recovery configures recovery from a backup.
+	// +optional
+	Recovery *RecoveryConfiguration `json:"recovery,omitempty"`
+}
+
+// RecoveryConfiguration defines backup recovery settings.
+type RecoveryConfiguration struct {
+	// Backup specifies the source backup to restore from.
+	// +optional
+	Backup cnpgv1.LocalObjectReference `json:"backup,omitempty"`
+}
+
+// BackupConfiguration defines backup settings for DocumentDB.
+type BackupConfiguration struct {
+	// RetentionDays specifies how many days backups should be retained.
+	// If not specified, the default retention period is 30 days.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=365
+	// +kubebuilder:default=30
+	// +optional
+	RetentionDays int `json:"retentionDays,omitempty"`
 }
 
 type Resource struct {

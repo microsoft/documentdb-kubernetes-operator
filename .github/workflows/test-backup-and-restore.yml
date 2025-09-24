@@ -1,0 +1,358 @@
+name: Test - Backup and Restore
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      documentdb_version:
+        description: 'DocumentDB image version to test'
+        required: false
+        default: '16'
+      node_count:
+        description: 'Number of DocumentDB nodes'
+        required: false
+        default: '1'
+      image_tag:
+        description: 'Optional: Use existing image tag instead of building locally'
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      image_tag:
+        description: 'Optional: Use existing image tag instead of building locally'
+        required: false
+        type: string
+      documentdb_version:
+        description: 'DocumentDB image version to test'
+        required: false
+        default: '16'
+        type: string
+      node_count:
+        description: 'Number of DocumentDB nodes'
+        required: false
+        default: '1'
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  packages: read
+
+env:
+  CERT_MANAGER_NS: cert-manager
+  OPERATOR_NS: documentdb-operator
+  DB_NS: documentdb-backup-and-restore-test
+  DB_NAME: documentdb-backup-and-restore
+  DB_RESTORE_NAME: documentdb-restore-from-backup
+  DB_USERNAME: k8s_secret_user
+  DB_PASSWORD: K8sSecret100
+  DB_PORT: 10260
+
+jobs:
+  # Conditional build workflow - only run if image_tag is not provided
+  build:
+    name: Build Images and Charts
+    if: ${{ inputs.image_tag == '' || inputs.image_tag == null }}
+    uses: ./.github/workflows/test-build-and-package.yml
+    with:
+      image_tag_prefix: 'backup-and-restore-test'
+      chart_version_prefix: '0.1.0'
+    secrets: inherit
+    
+  backup-and-restore-test:
+    name: Run Backup and Restore Tests
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    needs: build
+    if: always() && (needs.build.result == 'success' || needs.build.result == 'skipped')
+
+    strategy:
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-22.04
+            test_scenario_name: "single-node"
+            node_count: 1
+            instances_per_node: 1
+          - architecture: arm64
+            runner: ubuntu-22.04-arm
+            test_scenario_name: "single-node"
+            node_count: 1
+            instances_per_node: 1
+    env:
+      # Use provided image tag or outputs from the build workflow
+      IMAGE_TAG: ${{ inputs.image_tag || needs.build.outputs.image_tag }}
+      CHART_VERSION: ${{ needs.build.outputs.chart_version || '0.1.0' }}
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download artifacts
+      if: ${{ inputs.image_tag == '' || inputs.image_tag == null }}
+      uses: actions/download-artifact@v4
+      with:
+        pattern: 'build-*'
+        path: ./artifacts
+
+    - name: Log test configuration
+      run: |
+        echo "## Backup and Restore Test Configuration" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        if [[ -n "${{ inputs.image_tag }}" ]]; then
+          echo "- **Mode**: Using provided image tag" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: \`${{ inputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source**: External (no local build)" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **Mode**: Using locally built images" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: \`${{ env.IMAGE_TAG }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source**: Local build pipeline" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "- **Architecture**: \`${{ matrix.architecture }}\`" >> $GITHUB_STEP_SUMMARY
+
+    - name: Setup test environment
+      uses: ./.github/actions/setup-test-environment
+      with:
+        architecture: ${{ matrix.architecture }}
+        runner: ${{ matrix.runner }}
+        test-scenario-name: ${{ matrix.test_scenario_name }}
+        node-count: '${{ matrix.node_count }}'
+        instances-per-node: '${{ matrix.instances_per_node }}'
+        cert-manager-namespace: ${{ env.CERT_MANAGER_NS }}
+        operator-namespace: ${{ env.OPERATOR_NS }}
+        db-namespace: ${{ env.DB_NS }}
+        db-cluster-name: ${{ env.DB_NAME }}
+        db-username: ${{ env.DB_USERNAME }}
+        db-password: ${{ env.DB_PASSWORD }}
+        db-port: ${{ env.DB_PORT }}
+        image-tag: ${{ env.IMAGE_TAG }}
+        chart-version: ${{ env.CHART_VERSION }}
+        use-external-images: ${{ inputs.image_tag != '' && inputs.image_tag != null }}
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        repository-owner: ${{ github.repository_owner }}
+
+    - name: Setup port forwarding for comprehensive tests
+      uses: ./.github/actions/setup-port-forwarding
+      with:
+        namespace: ${{ env.DB_NS }}
+        cluster-name: ${{ env.DB_NAME }}
+        port: ${{ env.DB_PORT }}
+        architecture: ${{ matrix.architecture }}
+        test-type: 'comprehensive'
+
+    - name: Insert test data using mongosh
+      run: |
+        echo "Inserting test data into DocumentDB cluster..."
+        if mongosh 127.0.0.1:$DB_PORT \
+          -u $DB_USERNAME \
+          -p $DB_PASSWORD \
+          --authenticationMechanism SCRAM-SHA-256 \
+          --tls \
+          --tlsAllowInvalidCertificates \
+          --eval "for (let i = 1; i <= 100; i++) { db.testCollection.insertOne({ index: i, message: 'This is document ' + i }); }" ; then
+          echo "✓ Test data insertion completed successfully on ${{ matrix.architecture }}"
+        else
+          echo "❌ Test data insertion failed on ${{ matrix.architecture }}"
+          exit 1
+        fi
+
+        echo "Verifying inserted test data..."
+        count=$(mongosh 127.0.0.1:$DB_PORT --quiet --eval "db.testCollection.countDocuments({})" -u $DB_USERNAME -p $DB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates)
+        if [[ "$count" -eq 100 ]]; then
+          echo "✓ Test data verification completed successfully on ${{ matrix.architecture }}"
+        else
+          echo "❌ Test data verification failed on ${{ matrix.architecture }}"
+          exit 1
+        fi
+
+    - name: Create ScheduledBackup to trigger backups
+      shell: bash
+      run: |
+        cat <<EOF | kubectl apply -f -
+        apiVersion: db.microsoft.com/preview
+        kind: ScheduledBackup
+        metadata:
+          name: $DB_NAME-backup
+          namespace: $DB_NS
+        spec:
+          cluster:
+            name: $DB_NAME
+          # every one minute
+          schedule: "*/1 * * * *"
+        EOF
+
+        schedule_status=$(kubectl -n $DB_NS get scheduledbackups $DB_NAME-backup -o jsonpath='{.metadata.name}')
+        if [ "$schedule_status" == "$DB_NAME-backup" ]; then
+          echo "✓ ScheduledBackup created successfully."
+        else
+          echo "❌ Failed to create ScheduledBackup."
+          exit 1
+        fi
+
+    - name: Wait for backup to complete
+      shell: bash
+      run: |
+        echo "Waiting for backup to complete..."
+        MAX_RETRIES=15
+        SLEEP_INTERVAL=20
+        ITER=0
+        while [ $ITER -lt $MAX_RETRIES ]; do
+          # check if there is at least two backups with phase completed
+          backup_status=$(kubectl -n $DB_NS get backups -o jsonpath='{.items[?(@.status.phase=="completed")].metadata.name}' | wc -w)
+          if [ "$backup_status" -ge 2 ]; then
+            echo "✓ Backup completed successfully."
+            exit 0
+          else
+            echo "Current backup status: $backup_status."
+            kubectl -n $DB_NS get backups
+
+            echo "Retrying in $SLEEP_INTERVAL seconds..."
+            sleep $SLEEP_INTERVAL
+          fi
+          ((++ITER))
+        done
+        echo "❌ Backup did not complete within expected time."
+        
+        echo "Fetching operator logs for debugging..."
+        operator_name=$(kubectl get pods -A | grep -E 'documentdb-operator-' | grep -v 'documentdb-operator-cloudnative-pg-' | awk '{print $2}')
+        kubectl -n $OPERATOR_NS logs $operator_name | grep 'Backup' || echo "No Backup related logs found."
+        
+        exit 1
+
+    - name: Delete test data before restore
+      run: |
+        echo "Deleting test data from DocumentDB cluster before restore..."
+        if mongosh 127.0.0.1:$DB_PORT \
+          -u $DB_USERNAME \
+          -p $DB_PASSWORD \
+          --authenticationMechanism SCRAM-SHA-256 \
+          --tls \
+          --tlsAllowInvalidCertificates \
+          --eval "db.testCollection.deleteMany({});" ; then
+          echo "✓ Test data deletion completed successfully on ${{ matrix.architecture }}"
+        else
+          echo "❌ Test data deletion failed on ${{ matrix.architecture }}"
+          exit 1
+        fi
+
+        count=$(mongosh 127.0.0.1:$DB_PORT --quiet --eval "db.testCollection.countDocuments({})" -u $DB_USERNAME -p $DB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates)
+        if [[ "$count" -eq 0 ]]; then
+          echo "✓ Test data deletion verified successfully on ${{ matrix.architecture }}"
+        else
+          echo "❌ Test data deletion verification failed on ${{ matrix.architecture }}"
+          exit 1
+        fi
+
+    - name: Cleanup comprehensive test port forwarding
+      if: always()
+      run: |
+        # Stop port-forward if it exists
+        if [ -f /tmp/pf_pid ]; then
+          PF_PID=$(cat /tmp/pf_pid)
+          kill $PF_PID 2>/dev/null || true
+          rm -f /tmp/pf_pid
+        fi
+        
+        # Clean up output log
+        rm -f /tmp/pf_output.log
+        
+        # Clean up output log
+        rm -f /tmp/pf_output.log
+
+    - name: Restore from backup
+      shell: bash
+      run: |
+        # Get the latest backup name
+        backup_name=$(kubectl -n ${{ env.DB_NS }} get backups -o jsonpath='{.items[?(@.status.phase=="completed")].metadata.name}' | tr ' ' '\n' | sort | tail -n 1)
+
+        # Create DocumentDB resource
+        cat <<EOF | kubectl apply -f -
+        apiVersion: db.microsoft.com/preview
+        kind: DocumentDB
+        metadata:
+          name: ${{ env.DB_RESTORE_NAME }}
+          namespace: ${{ env.DB_NS }}
+        spec:
+          nodeCount: ${{ matrix.node_count }}
+          instancesPerNode: ${{ matrix.instances_per_node }}
+          documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+          gatewayImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+          resource:
+            storage:
+              pvcSize: 5Gi
+              storageClass: csi-hostpath-sc
+          exposeViaService:
+            serviceType: ClusterIP
+          bootstrap:
+            recovery:
+              backup:
+                name: $backup_name
+        EOF
+
+    - name: Setup port forwarding for comprehensive tests
+      uses: ./.github/actions/setup-port-forwarding
+      with:
+        namespace: ${{ env.DB_NS }}
+        cluster-name: ${{ env.DB_RESTORE_NAME }}
+        port: ${{ env.DB_PORT }}
+        architecture: ${{ matrix.architecture }}
+        test-type: 'comprehensive'
+
+    - name: Validate restored data
+      run: |
+        # Validate that the restored cluster has the expected data
+        count=$(mongosh 127.0.0.1:$DB_PORT --quiet --eval "db.testCollection.countDocuments({})" -u $DB_USERNAME -p $DB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates)
+        if [ "$count" -eq 100 ]; then
+          echo "✓ Data validation completed successfully on ${{ matrix.architecture }}"
+        else
+          echo "❌ Data validation failed on ${{ matrix.architecture }}"
+          exit 1
+        fi
+
+    - name: Cleanup comprehensive test port forwarding
+      if: always()
+      run: |
+        # Stop port-forward if it exists
+        if [ -f /tmp/pf_pid ]; then
+          PF_PID=$(cat /tmp/pf_pid)
+          kill $PF_PID 2>/dev/null || true
+          rm -f /tmp/pf_pid
+        fi
+        
+        # Clean up output log
+        rm -f /tmp/pf_output.log
+        
+        # Clean up output log
+        rm -f /tmp/pf_output.log
+    
+    - name: Test if expired backups are cleaned up
+      shell: bash
+      run: |
+        echo "Verifying expired backups are cleaned up..."
+        # pick up one backup name
+        backup_name=$(kubectl -n $DB_NS get backups -o jsonpath='{.items[0].metadata.name}')
+        # set expiration time to past
+        kubectl -n $DB_NS patch backup $backup_name --type='json' --type=merge -p='{"status":{"expiredAt":"2000-01-01T00:00:00Z"}}' --subresource=status
+        # wait for cleanup
+        MAX_RETRIES=10
+        SLEEP_INTERVAL=15
+        ITER=0
+        while [ $ITER -lt $MAX_RETRIES ]; do
+          backup_status=$(kubectl -n $DB_NS get backup $backup_name --ignore-not-found)
+          if [ -z "$backup_status" ]; then
+            echo "✓ Expired backup cleaned up successfully."
+            exit 0
+          else
+            echo "Backup $backup_name still exists. Retrying in $SLEEP_INTERVAL seconds..."
+            kubectl -n $DB_NS get backup $backup_name
+            sleep $SLEEP_INTERVAL
+          fi
+          ((++ITER))
+        done
+        echo "❌ Expired backup was not cleaned up within expected time."
+        exit 1  

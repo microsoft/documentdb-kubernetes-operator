@@ -200,6 +200,25 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "DocumentDB")
 		os.Exit(1)
 	}
+
+	if err = (&controller.BackupReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("backup-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Backup")
+		os.Exit(1)
+	}
+
+	if err = (&controller.ScheduledBackupReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("scheduled-backup-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ScheduledBackup")
+		os.Exit(1)
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {

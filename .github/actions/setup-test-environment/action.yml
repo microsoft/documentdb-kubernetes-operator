@@ -273,6 +273,12 @@ runs:
         
         echo "✓ Cluster resource check completed for ${{ inputs.architecture }}"
 
+    - name: Deploy CSI driver
+      shell: bash
+      run: |
+        chmod +x ./scripts/test-scripts/deploy-csi-driver.sh
+        ./scripts/test-scripts/deploy-csi-driver.sh
+  
     - name: Install cert-manager
       shell: bash
       run: |
@@ -583,6 +589,7 @@ runs:
           resource:
             storage:
               pvcSize: 5Gi
+              storageClass: csi-hostpath-sc
           exposeViaService:
             serviceType: ClusterIP
         EOF

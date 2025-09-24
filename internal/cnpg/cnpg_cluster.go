@@ -5,6 +5,7 @@ package cnpg
 
 import (
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -34,11 +35,12 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 			Namespace: req.Namespace,
 		},
 		Spec: func() cnpgv1.ClusterSpec {
+			storageClass := "default"
 			spec := cnpgv1.ClusterSpec{
 				Instances: documentdb.Spec.InstancesPerNode,
 				ImageName: documentdb_image,
 				StorageConfiguration: cnpgv1.StorageConfiguration{
-					StorageClass: nil,
+					StorageClass: &storageClass,
 					Size:         documentdb.Spec.Resource.PvcSize,
 				},
 				InheritedMetadata: getInheritedMetadataLabels(documentdb),
@@ -67,6 +69,12 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 					},
 				},
 				Bootstrap: getBootstrapConfiguration(documentdb),
+				Backup: &cnpgv1.BackupConfiguration{
+					VolumeSnapshot: &cnpgv1.VolumeSnapshotConfiguration{
+						ClassName: "azure-disk-snapclass",
+					},
+					Target: cnpgv1.BackupTarget("primary"),
+				},
 			}
 			spec.MaxStopDelay = getMaxStopDelayOrDefault(documentdb)
 			return spec
@@ -84,14 +92,28 @@ func getInheritedMetadataLabels(documentdb dbpreview.DocumentDB) *cnpgv1.Embedde
 }
 
 func getBootstrapConfiguration(documentdb dbpreview.DocumentDB) *cnpgv1.BootstrapConfiguration {
-	return &cnpgv1.BootstrapConfiguration{
-		InitDB: &cnpgv1.BootstrapInitDB{
-			PostInitSQL: []string{
-				"CREATE EXTENSION documentdb CASCADE",
-				"CREATE ROLE documentdb WITH LOGIN PASSWORD 'Admin100'",
-				"ALTER ROLE documentdb WITH SUPERUSER CREATEDB CREATEROLE REPLICATION BYPASSRLS",
+	// Log the restore choice
+
+	log.Info("Restoring DocumentDB from backup", "backupName", documentdb.Spec.RestoreFromBackup)
+
+	if documentdb.Spec.RestoreFromBackup != "" {
+		return &cnpgv1.BootstrapConfiguration{
+			Recovery: &cnpgv1.BootstrapRecovery{
+				Backup: &cnpgv1.BackupSource{
+					LocalObjectReference: cnpgv1.LocalObjectReference{Name: documentdb.Spec.RestoreFromBackup},
+				},
 			},
-		},
+		}
+	} else {
+		return &cnpgv1.BootstrapConfiguration{
+			InitDB: &cnpgv1.BootstrapInitDB{
+				PostInitSQL: []string{
+					"CREATE EXTENSION documentdb CASCADE",
+					"CREATE ROLE documentdb WITH LOGIN PASSWORD 'Admin100'",
+					"ALTER ROLE documentdb WITH SUPERUSER CREATEDB CREATEROLE REPLICATION BYPASSRLS",
+				},
+			},
+		}
 	}
 }
 

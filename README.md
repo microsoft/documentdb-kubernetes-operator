@@ -10,7 +10,7 @@ The DocumentDB Kubernetes Operator extends Kubernetes with Custom Resource Defin
 
 - **Declarative Management**: Define your DocumentDB clusters using Kubernetes manifests
 - **Automated Operations**: Automatic deployment, scaling, and lifecycle management
-- **MongoDB Compatibility**: Full MongoDB API compatibility for seamless application integration
+- **MongoDB Compatibility**: MongoDB API–compatible for seamless integration
 - **Cloud Native**: Built on CloudNative-PG for robust PostgreSQL foundation
 - **Helm Chart Support**: Easy installation and configuration via Helm
 - **Production Ready**: Designed for enterprise-grade deployments
@@ -25,7 +25,7 @@ For comprehensive documentation, installation guides, configuration options, and
 
 ### Quick Links
 
-- [Installation Guide](https://microsoft.github.io/documentdb-kubernetes-operator/v1/quick-start)
+- [Installation Guide](https://microsoft.github.io/documentdb-kubernetes-operator/v1/#quickstart)
 
 ## 🔗 Connecting to DocumentDB
 
@@ -101,7 +101,7 @@ If you prefer to use port forwarding, you can connect as follows:
 kubectl port-forward pod/documentdb-preview-1 10260:10260 -n documentdb-preview-ns
 ```
 
-Connect using [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/). Use the username and password from the `documentdb-credentials` secret you created earlier:
+Connect using [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/). Use the username and password from the credentials secret (defaults to `documentdb-credentials`, or the value you set in `spec.documentDbCredentialSecret`):
 
 ```sh
 mongosh 127.0.0.1:10260 -u k8s_secret_user -p K8sSecret100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates

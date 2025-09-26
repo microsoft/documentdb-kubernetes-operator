@@ -116,7 +116,22 @@ spec:
                 - primary
                 type: object
               documentDBImage:
-                description: DocumentDBImage is the container image to use for DocumentDB.
+                description: |-
+                  DocumentDBImage is the container image to use for DocumentDB.
+                  Changing this is not recommended for most users.
+                  If not specified, defaults based on documentDBVersion or operator defaults.
+                type: string
+              documentDBVersion:
+                description: |-
+                  DocumentDBVersion specifies the version for all DocumentDB components (engine, gateway).
+                  When set, this overrides the default versions for documentDBImage and gatewayImage.
+                  Individual image fields take precedence over this version.
+                type: string
+              documentDbCredentialSecret:
+                description: |-
+                  DocumentDbCredentialSecret is the name of the Kubernetes Secret containing credentials
+                  for the DocumentDB gateway (expects keys `username` and `password`). If omitted,
+                  a default secret name `documentdb-credentials` is used.
                 type: string
               exposeViaService:
                 description: |-
@@ -136,6 +151,7 @@ spec:
               gatewayImage:
                 description: |-
                   GatewayImage is the container image to use for the DocumentDB Gateway sidecar.
+                  Changing this is not recommended for most users.
                   If not specified, defaults to a version that matches the DocumentDB operator version.
                 type: string
               instancesPerNode:
@@ -173,7 +189,6 @@ spec:
                     type: integer
                 type: object
             required:
-            - documentDBImage
             - instancesPerNode
             - nodeCount
             - resource

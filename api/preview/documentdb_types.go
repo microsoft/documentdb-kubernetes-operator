@@ -22,12 +22,25 @@ type DocumentDBSpec struct {
 	// Resource specifies the storage resources for DocumentDB.
 	Resource Resource `json:"resource"`
 
+	// DocumentDBVersion specifies the version for all DocumentDB components (engine, gateway).
+	// When set, this overrides the default versions for documentDBImage and gatewayImage.
+	// Individual image fields take precedence over this version.
+	DocumentDBVersion string `json:"documentDBVersion,omitempty"`
+
 	// DocumentDBImage is the container image to use for DocumentDB.
-	DocumentDBImage string `json:"documentDBImage"`
+	// Changing this is not recommended for most users.
+	// If not specified, defaults based on documentDBVersion or operator defaults.
+	DocumentDBImage string `json:"documentDBImage,omitempty"`
 
 	// GatewayImage is the container image to use for the DocumentDB Gateway sidecar.
+	// Changing this is not recommended for most users.
 	// If not specified, defaults to a version that matches the DocumentDB operator version.
 	GatewayImage string `json:"gatewayImage,omitempty"`
+
+	// DocumentDbCredentialSecret is the name of the Kubernetes Secret containing credentials
+	// for the DocumentDB gateway (expects keys `username` and `password`). If omitted,
+	// a default secret name `documentdb-credentials` is used.
+	DocumentDbCredentialSecret string `json:"documentDbCredentialSecret,omitempty"`
 
 	// ClusterReplication configures cross-cluster replication for DocumentDB.
 	ClusterReplication *ClusterReplication `json:"clusterReplication,omitempty"`

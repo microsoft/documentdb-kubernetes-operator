@@ -32,4 +32,17 @@ const (
 	DEFAULT_WAL_REPLICA_PLUGIN = "cnpg-i-wal-replica.documentdb.io"
 
 	CNPG_DEFAULT_STOP_DELAY = 30
+
+	// JSON Patch paths
+	JSON_PATCH_PATH_REPLICA_CLUSTER      = "/spec/replica"
+	JSON_PATCH_PATH_POSTGRES_CONFIG      = "/spec/postgresql"
+	JSON_PATCH_PATH_POSTGRES_CONFIG_SYNC = "/spec/postgresql/synchronous"
+	JSON_PATCH_PATH_INSTANCES            = "/spec/instances"
+	JSON_PATCH_PATH_PLUGINS              = "/spec/plugins"
+	JSON_PATCH_PATH_REPLICATION_SLOTS    = "/spec/replicationSlots"
+
+	// JSON Patch operations
+	JSON_PATCH_OP_REPLACE = "replace"
+	JSON_PATCH_OP_ADD     = "add"
+	JSON_PATCH_OP_REMOVE  = "remove"
 )

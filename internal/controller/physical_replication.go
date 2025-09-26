@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -199,12 +201,48 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 		return fmt.Errorf("self cannot be changed"), time.Second * 60
 	}
 
+	// Create JSON patch operations for all replica cluster updates
+	var patchOps []util.JSONPatch
+
 	if tokenNeedsUpdate || primaryChanged && current.Spec.ReplicaCluster.Primary == current.Spec.ReplicaCluster.Self {
 		// Primary => replica
 		// demote
-		current.Spec.ReplicaCluster.Primary = desired.Spec.ReplicaCluster.Primary
-		current.Spec.ReplicaCluster.Source = desired.Spec.ReplicaCluster.Source
-		err := r.Client.Update(ctx, current)
+		patchOps = append(patchOps, util.JSONPatch{
+			Op:    util.JSON_PATCH_OP_REPLACE,
+			Path:  util.JSON_PATCH_PATH_REPLICA_CLUSTER,
+			Value: desired.Spec.ReplicaCluster,
+		})
+
+		if documentdb.Spec.ClusterReplication.HighAvailability {
+			// need to remove quorum writes and num instances
+			// Only add remove operation if synchronous field exists, otherwise there's an error
+			// TODO this wouldn't be true if our "wait for token" logic wasn't reliant on a failure
+			if current.Spec.PostgresConfiguration.Synchronous != nil {
+				patchOps = append(patchOps, util.JSONPatch{
+					Op:   util.JSON_PATCH_OP_REMOVE,
+					Path: util.JSON_PATCH_PATH_POSTGRES_CONFIG_SYNC,
+				})
+			}
+			patchOps = append(patchOps, util.JSONPatch{
+				Op:    util.JSON_PATCH_OP_REPLACE,
+				Path:  util.JSON_PATCH_PATH_INSTANCES,
+				Value: desired.Spec.Instances,
+			})
+			patchOps = append(patchOps, util.JSONPatch{
+				Op:    util.JSON_PATCH_OP_REPLACE,
+				Path:  util.JSON_PATCH_PATH_PLUGINS,
+				Value: desired.Spec.Plugins,
+			})
+		}
+
+		patch, err := json.Marshal(patchOps)
+		if err != nil {
+			return fmt.Errorf("failed to marshal patch operations: %w", err), time.Second * 10
+		}
+
+		log.Log.Info("Applying patch for Primary => Replica transition", "patch", string(patch), "cluster", current.Name)
+
+		err = r.Client.Patch(ctx, current, client.RawPatch(types.JSONPatchType, patch))
 		if err != nil {
 			return err, time.Second * 10
 		}
@@ -221,6 +259,7 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 			documentdb.Spec.ClusterReplication.ClusterList,
 			current.Spec.ReplicaCluster.Primary)
 
+		replicaClusterConfig := desired.Spec.ReplicaCluster
 		// If the old primary is available, we can read the token from it
 		if oldPrimaryAvailable {
 			token, err, refreshTime := r.ReadToken(ctx, documentdb.Namespace, documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud)
@@ -228,12 +267,68 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 				return err, refreshTime
 			}
 			log.Log.Info("Token read successfully", "token", token)
-			current.Spec.ReplicaCluster.PromotionToken = token
+
+			// Update the configuration with the token
+			replicaClusterConfig.PromotionToken = token
 		}
 
-		// If the old primary is not available, just come up
-		current.Spec.ReplicaCluster.Primary = desired.Spec.ReplicaCluster.Primary
-		err = r.Client.Update(ctx, current)
+		patchOps = append(patchOps, util.JSONPatch{
+			Op:    util.JSON_PATCH_OP_REPLACE,
+			Path:  util.JSON_PATCH_PATH_REPLICA_CLUSTER,
+			Value: replicaClusterConfig,
+		})
+
+		if documentdb.Spec.ClusterReplication.HighAvailability {
+			// need to add second instance and wal replica
+			patchOps = append(patchOps, util.JSONPatch{
+				Op:    util.JSON_PATCH_OP_REPLACE,
+				Path:  util.JSON_PATCH_PATH_POSTGRES_CONFIG,
+				Value: desired.Spec.PostgresConfiguration,
+			})
+			patchOps = append(patchOps, util.JSONPatch{
+				Op:    util.JSON_PATCH_OP_REPLACE,
+				Path:  util.JSON_PATCH_PATH_INSTANCES,
+				Value: desired.Spec.Instances,
+			})
+			patchOps = append(patchOps, util.JSONPatch{
+				Op:    util.JSON_PATCH_OP_REPLACE,
+				Path:  util.JSON_PATCH_PATH_PLUGINS,
+				Value: desired.Spec.Plugins,
+			})
+			patchOps = append(patchOps, util.JSONPatch{
+				Op:    util.JSON_PATCH_OP_REPLACE,
+				Path:  util.JSON_PATCH_PATH_REPLICATION_SLOTS,
+				Value: desired.Spec.ReplicationSlots,
+			})
+		}
+
+		patch, err := json.Marshal(patchOps)
+		if err != nil {
+			return fmt.Errorf("failed to marshal patch operations: %w", err), time.Second * 10
+		}
+
+		log.Log.Info("Applying patch for Replica => Primary transition", "patch", string(patch), "cluster", current.Name, "hasToken", replicaClusterConfig.PromotionToken != "")
+
+		err = r.Client.Patch(ctx, current, client.RawPatch(types.JSONPatchType, patch))
+		if err != nil {
+			return err, time.Second * 10
+		}
+	} else if primaryChanged {
+		// Replica => replica
+		patchOps = append(patchOps, util.JSONPatch{
+			Op:    util.JSON_PATCH_OP_REPLACE,
+			Path:  util.JSON_PATCH_PATH_REPLICA_CLUSTER,
+			Value: desired.Spec.ReplicaCluster,
+		})
+
+		patch, err := json.Marshal(patchOps)
+		if err != nil {
+			return fmt.Errorf("failed to marshal patch operations: %w", err), time.Second * 10
+		}
+
+		log.Log.Info("Applying patch for Replica => Replica transition", "patch", string(patch), "cluster", current.Name)
+
+		err = r.Client.Patch(ctx, current, client.RawPatch(types.JSONPatchType, patch))
 		if err != nil {
 			return err, time.Second * 10
 		}

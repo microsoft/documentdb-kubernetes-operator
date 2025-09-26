@@ -137,16 +137,16 @@ func (impl Implementation) reconcileMetadata(
 		},
 	}
 
-	// Add USERNAME and PASSWORD environment variables from secret defined in configuration
-	credentialSecretName := configuration.DocumentDbCredentialSecret
-	log.Printf("Adding USERNAME and PASSWORD environment variables from secret '%s'", credentialSecretName)
+	// Add USERNAME and PASSWORD environment variables from secret
+	// TODO: Make this configurable and expose it in the configuration
+	log.Printf("Adding USERNAME and PASSWORD environment variables from secret")
 	envVars = append(envVars,
 		corev1.EnvVar{
 			Name: "USERNAME",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: credentialSecretName,
+						Name: "documentdb-credentials",
 					},
 					Key: "username",
 				},
@@ -157,7 +157,7 @@ func (impl Implementation) reconcileMetadata(
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: credentialSecretName,
+						Name: "documentdb-credentials",
 					},
 					Key: "password",
 				},
@@ -182,8 +182,8 @@ func (impl Implementation) reconcileMetadata(
 		},
 	}
 
-	// Check if the pod has the label replication_cluster_type=replica
-	if mutatedPod.Labels["replication_cluster_type"] == "replica" {
+	// Check if the pod has the label replication_cluster_type=replica or is not a local primary
+	if mutatedPod.Labels["replication_cluster_type"] == "replica" || cluster.Status.TargetPrimary != mutatedPod.Name {
 		sidecar.Args = []string{"--create-user", "false", "--start-pg", "false", "--pg-port", "5432"}
 	} else {
 		sidecar.Args = []string{"--create-user", "true", "--start-pg", "false", "--pg-port", "5432"}
@@ -194,8 +194,6 @@ func (impl Implementation) reconcileMetadata(
 	if err != nil {
 		return nil, err
 	}
-
-	// Apply any custom logic needed here, in this example we just add some metadata to the pod
 
 	for key, value := range configuration.Labels {
 		mutatedPod.Labels[key] = value

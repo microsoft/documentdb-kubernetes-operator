@@ -9,6 +9,8 @@ import (
 	"github.com/cloudnative-pg/cnpg-i/pkg/operator"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/documentdb/cnpg-i-sidecar-injector/internal/identity"
 	lifecycleImpl "github.com/documentdb/cnpg-i-sidecar-injector/internal/lifecycle"
@@ -26,6 +28,7 @@ func NewCmd() *cobra.Command {
 
 	// If you want to provide your own logr.Logger here, inject it into a context.Context
 	// with logr.NewContext(ctx, logger) and pass it to cmd.SetContext(ctx)
+	log.SetLogger(zap.New(zap.UseDevMode(true)))
 
 	// Additional custom behaviour can be added by wrapping cmd.PersistentPreRun or cmd.Run
 

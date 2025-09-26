@@ -48,52 +48,6 @@ spec:
           spec:
             description: DocumentDBSpec defines the desired state of DocumentDB.
             properties:
-              tls:
-                description: TLS configures gateway TLS certificate management.
-                type: object
-                properties:
-                  mode:
-                    description: Mode selects TLS management strategy.
-                    type: string
-                    enum:
-                      - Disabled
-                      - SelfSigned
-                      - CertManager
-                      - Provided
-                  certManager:
-                    description: cert-manager driven certificate parameters.
-                    type: object
-                    properties:
-                      issuerRef:
-                        description: Reference to cert-manager Issuer or ClusterIssuer.
-                        type: object
-                        properties:
-                          name:
-                            type: string
-                          kind:
-                            type: string
-                          group:
-                            type: string
-                        required:
-                          - name
-                      dnsNames:
-                        description: Additional DNS SANs for the certificate.
-                        type: array
-                        items:
-                          type: string
-                      secretName:
-                        description: Override target secret name.
-                        type: string
-                    required:
-                      - issuerRef
-                  provided:
-                    description: Reference to existing secret with tls.crt/tls.key.
-                    type: object
-                    properties:
-                      secretName:
-                        type: string
-                    required:
-                      - secretName
               clusterReplication:
                 description: ClusterReplication configures cross-cluster replication
                   for DocumentDB.
@@ -188,6 +142,72 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
+              tls:
+                description: TLS configures certificate management for DocumentDB
+                  components.
+                properties:
+                  gateway:
+                    description: 'Gateway configures TLS for the gateway sidecar (Phase
+                      1: certificate provisioning only).'
+                    properties:
+                      certManager:
+                        description: CertManager config when Mode=CertManager.
+                        properties:
+                          dnsNames:
+                            description: DNSNames for the certificate SANs. If empty,
+                              operator will add Service DNS names.
+                            items:
+                              type: string
+                            type: array
+                          issuerRef:
+                            description: IssuerRef references a cert-manager Issuer
+                              or ClusterIssuer.
+                            properties:
+                              group:
+                                description: Group defaults to cert-manager.io
+                                type: string
+                              kind:
+                                description: Kind of issuer (Issuer or ClusterIssuer).
+                                  Defaults to Issuer.
+                                type: string
+                              name:
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          secretName:
+                            description: SecretName optional explicit name for the
+                              target secret. If empty a default is chosen.
+                            type: string
+                        required:
+                        - issuerRef
+                        type: object
+                      mode:
+                        description: Mode selects the TLS management strategy.
+                        enum:
+                        - Disabled
+                        - SelfSigned
+                        - CertManager
+                        - Provided
+                        type: string
+                      provided:
+                        description: Provided secret reference when Mode=Provided.
+                        properties:
+                          secretName:
+                            type: string
+                        required:
+                        - secretName
+                        type: object
+                    type: object
+                  globalEndpoints:
+                    description: GlobalEndpoints configures TLS for global endpoints
+                      (placeholder for future phases).
+                    type: object
+                  postgres:
+                    description: Postgres configures TLS for the Postgres server (placeholder
+                      for future phases).
+                    type: object
+                type: object
             required:
             - instancesPerNode
             - nodeCount
@@ -203,15 +223,15 @@ spec:
                   CNPG Cluster.
                 type: string
               tls:
-                description: TLS reports gateway TLS provisioning status.
-                type: object
+                description: TLS reports gateway TLS provisioning status (Phase 1).
                 properties:
+                  message:
+                    type: string
                   ready:
                     type: boolean
                   secretName:
                     type: string
-                  message:
-                    type: string
+                type: object
             type: object
         type: object
     served: true

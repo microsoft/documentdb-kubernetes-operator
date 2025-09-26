@@ -54,8 +54,8 @@ type DocumentDBSpec struct {
 
 	Timeouts Timeouts `json:"timeouts,omitempty"`
 
-	// TLS configures (future) gateway TLS certificate management. Phase 1: create cert-manager resources and status tracking only.
-	TLS *GatewayTLS `json:"tls,omitempty"`
+	// TLS configures certificate management for DocumentDB components.
+	TLS *TLSConfiguration `json:"tls,omitempty"`
 }
 
 type Resource struct {
@@ -84,6 +84,18 @@ type Timeouts struct {
 	StopDelay int32 `json:"stopDelay,omitempty"`
 }
 
+// TLSConfiguration aggregates TLS settings across DocumentDB components.
+type TLSConfiguration struct {
+	// Gateway configures TLS for the gateway sidecar (Phase 1: certificate provisioning only).
+	Gateway *GatewayTLS `json:"gateway,omitempty"`
+
+	// Postgres configures TLS for the Postgres server (placeholder for future phases).
+	Postgres *PostgresTLS `json:"postgres,omitempty"`
+
+	// GlobalEndpoints configures TLS for global endpoints (placeholder for future phases).
+	GlobalEndpoints *GlobalEndpointsTLS `json:"globalEndpoints,omitempty"`
+}
+
 // GatewayTLS defines TLS configuration for the gateway sidecar (Phase 1: certificate provisioning only)
 type GatewayTLS struct {
 	// Mode selects the TLS management strategy.
@@ -96,6 +108,12 @@ type GatewayTLS struct {
 	// Provided secret reference when Mode=Provided.
 	Provided *ProvidedTLS `json:"provided,omitempty"`
 }
+
+// PostgresTLS acts as a placeholder for future Postgres TLS settings.
+type PostgresTLS struct{}
+
+// GlobalEndpointsTLS acts as a placeholder for future global endpoint TLS settings.
+type GlobalEndpointsTLS struct{}
 
 // CertManagerTLS holds parameters for cert-manager driven certificates.
 type CertManagerTLS struct {

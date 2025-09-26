@@ -44,7 +44,7 @@ func baseDocumentDB(name, ns string) *dbpreview.DocumentDB {
 func TestEnsureProvidedSecret(t *testing.T) {
 	ctx := context.Background()
 	ddb := baseDocumentDB("ddb-prov", "default")
-	ddb.Spec.TLS = &dbpreview.GatewayTLS{Mode: "Provided", Provided: &dbpreview.ProvidedTLS{SecretName: "mycert"}}
+	ddb.Spec.TLS = &dbpreview.TLSConfiguration{Gateway: &dbpreview.GatewayTLS{Mode: "Provided", Provided: &dbpreview.ProvidedTLS{SecretName: "mycert"}}}
 	// Secret missing first
 	r := buildReconciler(t, ddb)
 	err := r.reconcileGatewayTLS(ctx, ddb)
@@ -63,7 +63,7 @@ func TestEnsureProvidedSecret(t *testing.T) {
 func TestEnsureCertManagerManagedCert(t *testing.T) {
 	ctx := context.Background()
 	ddb := baseDocumentDB("ddb-cm", "default")
-	ddb.Spec.TLS = &dbpreview.GatewayTLS{Mode: "CertManager", CertManager: &dbpreview.CertManagerTLS{IssuerRef: dbpreview.IssuerRef{Name: "test-issuer", Kind: "Issuer"}, DNSNames: []string{"custom.example"}}}
+	ddb.Spec.TLS = &dbpreview.TLSConfiguration{Gateway: &dbpreview.GatewayTLS{Mode: "CertManager", CertManager: &dbpreview.CertManagerTLS{IssuerRef: dbpreview.IssuerRef{Name: "test-issuer", Kind: "Issuer"}, DNSNames: []string{"custom.example"}}}}
 	ddb.Status.TLS = &dbpreview.TLSStatus{}
 	issuer := &cmapi.Issuer{ObjectMeta: metav1.ObjectMeta{Name: "test-issuer", Namespace: "default"}, Spec: cmapi.IssuerSpec{IssuerConfig: cmapi.IssuerConfig{SelfSigned: &cmapi.SelfSignedIssuer{}}}}
 	r := buildReconciler(t, ddb, issuer)
@@ -100,7 +100,7 @@ func TestEnsureCertManagerManagedCert(t *testing.T) {
 func TestEnsureSelfSignedCert(t *testing.T) {
 	ctx := context.Background()
 	ddb := baseDocumentDB("ddb-ss", "default")
-	ddb.Spec.TLS = &dbpreview.GatewayTLS{Mode: "SelfSigned"}
+	ddb.Spec.TLS = &dbpreview.TLSConfiguration{Gateway: &dbpreview.GatewayTLS{Mode: "SelfSigned"}}
 	ddb.Status.TLS = &dbpreview.TLSStatus{}
 	r := buildReconciler(t, ddb)
 

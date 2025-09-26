@@ -41,7 +41,11 @@ type DocumentDBReconciler struct {
 // reconcileGatewayTLS handles self-signed TLS provisioning (SelfSigned mode) for the gateway.
 // Future: extend for CertManager and Provided modes.
 func (r *DocumentDBReconciler) reconcileGatewayTLS(ctx context.Context, ddb *dbpreview.DocumentDB) error {
-	if ddb.Spec.TLS == nil || ddb.Spec.TLS.Mode == "" || ddb.Spec.TLS.Mode == "Disabled" {
+	if ddb.Spec.TLS == nil || ddb.Spec.TLS.Gateway == nil {
+		return nil
+	}
+	gatewayCfg := ddb.Spec.TLS.Gateway
+	if gatewayCfg.Mode == "" || gatewayCfg.Mode == "Disabled" {
 		return nil
 	}
 	// Initialize status structure if missing
@@ -50,7 +54,7 @@ func (r *DocumentDBReconciler) reconcileGatewayTLS(ctx context.Context, ddb *dbp
 		_ = r.Status().Update(ctx, ddb)
 	}
 
-	switch ddb.Spec.TLS.Mode {
+	switch gatewayCfg.Mode {
 	case "SelfSigned":
 		return r.ensureSelfSignedCert(ctx, ddb)
 	case "Provided":
@@ -64,19 +68,20 @@ func (r *DocumentDBReconciler) reconcileGatewayTLS(ctx context.Context, ddb *dbp
 
 // ensureProvidedSecret validates presence of a user-provided secret and marks TLS ready.
 func (r *DocumentDBReconciler) ensureProvidedSecret(ctx context.Context, ddb *dbpreview.DocumentDB) error {
+	gatewayCfg := ddb.Spec.TLS.Gateway
 	if ddb.Status.TLS == nil { // defensive init for direct test invocation
 		ddb.Status.TLS = &dbpreview.TLSStatus{}
 	}
-	if ddb.Spec.TLS == nil || ddb.Spec.TLS.Provided == nil || ddb.Spec.TLS.Provided.SecretName == "" {
+	if gatewayCfg == nil || gatewayCfg.Provided == nil || gatewayCfg.Provided.SecretName == "" {
 		ddb.Status.TLS.Message = "Provided TLS secret name missing"
 		_ = r.Status().Update(ctx, ddb)
 		return nil
 	}
 	secret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Name: ddb.Spec.TLS.Provided.SecretName, Namespace: ddb.Namespace}, secret); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: gatewayCfg.Provided.SecretName, Namespace: ddb.Namespace}, secret); err != nil {
 		if errors.IsNotFound(err) {
 			ddb.Status.TLS.Ready = false
-			ddb.Status.TLS.SecretName = ddb.Spec.TLS.Provided.SecretName
+			ddb.Status.TLS.SecretName = gatewayCfg.Provided.SecretName
 			ddb.Status.TLS.Message = "Waiting for provided TLS secret"
 			_ = r.Status().Update(ctx, ddb)
 			return nil
@@ -97,7 +102,7 @@ func (r *DocumentDBReconciler) ensureProvidedSecret(ctx context.Context, ddb *db
 		return nil
 	}
 	ddb.Status.TLS.Ready = true
-	ddb.Status.TLS.SecretName = ddb.Spec.TLS.Provided.SecretName
+	ddb.Status.TLS.SecretName = gatewayCfg.Provided.SecretName
 	ddb.Status.TLS.Message = "Using provided TLS secret"
 	_ = r.Status().Update(ctx, ddb)
 	return nil
@@ -105,15 +110,16 @@ func (r *DocumentDBReconciler) ensureProvidedSecret(ctx context.Context, ddb *db
 
 // ensureCertManagerManagedCert ensures a certificate using a user-specified Issuer/ClusterIssuer.
 func (r *DocumentDBReconciler) ensureCertManagerManagedCert(ctx context.Context, ddb *dbpreview.DocumentDB) error {
+	gatewayCfg := ddb.Spec.TLS.Gateway
 	if ddb.Status.TLS == nil { // defensive init for direct test invocation
 		ddb.Status.TLS = &dbpreview.TLSStatus{}
 	}
-	if ddb.Spec.TLS == nil || ddb.Spec.TLS.CertManager == nil {
+	if gatewayCfg == nil || gatewayCfg.CertManager == nil {
 		ddb.Status.TLS.Message = "CertManager configuration missing"
 		_ = r.Status().Update(ctx, ddb)
 		return nil
 	}
-	cmCfg := ddb.Spec.TLS.CertManager
+	cmCfg := gatewayCfg.CertManager
 
 	issuerRef := cmmeta.ObjectReference{Name: cmCfg.IssuerRef.Name}
 	if cmCfg.IssuerRef.Kind != "" {

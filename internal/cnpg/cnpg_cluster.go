@@ -108,13 +108,3 @@ func getMaxStopDelayOrDefault(documentdb dbpreview.DocumentDB) int32 {
 	}
 	return util.CNPG_DEFAULT_STOP_DELAY
 }
-	}
-}
-
-// getMaxStopDelayOrDefault returns StopDelay if set, otherwise util.CNPG_DEFAULT_STOP_DELAY
-func getMaxStopDelayOrDefault(documentdb dbpreview.DocumentDB) int32 {
-	if documentdb.Spec.Timeouts.StopDelay != 0 {
-		return documentdb.Spec.Timeouts.StopDelay
-	}
-	return util.CNPG_DEFAULT_STOP_DELAY
-}

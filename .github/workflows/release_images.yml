@@ -16,6 +16,10 @@ on:
         required: false
         default: false
         type: boolean
+      chart_version:
+        description: 'Helm chart version to publish'
+        required: false
+        default: '0.0.1'
 
 permissions:
   contents: read
@@ -91,13 +95,12 @@ jobs:
 
       - name: Set chart version
         run: |
-          if [[ "${{ github.event.inputs.target_tag }}" == "preview" ]]; then
-            echo "CHART_VERSION=0.0.1" >> $GITHUB_ENV
-            echo "Using default chart version: 0.0.1"
-          else
-            echo "CHART_VERSION=0.0.1-${{ github.event.inputs.target_tag }}" >> $GITHUB_ENV
-            echo "Using custom chart version: 0.0.1-${{ github.event.inputs.target_tag }}"
-          fi
+            CHART_VERSION_INPUT="${{ github.event.inputs.chart_version }}"
+            if [[ -z "$CHART_VERSION_INPUT" ]]; then
+              CHART_VERSION_INPUT="0.0.1"
+            fi
+            echo "CHART_VERSION=${CHART_VERSION_INPUT}" >> $GITHUB_ENV
+            echo "Using chart version: ${CHART_VERSION_INPUT}"
 
       - name: Package Helm chart
         run: |

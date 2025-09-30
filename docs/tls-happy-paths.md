@@ -26,7 +26,7 @@ Goal: Operator provisions a namespaced SelfSigned Issuer + Certificate; a TLS se
 
 Steps (high level)
 - Set the DocumentDB spec:
-  - `spec.tls.mode: SelfSigned`
+  - `spec.tls.gateway.mode: SelfSigned`
 - Wait for status:
   - `status.tls.ready: true`
   - `status.tls.secretName: <generated secret name>`
@@ -53,8 +53,8 @@ What we did
 - Created a SecretProviderClass in `documentdb-preview-ns` to pull the AKV cert and `syncSecret: true` to produce:
   - Secret: `documentdb-provided-tls` (contains `tls.crt` and `tls.key`)
 - Switched the DocumentDB CR to:
-  - `spec.tls.mode: Provided`
-  - `spec.tls.provided.secretName: documentdb-provided-tls`
+  - `spec.tls.gateway.mode: Provided`
+  - `spec.tls.gateway.provided.secretName: documentdb-provided-tls`
 
 Observed results (from our run)
 - `status.tls.ready: true`
@@ -67,6 +67,7 @@ Observed results (from our run)
   - Command with relaxed TLS: `{ ok: 1 }`
 
 Notes
+- Ensure the synced secret exposes the keys as `tls.crt` and `tls.key`. If your SecretProviderClass template uses different key names, add `objectAlias` mappings so the gateway TLS controller can mark the mode ready.
 - The example AKV certificate used a self-signed leaf (AKV Self policy). For strict verification, clients must trust the signer (use a CA-backed chain or a trusted CA file). See next section for a local CA.
 
 Success criteria
@@ -80,17 +81,48 @@ Success criteria
 
 Goal: Create a local CA via cert-manager, then issue the gateway leaf from that CA so clients can validate strictly using the included `ca.crt`.
 
-Manifests (in repo)
-- `EXAMPLE_k8s_cert_management/ca-issuer/00-clusterissuer-selfsigned-root.yaml`
-- `EXAMPLE_k8s_cert_management/ca-issuer/01-certificate-root-ca.yaml` (namespaced CA, secret `documentdb-root-ca`)
-- `EXAMPLE_k8s_cert_management/ca-issuer/02-issuer-from-ca.yaml` (namespaced Issuer `documentdb-ca-issuer`)
+Example manifests (apply in your workload namespace)
+
+```yaml
+# 00-clusterissuer-selfsigned-root.yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: documentdb-selfsigned-root
+spec:
+  selfSigned: {}
+---
+# 01-certificate-root-ca.yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: documentdb-root-ca
+  namespace: documentdb-preview-ns
+spec:
+  isCA: true
+  secretName: documentdb-root-ca
+  commonName: documentdb-root-ca
+  issuerRef:
+    name: documentdb-selfsigned-root
+    kind: ClusterIssuer
+---
+# 02-issuer-from-ca.yaml
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: documentdb-ca-issuer
+  namespace: documentdb-preview-ns
+spec:
+  ca:
+    secretName: documentdb-root-ca
+```
 
 Steps (high level)
-1. Apply the three manifests above.
+1. Apply the manifests above (update the namespace if your DocumentDB instance lives elsewhere).
 2. Patch DocumentDB to:
-   - `spec.tls.mode: CertManager`
-   - `spec.tls.certManager.issuerRef: { name: documentdb-ca-issuer, kind: Issuer }`
-   - Optionally include external SNI host (e.g., `<LB-IP>.sslip.io`) in `spec.tls.certManager.dnsNames`.
+   - `spec.tls.gateway.mode: CertManager`
+   - `spec.tls.gateway.certManager.issuerRef: { name: documentdb-ca-issuer, kind: Issuer }`
+   - Optionally include external SNI host (e.g., `<LB-IP>.sslip.io`) in `spec.tls.gateway.certManager.dnsNames`.
 3. Wait for certificate Ready. cert-manager will include `ca.crt` in the issued secret.
 4. Connect with strict TLS by supplying the CA file (e.g., `--tlsCAFile /tmp/ca.crt`).
 
@@ -138,15 +170,16 @@ Assumptions
 
 Set variables
 ```
+suffix=092901
 export SUBSCRIPTION_ID="81901d5e-31aa-46c5-b61a-537dbd5df1e7"
 export LOCATION="eastus2"
-export RG="documentdb-aks4-rg"
+export RG="documentdb-aks${suffix}-rg"
 export ACR_NAME="guanzhoutest"           # use this ACR name as provided
-export AKS_NAME="documentdb-aks4"
-export KV_NAME="ddb-issuer-04"           # optional for AKV prep (unique in your tenant)
+export AKS_NAME="documentdb-aks${suffix}"
+export KV_NAME="ddb-issuer-${suffix}"           # optional for AKV prep (unique in your tenant)
 export OPERATOR_IMAGE_REPO="$ACR_NAME.azurecr.io/documentdb/operator"
 export SIDECAR_IMAGE_REPO="$ACR_NAME.azurecr.io/documentdb/sidecar"
-export IMAGE_TAG="$(date +%Y%m%d%H%M%S)"
+export IMAGE_TAG="20250827144850"
 
 echo "Using variables:"
 echo "SUBSCRIPTION_ID=$SUBSCRIPTION_ID"
@@ -281,7 +314,8 @@ spec:
   exposeViaService:
     serviceType: LoadBalancer
   tls:
-    mode: SelfSigned
+    gateway:
+      mode: SelfSigned
 EOF
 ```
 ```

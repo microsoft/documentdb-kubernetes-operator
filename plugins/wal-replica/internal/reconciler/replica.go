@@ -28,11 +28,6 @@ func CreateWalReplica(
 ) error {
 	logger := log.FromContext(ctx).WithName("CreateWalReplica")
 
-	if !IsPrimaryCluster(cluster) {
-		logger.Info("Cluster is not a primary, skipping wal replica creation", "cluster", cluster.Name)
-		return nil
-	}
-
 	// Build Deployment name unique per cluster
 	deploymentName := fmt.Sprintf("%s-wal-receiver", cluster.Name)
 	namespace := cluster.Namespace
@@ -239,9 +234,4 @@ func int64Ptr(i int64) *int64 {
 }
 func int32Ptr(i int32) *int32 {
 	return &i
-}
-
-func IsPrimaryCluster(cluster *cnpgv1.Cluster) bool {
-	// TODO implement
-	return true
 }

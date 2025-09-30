@@ -1,180 +1,442 @@
-# Plugin Development
+# WAL Replica Plugin Development Guide
 
-This section of the documentation illustrates the CNPG-I capabilities used by
-the wal-replica plugin, how the plugin implementation uses them, and how
-developers can build and deploy the plugin.
+This document provides comprehensive guidance for developers working with the WAL Replica plugin for CloudNativePG. It covers the CNPG-I framework capabilities used, implementation details, and development workflows.
 
-## Concepts
+## Overview
 
-### Identity
+The WAL Replica plugin (`cnpg-i-wal-replica.documentdb.io`) is built using the CloudNativePG Interface (CNPG-I) framework, which provides a plugin architecture for extending CloudNativePG clusters with custom functionality.
 
-The Identity interface defines the features supported by the plugin and is the
-only interface that must always be implemented.
+### Plugin Metadata
 
-This information is essential for the operator to discover the plugin's
-capabilities during startup.
-
-The Identity interface provides:
-
-- A mechanism for plugins to report readiness probes. Readiness is a
-  prerequisite for receiving events, and plugins are expected to always report
-  the most accurate readiness data available.
-- The capabilities reported by the plugin, which determine the subsequent calls
-  the plugin will receive.
-- Metadata about the plugin.
-
-[API reference](https://github.com/cloudnative-pg/cnpg-i/blob/main/proto/identity.proto)
-
-### Capabilities
-
-This plugin implements the Operator and the Lifecycle capabilities.
-
-#### Operator
-
-This feature enables the plugin to receive events about the cluster creation and
-mutations, this is defined by the following
-
-``` proto
-// ValidateCreate improves the behavior of the validating webhook that
-// is called on creation of the Cluster resources
-rpc ValidateClusterCreate(OperatorValidateClusterCreateRequest) returns (OperatorValidateClusterCreateResult) {}
-
-// ValidateClusterChange improves the behavior of the validating webhook of
-// is called on updates of the Cluster resources
-rpc ValidateClusterChange(OperatorValidateClusterChangeRequest) returns (OperatorValidateClusterChangeResult) {}
-
-// MutateCluster fills in the defaults inside a Cluster resource
-rpc MutateCluster(OperatorMutateClusterRequest) returns (OperatorMutateClusterResult) {}
+```go
+// From pkg/metadata/doc.go
+const PluginName = "cnpg-i-wal-replica.documentdb.io"
+Version: "0.1.0"
+DisplayName: "WAL Replica Pod Manager"
+License: "MIT"
+Maturity: "alpha"
 ```
 
-This interface allows plugins to implement important features like:
+## CNPG-I Framework Concepts
 
-1. validating the cluster manifest during the creation and mutations
-   (it is expected that the plugin validate the parameters assigned to their
-   configuration).
+### Identity Interface
 
-2. mutating the cluster object before it is submitted to kubernetes API server,
-   for example to set default values for the plugin parameters.
+The Identity interface is fundamental to all CNPG-I plugins and defines:
 
-[API reference](https://github.com/cloudnative-pg/cnpg-i/blob/main/proto/operator.proto)
+- **Plugin Metadata**: Name, version, description, and licensing information
+- **Capabilities**: Which CNPG-I services the plugin implements
+- **Readiness**: Health check mechanism for the plugin
 
-The wal-replica plugin is using this to validate used-defined parameters, and to
-set default values for the labels and annotations applied by the plugin if not
-specified by the user.
+The identity implementation is located in [`internal/identity/impl.go`](../internal/identity/impl.go).
 
-#### Lifecycle
+**Key Methods:**
+- `GetPluginMetadata()`: Returns plugin information from `pkg/metadata`
+- `GetPluginCapabilities()`: Declares supported services (Operator + Reconciler)
+- `Probe()`: Always returns ready (stateless plugin)
 
-This feature enables the plugin to receive events and create patches for
-Kubernetes resources `before` they are submitted to the API server.
+[CNPG-I Identity API Reference](https://github.com/cloudnative-pg/cnpg-i/blob/main/proto/identity.proto)
 
-To use this feature, the plugin must specify the resource and operation it wants
-to be notified of.
+### Implemented Capabilities
 
-Some examples of what it can be achieved through the lifecycle:
+This plugin implements two core CNPG-I capabilities:
 
-- add volume, volume mounts, sidecar containers, labels, annotations to pods,
-  especially necessary when implementing custom backup solutions
-- modify any resource with some annotations or labels
-- add/remove finalizers
+#### 1. Operator Interface
 
-[API reference](https://github.com/cloudnative-pg/cnpg-i/blob/main/proto/operator_lifecycle.proto):
+Provides cluster-level validation and mutation capabilities through webhooks:
 
-The wal-replica plugin is using this to add labels, annotations and a sidecar
-to the pods.
-
-## Implementation
-
-### Identity
-
-1. Define a struct inside the `internal/identity` package that implements
-   the `pluginhelper.IdentityServer` interface.
-
-2. Implement the following methods:
-
-    - `GetPluginMetadata`: return human-readable information about the plugin.
-    - `GetPluginCapabilities`: specify the features supported by the plugin. In
-      the wal-replica example, the
-      `PluginCapability_Service_TYPE_LIFECYCLE_SERVICE` is defined in the
-      corresponding Go [file](../internal/lifecycle/lifecycle.go).
-    - `Probe`: indicate whether the plugin is ready to serve requests; this
-      example is stateless, so it will always be ready.
-
-### Lifecycle
-
-This example implements the lifecycle service capabilities to add labels and
-annotations to the pods. The `OperatorLifecycleServer` interface is implemented
-inside the `internal/lifecycle` package.
-
-The `OperatorLifecycleServer` interface requires several methods:
-
-- `GetCapabilities`: describe the resources and operations the plugin should be
-  notified for
-
-- `LifecycleHook`: is invoked for every operation against the Kubernetes API
-  server that matches the specifications returned by `GetCapabilities`
-
-  In this function, the plugin is expected to do pattern matching using
-  the `Kind` and the operation `Type` and proceed with the proper logic.
-
-### Operator
-
-The operator interface offers a way for the plugin to interact with the Cluster
-resource webhooks.
-
-Do that, the plugin should implement
-the [operator](https://github.com/cloudnative-pg/cnpg-i/blob/main/proto/operator.proto)
-interface, specifically the `MutateCluster`, `ValidateClusterCreate`,
-and `ValidateClusterChange` rpc calls.
-
-- `MutateCluster`: enriches the plugin defaulting webhook
-
-- `ValidateClusterCreate` and `ValidateClusterChange`: enriches the plugin
-  validation logic.
-
-The package `internal/operator` implements this interface.
-
-### Startup Command
-
-The plugin runs in its own pod, and its main command is implemented in
-the `main.go` file.
-
-This function uses the plugin helper library to create a GRPC server and manage
-TLS.
-
-Plugin developers are expected to use the `pluginhelper.CreateMainCmd`
-to implement the `main` function, passing an implemented `Identity`
-struct.
-
-Further implementations can be registered within the callback function.
-
-In the example we propose, that's done for **operator** and for the
-**lifecycle** services in [file](../cmd/plugin/plugin.go):
-
-``` proto
-operator.RegisterOperatorServer(server, operatorImpl.Implementation{})
-lifecycle.RegisterOperatorLifecycleServer(server, lifecycleImpl.Implementation{})
+```go
+// From internal/operator/
+rpc ValidateClusterCreate(OperatorValidateClusterCreateRequest) returns (OperatorValidateClusterCreateResult)
+rpc ValidateClusterChange(OperatorValidateClusterChangeRequest) returns (OperatorValidateClusterChangeResult)  
+rpc MutateCluster(OperatorMutateClusterRequest) returns (OperatorMutateClusterResult)
 ```
 
-## Build and deploy the plugin
+**Implementation Features:**
+- **Parameter Validation**: Validates `synchronous`, `walPVCSize`, and other plugin parameters
+- **Default Application**: Sets default values for image, replication host, WAL directory
+- **Configuration Parsing**: Converts plugin parameters to typed configuration objects
 
-Users can test their own changes to the plugin by building a container image
-running it inside a Kubernetes cluster with CloudNativePG and cert-manager
-installed.
+See [`internal/operator/validation.go`](../internal/operator/validation.go) and [`internal/operator/mutations.go`](../internal/operator/mutations.go).
 
-### Local build
+#### 2. Reconciler Hooks Interface  
 
-The repository provides a [`Taskfile`](https://taskfile.dev/) that contains
-several helpful commands to test the plugin in
-a [CNPG development environment](https://github.com/cloudnative-pg/cloudnative-pg/tree/main/contribute/e2e_testing_environment#the-local-kubernetes-cluster-for-testing).
+Enables resource reconciliation and custom Kubernetes resource management:
 
-By executing `task local-kind-deploy`, a container image containing the
-executable of the repository will be built and loaded inside the kind cluster.
+```go
+// From internal/reconciler/
+rpc ReconcilerHook(ReconcilerHookRequest) returns (ReconcilerHookResponse)
+```
 
-Having done that, the wal-replica plugin deployment will be applied.
+**Core Functionality:**
+- **WAL Receiver Deployment**: Creates and manages the `<cluster>-wal-receiver` deployment
+- **PVC Management**: Provisions persistent storage for WAL files
+- **TLS Configuration**: Sets up certificate-based authentication
+- **Resource Lifecycle**: Handles creation, updates, and cleanup with owner references
 
-### CI/CD build
+See [`internal/reconciler/replica.go`](../internal/reconciler/replica.go) for the main implementation.
 
-The repository provides a GitHub Actions workflow that, on pushes, builds a
-container image and generates a manifest file that can be used to deploy the
-plugin. The manifest is attached to the workflow run as an artifact, and can be
-applied to the cluster.
+[CNPG-I Operator API Reference](https://github.com/cloudnative-pg/cnpg-i/blob/main/proto/operator.proto)
+
+## Architecture Deep Dive
+
+### Configuration Management
+
+The plugin uses a layered configuration approach:
+
+```go
+// From internal/config/config.go
+type Configuration struct {
+    Image           string          // Container image for pg_receivewal
+    ReplicationHost string          // Primary cluster endpoint  
+    Synchronous     SynchronousMode // active/inactive replication mode
+    WalDirectory    string          // WAL storage path
+    WalPVCSize      string          // Storage size for PVC
+}
+```
+
+**Configuration Flow:**
+1. Raw parameters from Cluster spec
+2. Validation using `ValidateParams()`
+3. Type conversion via `FromParameters()`
+4. Default application with `ApplyDefaults()`
+
+### Resource Reconciliation
+
+The plugin creates and manages several Kubernetes resources:
+
+#### WAL Receiver Deployment
+
+```yaml
+# Generated deployment structure
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: <cluster>-wal-receiver
+  ownerReferences: [<cluster>]
+spec:
+  containers:
+  - name: wal-receiver
+    image: <configured-image>
+    command: ["/bin/bash", "-c"]
+    args: ["<pg_receivewal-command>"]
+    volumeMounts:
+    - name: wal-storage
+      mountPath: <walDirectory>
+    - name: ca
+      mountPath: /var/lib/postgresql/rootcert
+    - name: tls  
+      mountPath: /var/lib/postgresql/cert
+```
+
+#### pg_receivewal Command Construction
+
+The plugin builds sophisticated `pg_receivewal` commands:
+
+```bash
+# Two-phase execution:
+# 1. Create replication slot (if needed)
+pg_receivewal --slot wal_replica --create-slot --if-not-exists --directory /path/to/wal --dbname "postgres://streaming_replica@host/postgres?sslmode=verify-full&..."
+
+# 2. Continuous WAL streaming  
+pg_receivewal --slot wal_replica --compress 0 --directory /path/to/wal --dbname "postgres://..." [--synchronous] [--verbose]
+```
+
+### Security Implementation
+
+**TLS Configuration:**
+- Uses cluster-managed certificates from CloudNativePG
+- Mounts CA certificate for SSL verification
+- Client certificate authentication for `streaming_replica` user
+- `sslmode=verify-full` for maximum security
+
+**Pod Security:**
+- Runs as PostgreSQL user (`uid: 105, gid: 103`)
+- Proper filesystem permissions (`fsGroup: 103`)
+- Read-only certificate mounts
+
+## Development Environment Setup
+
+### Prerequisites
+
+```bash
+# Required tools
+go 1.24.1+
+docker or podman
+kubectl
+kind (for local testing)
+
+# Required Kubernetes components
+cloudnative-pg operator
+cnpg-i framework
+cert-manager (for TLS)
+```
+
+### Local Development
+
+#### 1. Environment Setup
+
+```bash
+# Clone repository
+git clone https://github.com/documentdb/cnpg-i-wal-replica
+cd cnpg-i-wal-replica
+
+# Install dependencies
+go mod download
+
+# Verify build
+go build -o bin/cnpg-i-wal-replica main.go
+```
+
+#### 2. Code Structure Navigation
+
+```
+├── cmd/plugin/           # CLI interface and gRPC server setup
+│   ├── doc.go           # Package documentation
+│   └── plugin.go        # Main command and service registration
+├── internal/
+│   ├── config/          # Configuration management
+│   │   ├── config.go    # Configuration types and validation
+│   │   └── doc.go       # Package documentation
+│   ├── identity/        # Plugin identity implementation
+│   │   ├── impl.go      # Identity service methods
+│   │   └── doc.go       # Package documentation
+│   ├── k8sclient/       # Kubernetes client utilities
+│   │   ├── k8sclient.go # Client initialization and management
+│   │   └── doc.go       # Package documentation
+│   ├── operator/        # Operator interface implementation
+│   │   ├── impl.go      # Core operator methods
+│   │   ├── mutations.go # Cluster mutation logic
+│   │   ├── status.go    # Status reporting
+│   │   ├── validation.go# Parameter validation
+│   │   └── doc.go       # Package documentation
+│   └── reconciler/      # Resource reconciliation
+│       ├── impl.go      # Reconciler hook implementation
+│       ├── replica.go   # WAL receiver resource management
+│       └── doc.go       # Package documentation
+├── kubernetes/          # Deployment manifests
+└── pkg/metadata/        # Plugin metadata constants
+```
+
+#### 3. Testing Locally
+
+```bash
+# Build and test
+./scripts/build.sh
+
+# Run with debugging
+./scripts/run.sh
+
+# Test configuration parsing
+go test ./internal/config/
+
+# Test reconciliation logic  
+go test ./internal/reconciler/
+```
+
+### Container Development
+
+#### Building Images
+
+```bash
+# Local build
+docker build -t wal-replica-plugin:dev .
+
+# Multi-arch build
+docker buildx build --platform linux/amd64,linux/arm64 -t wal-replica-plugin:latest .
+```
+
+#### Kubernetes Testing
+
+```bash
+# Load into kind cluster
+kind load docker-image wal-replica-plugin:dev
+
+# Apply manifests
+kubectl apply -f kubernetes/
+
+# Deploy test cluster
+kubectl apply -f doc/examples/cluster-example.yaml
+```
+
+## Extending the Plugin
+
+### Adding New Parameters
+
+1. **Define in Configuration**:
+```go
+// internal/config/config.go
+const MyNewParam = "myNewParam"
+
+type Configuration struct {
+    // existing fields...
+    MyNewValue string
+}
+```
+
+2. **Add Validation**:
+```go
+// internal/config/config.go  
+func ValidateParams(helper *common.Plugin) []*operator.ValidationError {
+    // existing validation...
+    
+    if raw, present := helper.Parameters[MyNewParam]; present {
+        // Add validation logic
+    }
+}
+```
+
+3. **Update Reconciliation**:
+```go
+// internal/reconciler/replica.go
+func CreateWalReplica(ctx context.Context, cluster *cnpgv1.Cluster) error {
+    // Use configuration.MyNewValue in resource creation
+}
+```
+
+### Adding Resource Management
+
+```go
+// Example: Adding a Service resource
+func createWalReceiverService(ctx context.Context, cluster *cnpgv1.Cluster) error {
+    service := &corev1.Service{
+        ObjectMeta: metav1.ObjectMeta{
+            Name:      fmt.Sprintf("%s-wal-receiver", cluster.Name),
+            Namespace: cluster.Namespace,
+            OwnerReferences: []metav1.OwnerReference{{
+                APIVersion: cluster.APIVersion,
+                Kind:       cluster.Kind,
+                Name:       cluster.Name,
+                UID:        cluster.UID,
+            }},
+        },
+        Spec: corev1.ServiceSpec{
+            Selector: map[string]string{"app": fmt.Sprintf("%s-wal-receiver", cluster.Name)},
+            Ports: []corev1.ServicePort{{
+                Port:       5432,
+                TargetPort: intstr.FromInt(5432),
+            }},
+        },
+    }
+    
+    return k8sclient.MustGet().Create(ctx, service)
+}
+```
+
+## Debugging and Troubleshooting
+
+### Common Development Issues
+
+1. **gRPC Connection Problems**:
+```bash
+# Check plugin registration
+kubectl logs -l app=cnpg-i-wal-replica
+
+# Verify TLS certificates
+kubectl describe secret <cluster>-ca-secret
+```
+
+2. **Resource Creation Failures**:
+```bash
+# Check reconciler logs
+kubectl logs deployment/<cluster>-wal-receiver
+
+# Verify owner references
+kubectl get deployment <cluster>-wal-receiver -o yaml
+```
+
+3. **Parameter Validation Errors**:
+```bash
+# Check cluster events
+kubectl describe cluster <cluster-name>
+
+# Review validation logs
+kubectl logs -l app=cnpg-operator
+```
+
+### Testing Configurations
+
+```yaml
+# Test with minimal parameters
+spec:
+  plugins:
+  - name: cnpg-i-wal-replica.documentdb.io
+    # No parameters - should use all defaults
+
+# Test with full configuration
+spec:
+  plugins:
+  - name: cnpg-i-wal-replica.documentdb.io
+    parameters:
+      image: "postgres:16"
+      replicationHost: "my-cluster-rw" 
+      synchronous: "active"
+      walDirectory: "/custom/wal/path"
+      walPVCSize: "50Gi"
+```
+
+## CI/CD Integration
+
+### GitHub Actions Workflow
+
+The repository includes automated workflows for:
+
+- **Build Verification**: Compiles plugin for multiple architectures
+- **Container Publishing**: Builds and pushes container images
+- **Manifest Generation**: Creates deployment artifacts
+- **Integration Testing**: Tests against live CloudNativePG clusters
+
+### Deployment Artifacts
+
+Generated manifests include:
+- Plugin deployment with proper RBAC
+- Certificate management for TLS
+- Service definitions for plugin discovery
+- Example cluster configurations
+
+## Contributing Guidelines
+
+### Code Standards
+
+- Follow Go conventions and `gofmt` formatting
+- Add comprehensive unit tests for new functionality
+- Document all public interfaces and complex logic
+- Use structured logging with appropriate levels
+
+### Pull Request Process
+
+1. Fork and create feature branch
+2. Implement changes with tests
+3. Update documentation
+4. Submit PR with detailed description
+5. Address review feedback
+
+### Testing Requirements
+
+- Unit tests for all new configuration parameters
+- Integration tests for resource reconciliation
+- End-to-end testing with real CloudNativePG clusters
+- Performance testing for WAL streaming scenarios
+
+## Future Development Roadmap
+
+### Planned Enhancements
+
+- **Enhanced Monitoring**: Prometheus metrics for WAL streaming
+- **Multi-Zone Support**: Cross-region WAL archival capabilities  
+- **Backup Integration**: Coordination with CloudNativePG backup strategies
+- **Resource Optimization**: Configurable resource requests/limits
+- **Advanced Filtering**: WAL file retention and cleanup policies
+- **Replica Support**: Extension to replica clusters for cascading replication
+
+### API Stability
+
+- Current API is alpha-level with potential breaking changes
+- Plugin interface follows CNPG-I versioning conventions
+- Configuration parameters may evolve based on user feedback
+
+## Resources
+
+- [CloudNativePG Documentation](https://cloudnative-pg.io/)
+- [CNPG-I Framework](https://github.com/cloudnative-pg/cnpg-i)
+- [PostgreSQL WAL Documentation](https://www.postgresql.org/docs/current/wal.html)
+- [Plugin Examples Repository](https://github.com/cloudnative-pg/cnpg-i-examples)

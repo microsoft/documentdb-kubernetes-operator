@@ -16,7 +16,7 @@ var Data = identity.GetPluginMetadataResponse{
 	DisplayName:   "WAL Replica Pod Manager",
 	ProjectUrl:    "https://github.com/documentdb/cnpg-i-wal-replica",
 	RepositoryUrl: "https://github.com/documentdb/cnpg-i-wal-replica",
-	License:       "Proprietary",
+	License:       "MIT",
 	LicenseUrl:    "https://github.com/documentdb/cnpg-i-wal-replica/LICENSE",
 	Maturity:      "alpha",
 }

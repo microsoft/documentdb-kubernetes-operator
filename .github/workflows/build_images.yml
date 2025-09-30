@@ -39,7 +39,7 @@ jobs:
             dockerfile: .github/dockerfiles/Dockerfile_docdb
             context: .
           - name: gateway
-            dockerfile: .github/dockerfiles/Dockerfile_gateway
+            dockerfile: .github/dockerfiles/Dockerfile_gw
             context: .
         include:
           - arch: amd64

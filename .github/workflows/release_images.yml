@@ -19,7 +19,7 @@ on:
       chart_version:
         description: 'Helm chart version to publish'
         required: false
-        default: '0.0.1'
+        default: '0.1.0'
 
 permissions:
   contents: read
@@ -97,7 +97,7 @@ jobs:
         run: |
             CHART_VERSION_INPUT="${{ github.event.inputs.chart_version }}"
             if [[ -z "$CHART_VERSION_INPUT" ]]; then
-              CHART_VERSION_INPUT="0.0.1"
+              CHART_VERSION_INPUT="0.1.0"
             fi
             echo "CHART_VERSION=${CHART_VERSION_INPUT}" >> $GITHUB_ENV
             echo "Using chart version: ${CHART_VERSION_INPUT}"

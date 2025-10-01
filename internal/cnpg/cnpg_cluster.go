@@ -66,7 +66,7 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 						"host replication all all trust",
 					},
 				},
-				Bootstrap: getBootstrapConfiguration(documentdb),
+				Bootstrap: getBootstrapConfiguration(),
 			}
 			spec.MaxStopDelay = getMaxStopDelayOrDefault(documentdb)
 			return spec
@@ -83,13 +83,16 @@ func getInheritedMetadataLabels(documentdb dbpreview.DocumentDB) *cnpgv1.Embedde
 	}
 }
 
-func getBootstrapConfiguration(documentdb dbpreview.DocumentDB) *cnpgv1.BootstrapConfiguration {
+func getBootstrapConfiguration() *cnpgv1.BootstrapConfiguration {
 	return &cnpgv1.BootstrapConfiguration{
 		InitDB: &cnpgv1.BootstrapInitDB{
 			PostInitSQL: []string{
 				"CREATE EXTENSION documentdb CASCADE",
 				"CREATE ROLE documentdb WITH LOGIN PASSWORD 'Admin100'",
 				"ALTER ROLE documentdb WITH SUPERUSER CREATEDB CREATEROLE REPLICATION BYPASSRLS",
+			},
+			PostInitApplicationSQL: []string{
+				"GRANT documentdb_admin_role TO streaming_replica",
 			},
 		},
 	}

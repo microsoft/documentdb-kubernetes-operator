@@ -182,8 +182,11 @@ func (impl Implementation) reconcileMetadata(
 		},
 	}
 
-	// Check if the pod has the label replication_cluster_type=replica
-	if mutatedPod.Labels["replication_cluster_type"] == "replica" {
+	// Check if the pod has the label replication_cluster_type=replica or is not a primary by CNPG instanceRole
+	instanceRole := mutatedPod.Labels["cnpg.io/instanceRole"]
+	isLocalReplica := instanceRole == "replica"
+
+	if mutatedPod.Labels["replication_cluster_type"] == "replica" || isLocalReplica {
 		sidecar.Args = []string{"--create-user", "false", "--start-pg", "false", "--pg-port", "5432"}
 	} else {
 		sidecar.Args = []string{"--create-user", "true", "--start-pg", "false", "--pg-port", "5432"}

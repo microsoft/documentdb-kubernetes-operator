@@ -14,9 +14,9 @@ type DocumentDBSpec struct {
 	// +kubebuilder:validation:Maximum=1
 	NodeCount int `json:"nodeCount"`
 
-	// InstancesPerNode is the number of DocumentDB instances per node. Must be 1.
+	// InstancesPerNode is the number of DocumentDB instances per node. Range: 1-3.
 	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=1
+	// +kubebuilder:validation:Maximum=3
 	InstancesPerNode int `json:"instancesPerNode"`
 
 	// Resource specifies the storage resources for DocumentDB.

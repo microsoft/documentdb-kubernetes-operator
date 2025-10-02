@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -21,18 +22,14 @@ const (
 	documentDBGVRGroup    = "db.microsoft.com"
 	documentDBGVRVersion  = "preview"
 	documentDBGVRResource = "documentdbs"
-
-	cnpgGroup    = "postgresql.cnpg.io"
-	cnpgVersion  = "v1"
-	cnpgResource = "clusters"
 )
 
 type promoteOptions struct {
 	documentDBName string
 	namespace      string
+	hubContext     string
 	targetCluster  string
 	targetContext  string
-	cnpgCluster    string
 	skipWait       bool
 	waitTimeout    time.Duration
 	pollInterval   time.Duration
@@ -54,9 +51,9 @@ func newPromoteCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&opts.documentDBName, "documentdb", opts.documentDBName, "Name of the DocumentDB resource to promote")
 	cmd.Flags().StringVarP(&opts.namespace, "namespace", "n", "default", "Namespace containing the DocumentDB resource")
+	cmd.Flags().StringVar(&opts.hubContext, "hub-context", opts.hubContext, "Kubeconfig context for the fleet hub (defaults to current context)")
 	cmd.Flags().StringVar(&opts.targetCluster, "target-cluster", opts.targetCluster, "Name of the cluster that should become primary (required)")
-	cmd.Flags().StringVar(&opts.targetContext, "cluster-context", opts.targetContext, "Kubeconfig context for checking the CNPG cluster status (defaults to current context)")
-	cmd.Flags().StringVar(&opts.cnpgCluster, "cluster-name", opts.cnpgCluster, "CNPG Cluster resource name to inspect (defaults to DocumentDB name)")
+	cmd.Flags().StringVar(&opts.targetContext, "cluster-context", opts.targetContext, "Kubeconfig context for verifying member status (defaults to current context)")
 	cmd.Flags().BoolVar(&opts.skipWait, "skip-wait", opts.skipWait, "Return immediately after submitting the promotion request")
 	cmd.Flags().DurationVar(&opts.waitTimeout, "wait-timeout", 10*time.Minute, "Maximum time to wait for the promotion to complete")
 	cmd.Flags().DurationVar(&opts.pollInterval, "poll-interval", 10*time.Second, "Polling interval while waiting for the promotion to complete")
@@ -68,9 +65,6 @@ func newPromoteCommand() *cobra.Command {
 }
 
 func (o *promoteOptions) complete() error {
-	if o.cnpgCluster == "" {
-		o.cnpgCluster = o.documentDBName
-	}
 	if o.waitTimeout <= 0 {
 		o.waitTimeout = 10 * time.Minute
 	}
@@ -83,15 +77,15 @@ func (o *promoteOptions) complete() error {
 func (o *promoteOptions) run(ctx context.Context, cmd *cobra.Command) error {
 	cmd.PrintErrln("Starting DocumentDB promotion workflow...")
 
-	hubConfig, hubContextName, err := loadConfig("")
+	hubConfig, hubContextName, err := loadConfig(o.hubContext)
 	if err != nil {
 		return fmt.Errorf("failed to load hub kubeconfig: %w", err)
 	}
-	if hubContextName == "" {
-		hubContextName = "(current)"
-	}
 	if o.targetContext == "" {
 		o.targetContext = hubContextName
+	}
+	if hubContextName == "" {
+		hubContextName = "(current)"
 	}
 
 	dynHub, err := dynamic.NewForConfig(hubConfig)
@@ -121,9 +115,9 @@ func (o *promoteOptions) run(ctx context.Context, cmd *cobra.Command) error {
 		return fmt.Errorf("failed to create target dynamic client: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Waiting for CNPG cluster %q in namespace %q (context %q) to switch primary to %q...\n", o.cnpgCluster, o.namespace, targetContextName, o.targetCluster)
+	fmt.Fprintf(cmd.OutOrStdout(), "Waiting for DocumentDB replication to converge (hub context %q, target context %q)...\n", hubContextName, targetContextName)
 
-	if err := o.waitForPromotion(ctx, dynTarget); err != nil {
+	if err := o.waitForPromotion(ctx, dynHub, dynTarget); err != nil {
 		return err
 	}
 
@@ -155,43 +149,39 @@ func (o *promoteOptions) patchDocumentDB(ctx context.Context, dyn dynamic.Interf
 	return nil
 }
 
-func (o *promoteOptions) waitForPromotion(ctx context.Context, dyn dynamic.Interface) error {
+func (o *promoteOptions) waitForPromotion(ctx context.Context, dynHub, dynTarget dynamic.Interface) error {
 	ctx, cancel := context.WithTimeout(ctx, o.waitTimeout)
 	defer cancel()
 
 	ticker := time.NewTicker(o.pollInterval)
 	defer ticker.Stop()
 
-	gvr := schema.GroupVersionResource{Group: cnpgGroup, Version: cnpgVersion, Resource: cnpgResource}
+	gvr := schema.GroupVersionResource{Group: documentDBGVRGroup, Version: documentDBGVRVersion, Resource: documentDBGVRResource}
 
 	for {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("timed out waiting for promotion to complete after %s", o.waitTimeout)
 		case <-ticker.C:
-			cluster, err := dyn.Resource(gvr).Namespace(o.namespace).Get(ctx, o.cnpgCluster, metav1.GetOptions{})
+			docHub, err := dynHub.Resource(gvr).Namespace(o.namespace).Get(ctx, o.documentDBName, metav1.GetOptions{})
 			if err != nil {
-				if apierrors.IsNotFound(err) {
+				return fmt.Errorf("failed to get DocumentDB %q from hub context: %w", o.documentDBName, err)
+			}
+			if !isDocumentReady(docHub, o.targetCluster) {
+				continue
+			}
+
+			if dynTarget != nil {
+				docTarget, err := dynTarget.Resource(gvr).Namespace(o.namespace).Get(ctx, o.documentDBName, metav1.GetOptions{})
+				if err != nil {
+					if apierrors.IsNotFound(err) {
+						continue
+					}
+					return fmt.Errorf("failed to get DocumentDB %q from target context: %w", o.documentDBName, err)
+				}
+				if !isDocumentReady(docTarget, o.targetCluster) {
 					continue
 				}
-				return fmt.Errorf("failed to get CNPG cluster %q: %w", o.cnpgCluster, err)
-			}
-
-			primary, _, err := unstructured.NestedString(cluster.Object, "spec", "replica", "primaryCluster")
-			if err != nil {
-				return fmt.Errorf("failed to parse primaryCluster from CNPG cluster: %w", err)
-			}
-			phase, _, err := unstructured.NestedString(cluster.Object, "status", "phase")
-			if err != nil {
-				return fmt.Errorf("failed to parse phase from CNPG cluster: %w", err)
-			}
-
-			if primary != o.targetCluster {
-				continue
-			}
-
-			if !isHealthyPhase(phase) {
-				continue
 			}
 
 			return nil
@@ -199,13 +189,43 @@ func (o *promoteOptions) waitForPromotion(ctx context.Context, dyn dynamic.Inter
 	}
 }
 
-func isHealthyPhase(phase string) bool {
-	switch phase {
-	case "Healthy", "Ready", "Running":
-		return true
-	default:
+func isDocumentReady(doc *unstructured.Unstructured, targetCluster string) bool {
+	if doc == nil {
 		return false
 	}
+
+	primary, _, err := unstructured.NestedString(doc.Object, "spec", "clusterReplication", "primary")
+	if err != nil || primary != targetCluster {
+		return false
+	}
+
+	phase, found, err := unstructured.NestedString(doc.Object, "status", "status")
+	if err != nil {
+		return false
+	}
+	if !found || strings.TrimSpace(phase) == "" {
+		return true
+	}
+
+	return isHealthyPhase(phase)
+}
+
+func isHealthyPhase(phase string) bool {
+	phase = strings.ToLower(strings.TrimSpace(phase))
+	if phase == "" {
+		return true
+	}
+
+	switch phase {
+	case "healthy", "ready", "running", "succeeded":
+		return true
+	}
+
+	if strings.Contains(phase, "healthy") || strings.Contains(phase, "ready") {
+		return true
+	}
+
+	return false
 }
 
 func loadConfig(contextName string) (*rest.Config, string, error) {
@@ -225,6 +245,13 @@ func loadConfig(contextName string) (*rest.Config, string, error) {
 	rawConfig, err := clientConfig.RawConfig()
 	if err != nil {
 		return restConfig, "", err
+	}
+
+	if contextName != "" {
+		if _, ok := rawConfig.Contexts[contextName]; !ok {
+			return nil, "", fmt.Errorf("kubeconfig context %q not found", contextName)
+		}
+		return restConfig, contextName, nil
 	}
 
 	return restConfig, rawConfig.CurrentContext, nil

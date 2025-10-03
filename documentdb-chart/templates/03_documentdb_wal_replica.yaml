@@ -1,0 +1,174 @@
+{{- if .Values.walReplica }}
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: wal-replica
+    cnpg.io/pluginName: cnpg-i-wal-replica.documentdb.io
+  annotations:
+    cnpg.io/pluginClientSecret: walreplica-client-tls
+    cnpg.io/pluginServerSecret: walreplica-server-tls
+    cnpg.io/pluginPort: "9090"
+  name: wal-replica
+  namespace: cnpg-system
+spec:
+  ports:
+  - port: 9090
+    protocol: TCP
+    targetPort: 9090
+  selector:
+    app: wal-replica
+
+---
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: walreplica-client
+  namespace: cnpg-system
+spec:
+  secretName: walreplica-client-tls
+  commonName: "walreplica-client"
+  duration: 2160h # 90d
+  renewBefore: 360h # 15d
+
+  isCA: false
+  usages:
+    - client auth
+
+  issuerRef:
+    name: selfsigned-issuer
+    kind: Issuer
+    group: cert-manager.io
+
+---
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: walreplica-server
+  namespace: cnpg-system
+spec:
+  secretName: walreplica-server-tls
+  commonName: "wal-replica"
+  dnsNames:
+    - wal-replica
+
+  duration: 2160h # 90d
+  renewBefore: 360h # 15d
+
+  isCA: false
+  usages:
+    - server auth
+
+  issuerRef:
+    name: selfsigned-issuer
+    kind: Issuer
+    group: cert-manager.io
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: wal-replica
+  name: wal-replica
+  namespace: cnpg-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wal-replica
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: wal-replica
+    spec:
+      serviceAccountName: wal-replica-manager
+      containers:
+      - image: "{{ .Values.image.walreplica.repository }}:{{ .Values.image.walreplica.tag }}"  
+        name: cnpg-i-wal-replica
+        ports:
+        - containerPort: 9090
+          protocol: TCP
+        args:
+        - receivewal
+        - --server-cert=/server/tls.crt
+        - --server-key=/server/tls.key
+        - --client-cert=/client/tls.crt
+        - --server-address=:9090
+        volumeMounts:
+        - mountPath: /server
+          name: server
+        - mountPath: /client
+          name: client
+        resources: {}
+      volumes:
+      - name: server
+        secret:
+          secretName: walreplica-server-tls
+      - name: client
+        secret:
+          secretName: walreplica-client-tls
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/name: wal-replia-manager
+    app.kubernetes.io/managed-by: kustomize
+  name: wal-replica-manager-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: wal-replica-manager
+subjects:
+- kind: ServiceAccount
+  name: wal-replica-manager
+  namespace: cnpg-system
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wal-replica-manager
+rules: # TODO trim this down to what's actually needed
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["services", "pods", "endpoints", "leases", "serviceaccounts", "configmaps", "namespaces"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["roles", "rolebindings"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["secrets", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["postgresql.cnpg.io"]
+  resources: ["clusters", "publications", "subscriptions"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: wal-replica-manager
+  namespace: cnpg-system
+  labels:
+    app.kubernetes.io/name: wal-replia-manager
+    app.kubernetes.io/managed-by: kustomize
+{{- end }}

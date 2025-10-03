@@ -168,7 +168,9 @@ func generateServiceName(source, target, resourceGroup string) string {
 func (r *ReplicationContext) CreateStandbyNamesList() []string {
 	standbyNames := make([]string, len(r.Others)+1)
 	copy(standbyNames, r.Others)
+	/* TODO re-enable when we have a WAL replica image
 	standbyNames[len(r.Others)] = "pg_receivewal"
+	*/
 	return standbyNames
 }
 

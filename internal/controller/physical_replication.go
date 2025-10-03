@@ -76,10 +76,12 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 		if walReplicaPluginName == "" {
 			walReplicaPluginName = util.DEFAULT_WAL_REPLICA_PLUGIN
 		}
+		/* TODO re-enable when we have a WAL replica image
 		cnpgCluster.Spec.Plugins = append(cnpgCluster.Spec.Plugins,
 			cnpgv1.PluginConfiguration{
 				Name: walReplicaPluginName,
 			})
+		*/
 	}
 
 	cnpgCluster.Spec.ReplicaCluster = &cnpgv1.ReplicaClusterConfiguration{

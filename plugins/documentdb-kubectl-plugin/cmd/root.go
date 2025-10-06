@@ -26,4 +26,5 @@ func Execute() {
 func init() {
 	rootCmd.AddCommand(newPromoteCommand())
 	rootCmd.AddCommand(newStatusCommand())
+	rootCmd.AddCommand(newEventsCommand())
 }

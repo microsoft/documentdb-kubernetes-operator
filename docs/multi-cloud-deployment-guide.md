@@ -62,10 +62,10 @@ https://github.com/Azure/fleet/blob/main/docs/tutorials/Azure/JoinOnPremClusters
 
 ```bash
 # Add the hub to your kubectl config file
-az fleet get-credentials --resource-group fleet-resource-group --name fleet-hub-name
+az fleet get-credentials --resource-group documentdb-aks100201-rg --name guanzhou-fleet-100201
 
 # This needs to match the member cluster name in your kubectl config file
-clusterName="your-on-prem-cluster-name"
+clusterName="documentdb-aks100201"
 
 git clone https://github.com/kubefleet-dev/kubefleet.git
 cd kubefleet

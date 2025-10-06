@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
@@ -187,45 +185,6 @@ func (o *promoteOptions) waitForPromotion(ctx context.Context, dynHub, dynTarget
 			return nil
 		}
 	}
-}
-
-func isDocumentReady(doc *unstructured.Unstructured, targetCluster string) bool {
-	if doc == nil {
-		return false
-	}
-
-	primary, _, err := unstructured.NestedString(doc.Object, "spec", "clusterReplication", "primary")
-	if err != nil || primary != targetCluster {
-		return false
-	}
-
-	phase, found, err := unstructured.NestedString(doc.Object, "status", "status")
-	if err != nil {
-		return false
-	}
-	if !found || strings.TrimSpace(phase) == "" {
-		return true
-	}
-
-	return isHealthyPhase(phase)
-}
-
-func isHealthyPhase(phase string) bool {
-	phase = strings.ToLower(strings.TrimSpace(phase))
-	if phase == "" {
-		return true
-	}
-
-	switch phase {
-	case "healthy", "ready", "running", "succeeded":
-		return true
-	}
-
-	if strings.Contains(phase, "healthy") || strings.Contains(phase, "ready") {
-		return true
-	}
-
-	return false
 }
 
 func loadConfig(contextName string) (*rest.Config, string, error) {

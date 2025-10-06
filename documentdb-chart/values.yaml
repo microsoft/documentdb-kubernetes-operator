@@ -1,26 +1,22 @@
 namespace: documentdb-operator
 replicaCount: 1
-
-# DocumentDB version - global default for all components when individual tags are not set
-# Priority: individual component tag > documentDbVersion > Chart.appVersion
-# Defaults to Chart.appVersion if not specified  
-documentDbVersion: ""
-
 serviceAccount:
   create: true
   automount: true
   annotations: {}
   name: "documentdb-operator"
-  
 image:
   documentdbk8soperator:
-    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/operator
+    repository: ghcr.io/alaye-ms/documentdb-kubernetes-operator/operator
     pullPolicy: Always
-    tag: preview
+    tag: latest
   sidecarinjector:
-    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/sidecar
+    repository: ghcr.io/alaye-ms/documentdb-kubernetes-operator/sidecar
     pullPolicy: Always
-    tag: preview
-    
+    tag: latest
+  walreplica:
+    repository: ghcr.io/alaye-ms/documentdb-kubernetes-operator/wal-replica
+    pullPolicy: Always
+    tag: latest
 cloudnative-pg:
   namespaceOverride: cnpg-system

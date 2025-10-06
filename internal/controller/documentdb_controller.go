@@ -177,7 +177,6 @@ func (r *DocumentDBReconciler) cleanupResources(ctx context.Context, req ctrl.Re
 		return err
 	}
 
-	// TODO: clean up backups associated with this DocumentDB instance
 	return nil
 }
 

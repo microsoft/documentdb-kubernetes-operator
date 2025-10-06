@@ -5,7 +5,6 @@ package cnpg
 
 import (
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -35,12 +34,11 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 			Namespace: req.Namespace,
 		},
 		Spec: func() cnpgv1.ClusterSpec {
-			storageClass := "default"
 			spec := cnpgv1.ClusterSpec{
 				Instances: documentdb.Spec.InstancesPerNode,
 				ImageName: documentdb_image,
 				StorageConfiguration: cnpgv1.StorageConfiguration{
-					StorageClass: &storageClass,
+					StorageClass: nil,
 					Size:         documentdb.Spec.Resource.PvcSize,
 				},
 				InheritedMetadata: getInheritedMetadataLabels(documentdb),
@@ -68,10 +66,10 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 						"host replication all all trust",
 					},
 				},
-				Bootstrap: getBootstrapConfiguration(documentdb),
+				Bootstrap: getBootstrapConfiguration(documentdb, log),
 				Backup: &cnpgv1.BackupConfiguration{
 					VolumeSnapshot: &cnpgv1.VolumeSnapshotConfiguration{
-						ClassName: "azure-disk-snapclass",
+						ClassName: "azure-disk-snapclass", // TODO: Make this configurable or detect automatically
 					},
 					Target: cnpgv1.BackupTarget("primary"),
 				},
@@ -91,29 +89,27 @@ func getInheritedMetadataLabels(documentdb dbpreview.DocumentDB) *cnpgv1.Embedde
 	}
 }
 
-func getBootstrapConfiguration(documentdb dbpreview.DocumentDB) *cnpgv1.BootstrapConfiguration {
-	// Log the restore choice
-
-	log.Info("Restoring DocumentDB from backup", "backupName", documentdb.Spec.RestoreFromBackup)
-
-	if documentdb.Spec.RestoreFromBackup != "" {
+func getBootstrapConfiguration(documentdb dbpreview.DocumentDB, log logr.Logger) *cnpgv1.BootstrapConfiguration {
+	if documentdb.Spec.Bootstrap != nil && documentdb.Spec.Bootstrap.Recovery != nil && documentdb.Spec.Bootstrap.Recovery.Backup.Name != "" {
+		backupName := documentdb.Spec.Bootstrap.Recovery.Backup.Name
+		log.Info("DocumentDB cluster will be bootstrapped from backup", "backupName", backupName)
 		return &cnpgv1.BootstrapConfiguration{
 			Recovery: &cnpgv1.BootstrapRecovery{
 				Backup: &cnpgv1.BackupSource{
-					LocalObjectReference: cnpgv1.LocalObjectReference{Name: documentdb.Spec.RestoreFromBackup},
+					LocalObjectReference: cnpgv1.LocalObjectReference{Name: backupName},
 				},
 			},
 		}
-	} else {
-		return &cnpgv1.BootstrapConfiguration{
-			InitDB: &cnpgv1.BootstrapInitDB{
-				PostInitSQL: []string{
-					"CREATE EXTENSION documentdb CASCADE",
-					"CREATE ROLE documentdb WITH LOGIN PASSWORD 'Admin100'",
-					"ALTER ROLE documentdb WITH SUPERUSER CREATEDB CREATEROLE REPLICATION BYPASSRLS",
-				},
+	}
+
+	return &cnpgv1.BootstrapConfiguration{
+		InitDB: &cnpgv1.BootstrapInitDB{
+			PostInitSQL: []string{
+				"CREATE EXTENSION documentdb CASCADE",
+				"CREATE ROLE documentdb WITH LOGIN PASSWORD 'Admin100'",
+				"ALTER ROLE documentdb WITH SUPERUSER CREATEDB CREATEROLE REPLICATION BYPASSRLS",
 			},
-		}
+		},
 	}
 }
 

@@ -4,26 +4,20 @@
 package preview
 
 import (
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
-
-// LocalObjectReference contains enough information to let you locate the
-// referenced object inside the same namespace.
-type LocalObjectReference struct {
-	// Name of the referent.
-	Name string `json:"name"`
-}
 
 // BackupSpec defines the desired state of Backup.
 type BackupSpec struct {
 	// Cluster specifies the DocumentDB cluster to backup.
-	Cluster LocalObjectReference `json:"cluster"`
+	Cluster cnpgv1.LocalObjectReference `json:"cluster"`
 }
 
 // BackupStatus defines the observed state of Backup.
 type BackupStatus struct {
 	// Phase represents the current phase of the backup operation.
-	Phase string `json:"phase,omitempty"`
+	Phase cnpgv1.BackupPhase `json:"phase,omitempty"`
 
 	// StartedAt is the time when the backup operation started.
 	// +optional

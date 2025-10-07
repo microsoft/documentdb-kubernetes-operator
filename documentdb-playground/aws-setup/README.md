@@ -5,7 +5,7 @@ Simple automation scripts for deploying DocumentDB operator on AWS EKS.
 ## Prerequisites
 
 - AWS CLI configured: `aws configure`
-- Required tools: `aws`, `eksctl`, `kubectl`, `helm`
+- Required tools: `aws`, `eksctl`, `kubectl`, `helm`, `jq`
 - **For operator installation**: GitHub account with access to microsoft/documentdb-operator
 
 ### GitHub Authentication (Required for Operator)
@@ -27,11 +27,42 @@ To install the DocumentDB operator, you need GitHub Container Registry access:
 ## Quick Start
 
 ```bash
-# Create EKS cluster (basic setup - ~$140/month)
-./scripts/create-cluster.sh
+# Create EKS cluster with DocumentDB (includes public IP LoadBalancer)
+export GITHUB_USERNAME="your-github-username"
+export GITHUB_TOKEN="ghp_xxxxxxxxxxxxxxxxxxxx"
+./scripts/create-cluster.sh --deploy-instance
 
 # Delete cluster when done (avoid charges)
 ./scripts/delete-cluster.sh
+
+# OR keep cluster and delete DocumentDB components
+./scripts/delete-cluster.sh --instance-and-operator
+```
+
+## Load Balancer Configuration
+
+The DocumentDB service is automatically configured with these annotations for public IP access:
+
+```yaml
+serviceAnnotations:
+  service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+  service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+  service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+  service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
+```
+
+**Note**: It takes 2-5 minutes for AWS to provision the Network Load Balancer and assign a public IP.
+
+### Manual Service Patching
+
+If you need to manually add LoadBalancer annotations to an existing DocumentDB service:
+
+```bash
+# Auto-detect and patch DocumentDB service
+./scripts/patch-documentdb-service.sh
+
+# Patch specific service
+./scripts/patch-documentdb-service.sh --service-name my-documentdb-svc --namespace my-namespace
 ```
 
 ## Script Options
@@ -67,8 +98,14 @@ export GITHUB_TOKEN="your-token"
 
 ### delete-cluster.sh
 ```bash
-# Basic usage
+# Delete everything (default)
 ./scripts/delete-cluster.sh
+
+# Delete only DocumentDB instances (keep operator and cluster)
+./scripts/delete-cluster.sh --instance-only
+
+# Delete instances and operator (keep cluster)
+./scripts/delete-cluster.sh --instance-and-operator
 
 # Custom configuration  
 ./scripts/delete-cluster.sh --cluster-name my-cluster --region us-east-1
@@ -80,6 +117,14 @@ export GITHUB_TOKEN="your-token"
 **Available options:**
 - `--cluster-name NAME` - EKS cluster name (default: documentdb-cluster)
 - `--region REGION` - AWS region (default: us-west-2)
+- `--instance-only` - Delete only DocumentDB instances
+- `--instance-and-operator` - Delete instances and operator (keep cluster)
+
+**Common scenarios:**
+- **Default**: Delete everything (instances + operator + cluster)
+- **Cost optimization**: Use `--instance-and-operator` to preserve expensive EKS setup
+- **Testing instances**: Use `--instance-only` to test deployments without recreating operator
+- **Operator upgrades**: Use `--instance-and-operator` to reinstall operator without losing cluster
 
 ## What Gets Created
 

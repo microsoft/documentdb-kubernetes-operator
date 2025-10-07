@@ -52,6 +52,11 @@ type DocumentDBSpec struct {
 	// This can be a LoadBalancer or ClusterIP service.
 	ExposeViaService ExposeViaService `json:"exposeViaService,omitempty"`
 
+	// Environment specifies the cloud environment for deployment
+	// This determines cloud-specific service annotations for LoadBalancer services
+	// +kubebuilder:validation:Enum=eks;aks;gke
+	Environment string `json:"environment,omitempty"`
+
 	Timeouts Timeouts `json:"timeouts,omitempty"`
 }
 

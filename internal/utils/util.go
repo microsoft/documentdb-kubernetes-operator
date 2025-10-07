@@ -37,10 +37,21 @@ func DeleteService(ctx context.Context, c client.Client, serviceName, namespace 
 
 // GetDocumentDBServiceDefinition returns the LoadBalancer Service definition for a given DocumentDB instance
 func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, namespace string, serviceType corev1.ServiceType) *corev1.Service {
-	return &corev1.Service{
+	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      DOCUMENTDB_SERVICE_PREFIX + documentdb.Name, // Unique service name
 			Namespace: namespace,
+			// CRITICAL: Set owner reference so service gets deleted when DocumentDB instance is deleted
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         documentdb.APIVersion,
+					Kind:               documentdb.Kind,
+					Name:               documentdb.Name,
+					UID:                documentdb.UID,
+					Controller:         &[]bool{true}[0], // This service is controlled by the DocumentDB instance
+					BlockOwnerDeletion: &[]bool{true}[0], // Block DocumentDB deletion until service is deleted
+				},
+			},
 		},
 		Spec: corev1.ServiceSpec{
 			Selector: map[string]string{
@@ -52,6 +63,40 @@ func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, namespace 
 			},
 			Type: serviceType,
 		},
+	}
+
+	// Add environment-specific annotations for LoadBalancer services
+	if serviceType == corev1.ServiceTypeLoadBalancer {
+		service.ObjectMeta.Annotations = getEnvironmentSpecificAnnotations(documentdb.Spec.Environment)
+	}
+
+	return service
+}
+
+// getEnvironmentSpecificAnnotations returns the appropriate service annotations based on the environment
+func getEnvironmentSpecificAnnotations(environment string) map[string]string {
+	switch environment {
+	case "eks":
+		// AWS EKS specific annotations for Network Load Balancer
+		return map[string]string{
+			"service.beta.kubernetes.io/aws-load-balancer-type":                              "nlb",
+			"service.beta.kubernetes.io/aws-load-balancer-scheme":                            "internet-facing",
+			"service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled": "true",
+			"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type":                   "ip",
+		}
+	case "aks":
+		// Azure AKS specific annotations for Load Balancer
+		return map[string]string{
+			"service.beta.kubernetes.io/azure-load-balancer-external": "true",
+		}
+	case "gke":
+		// Google GKE specific annotations for Load Balancer
+		return map[string]string{
+			"cloud.google.com/load-balancer-type": "External",
+		}
+	default:
+		// No specific annotations for unspecified or unknown environments
+		return map[string]string{}
 	}
 }
 
@@ -69,16 +114,24 @@ func EnsureServiceIP(ctx context.Context, service *corev1.Service) (string, erro
 		return "", fmt.Errorf("ClusterIP not assigned")
 	}
 
-	// For LoadBalancer services, wait for external IP to be assigned
+	// For LoadBalancer services, wait for external IP or hostname to be assigned
 	if service.Spec.Type == corev1.ServiceTypeLoadBalancer {
 		retries := 5
 		for i := 0; i < retries; i++ {
-			if len(service.Status.LoadBalancer.Ingress) > 0 && service.Status.LoadBalancer.Ingress[0].IP != "" {
-				return service.Status.LoadBalancer.Ingress[0].IP, nil
+			if len(service.Status.LoadBalancer.Ingress) > 0 {
+				ingress := service.Status.LoadBalancer.Ingress[0]
+				// Check for IP address first (some cloud providers provide IPs)
+				if ingress.IP != "" {
+					return ingress.IP, nil
+				}
+				// Check for hostname (AWS NLB provides hostnames)
+				if ingress.Hostname != "" {
+					return ingress.Hostname, nil
+				}
 			}
 			time.Sleep(time.Second * 10)
 		}
-		return "", fmt.Errorf("LoadBalancer IP not assigned after %d retries", retries)
+		return "", fmt.Errorf("LoadBalancer IP/hostname not assigned after %d retries", retries)
 	}
 
 	return "", fmt.Errorf("unsupported service type: %s", service.Spec.Type)

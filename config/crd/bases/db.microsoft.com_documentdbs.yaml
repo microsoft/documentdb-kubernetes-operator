@@ -87,6 +87,15 @@ spec:
                   for the DocumentDB gateway (expects keys `username` and `password`). If omitted,
                   a default secret name `documentdb-credentials` is used.
                 type: string
+              environment:
+                description: |-
+                  Environment specifies the cloud environment for deployment
+                  This determines cloud-specific service annotations for LoadBalancer services
+                enum:
+                - eks
+                - aks
+                - gke
+                type: string
               exposeViaService:
                 description: |-
                   ExposeViaService configures how to expose DocumentDB via a Kubernetes service.

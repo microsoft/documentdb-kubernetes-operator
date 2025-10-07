@@ -205,34 +205,79 @@ install_load_balancer_controller() {
         return 0
     fi
     
-    # Download IAM policy
-    curl -o /tmp/iam_policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.7.2/docs/install/iam_policy.json
+    # Get VPC ID for the cluster
+    VPC_ID=$(aws eks describe-cluster --name $CLUSTER_NAME --region $REGION --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+    log "Using VPC ID: $VPC_ID"
     
-    # Create IAM policy
+    # Verify subnet tags for Load Balancer Controller
+    log "Verifying subnet tags for Load Balancer Controller..."
+    PUBLIC_SUBNETS=$(aws ec2 describe-subnets \
+        --filters "Name=vpc-id,Values=$VPC_ID" "Name=map-public-ip-on-launch,Values=true" \
+        --query 'Subnets[].SubnetId' --output text --region $REGION)
+    
+    PRIVATE_SUBNETS=$(aws ec2 describe-subnets \
+        --filters "Name=vpc-id,Values=$VPC_ID" "Name=map-public-ip-on-launch,Values=false" \
+        --query 'Subnets[].SubnetId' --output text --region $REGION)
+    
+    # Tag public subnets for internet-facing load balancers
+    if [ -n "$PUBLIC_SUBNETS" ]; then
+        log "Tagging public subnets for internet-facing load balancers..."
+        for subnet in $PUBLIC_SUBNETS; do
+            aws ec2 create-tags --resources "$subnet" --tags Key=kubernetes.io/role/elb,Value=1 --region $REGION 2>/dev/null || true
+            log "Tagged public subnet: $subnet"
+        done
+    fi
+    
+    # Tag private subnets for internal load balancers
+    if [ -n "$PRIVATE_SUBNETS" ]; then
+        log "Tagging private subnets for internal load balancers..."
+        for subnet in $PRIVATE_SUBNETS; do
+            aws ec2 create-tags --resources "$subnet" --tags Key=kubernetes.io/role/internal-elb,Value=1 --region $REGION 2>/dev/null || true
+            log "Tagged private subnet: $subnet"
+        done
+    fi
+    
+    # Download the official IAM policy (latest version)
+    log "Downloading AWS Load Balancer Controller IAM policy (latest version)..."
+    curl -o /tmp/iam_policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
+    
+    # Delete existing policy if it exists to ensure we get the latest version
+    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+    log "Updating IAM policy to latest version..."
+    aws iam delete-policy --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy 2>/dev/null || true
+    
+    # Create IAM policy with latest permissions
     aws iam create-policy \
         --policy-name AWSLoadBalancerControllerIAMPolicy \
-        --policy-document file:///tmp/iam_policy.json 2>/dev/null || true
+        --policy-document file:///tmp/iam_policy.json
     
-    # Create service account
+    # Wait a moment for policy to be available
+    sleep 5
+    
+    # Create IAM service account with proper permissions using eksctl
+    log "Creating IAM service account with proper permissions..."
     eksctl create iamserviceaccount \
-        --cluster $CLUSTER_NAME \
-        --namespace kube-system \
-        --name aws-load-balancer-controller \
-        --attach-policy-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/AWSLoadBalancerControllerIAMPolicy \
+        --cluster=$CLUSTER_NAME \
+        --namespace=kube-system \
+        --name=aws-load-balancer-controller \
+        --role-name "AmazonEKSLoadBalancerControllerRole-$CLUSTER_NAME" \
+        --attach-policy-arn=arn:aws:iam::$ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy \
         --approve \
-        --region $REGION
+        --override-existing-serviceaccounts \
+        --region=$REGION
     
     # Add EKS Helm repository
     helm repo add eks https://aws.github.io/eks-charts
-    helm repo update
+    helm repo update eks
     
-    # Install Load Balancer Controller
+    # Install Load Balancer Controller using the existing service account
     helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
         -n kube-system \
         --set clusterName=$CLUSTER_NAME \
         --set serviceAccount.create=false \
         --set serviceAccount.name=aws-load-balancer-controller \
-        --set region=$REGION
+        --set region=$REGION \
+        --set vpcId=$VPC_ID
     
     # Wait for Load Balancer Controller to be ready
     log "Waiting for Load Balancer Controller to be ready..."
@@ -358,7 +403,7 @@ Then run the script again with --install-operator"
     log "Pulling and installing DocumentDB operator from ghcr.io/microsoft/documentdb-operator..."
     helm install documentdb-operator \
         oci://ghcr.io/microsoft/documentdb-operator \
-        --version 0.0.1 \
+        --version 0.1.0 \
         --namespace documentdb-operator \
         --create-namespace \
         --wait \
@@ -392,41 +437,45 @@ deploy_documentdb_instance() {
         error "DocumentDB operator not found. Cannot deploy instance without operator."
     fi
     
+    # Create DocumentDB namespace
+    kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: documentdb-instance-ns
+EOF
+    
     # Create credentials secret
     kubectl apply -f - <<EOF
 apiVersion: v1
 kind: Secret
 metadata:
   name: documentdb-credentials
-  namespace: default
+  namespace: documentdb-instance-ns
 type: Opaque
-data:
-  username: $(echo -n "docdbadmin" | base64)
-  password: $(echo -n "SecurePassword123!" | base64)
+stringData:
+  username: docdbadmin
+  password: SecurePassword123!
 EOF
     
     # Deploy DocumentDB instance
     kubectl apply -f - <<EOF
-apiVersion: db.microsoft.com/v1alpha1
+apiVersion: db.microsoft.com/preview
 kind: DocumentDB
 metadata:
   name: sample-documentdb
-  namespace: default
+  namespace: documentdb-instance-ns
 spec:
-  replicas: 1
-  resources:
-    requests:
-      memory: "1Gi"
-      cpu: "500m"
-    limits:
-      memory: "2Gi"
-      cpu: "1000m"
-  storage:
-    size: "10Gi"
-    storageClass: "documentdb-storage"
-  auth:
-    secretRef:
-      name: "documentdb-credentials"
+  nodeCount: 1
+  instancesPerNode: 1
+  documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+  gatewayImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+  documentDbCredentialSecret: documentdb-credentials
+  resource:
+    pvcSize: 10Gi
+  exposeViaService:
+    serviceType: LoadBalancer
+  sidecarInjectorPluginName: cnpg-i-sidecar-injector.documentdb.io
 EOF
     
     # Wait for DocumentDB to be ready
@@ -435,9 +484,31 @@ EOF
     
     success "DocumentDB instance deployed"
     
+    # Patch the DocumentDB service with LoadBalancer annotations for public IP
+    log "Patching DocumentDB service with LoadBalancer annotations for public IP access..."
+    
+    # Get the script directory (relative to this script)
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PATCH_SCRIPT="$SCRIPT_DIR/patch-documentdb-service.sh"
+    
+    if [ -f "$PATCH_SCRIPT" ]; then
+        log "Running service patch script..."
+        "$PATCH_SCRIPT" --cluster-name "$CLUSTER_NAME" --region "$REGION" || warn "Service patch failed, you may need to run it manually"
+    else
+        warn "Patch script not found at $PATCH_SCRIPT"
+        log "You can manually patch the service with:"
+        log "  kubectl patch service <service-name> -n documentdb-instance-ns --type='merge' -p='{\"metadata\":{\"annotations\":{\"service.beta.kubernetes.io/aws-load-balancer-type\":\"nlb\",\"service.beta.kubernetes.io/aws-load-balancer-scheme\":\"internet-facing\",\"service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled\":\"true\",\"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type\":\"ip\"}}}'"
+    fi
+    
     # Show connection info
     log "DocumentDB instance connection information:"
     kubectl get documentdb sample-documentdb -o wide
+    
+    log ""
+    log "🔍 To monitor the service and get the external IP:"
+    log "  kubectl get service -n documentdb-instance-ns"
+    log ""
+    log "📝 Note: It takes 2-5 minutes for AWS to provision the LoadBalancer and assign a public IP"
 }
 
 # Print summary
@@ -471,8 +542,10 @@ print_summary() {
         echo "  - Check operator: kubectl get pods -n documentdb-operator"
     fi
     if [ "$DEPLOY_INSTANCE" == "true" ]; then
-        echo "  - Check DocumentDB: kubectl get documentdb"
-        echo "  - Test connection: kubectl port-forward svc/sample-documentdb 27017:27017"
+        echo "  - Check DocumentDB: kubectl get documentdb -n documentdb-instance-ns"
+        echo "  - Check service status: kubectl get svc -n documentdb-instance-ns"
+        echo "  - Wait for LoadBalancer IP: kubectl get svc documentdb-service-sample-documentdb -n documentdb-instance-ns -w"
+        echo "  - Once IP is assigned, connect: mongodb://docdbadmin:SecurePassword123!@<EXTERNAL-IP>:10260/"
     fi
     echo ""
     echo "⚠️  IMPORTANT: Run './delete-cluster.sh' when done to avoid AWS charges!"

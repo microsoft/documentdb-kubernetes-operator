@@ -132,12 +132,23 @@ spec:
               resource:
                 description: Resource specifies the storage resources for DocumentDB.
                 properties:
-                  pvcSize:
-                    description: PvcSize is the size of the persistent volume claim
-                      for DocumentDB storage (e.g., "10Gi").
-                    type: string
+                  storage:
+                    description: Storage configuration for DocumentDB persistent volumes.
+                    properties:
+                      pvcSize:
+                        description: PvcSize is the size of the persistent volume
+                          claim for DocumentDB storage (e.g., "10Gi").
+                        type: string
+                      storageClass:
+                        description: |-
+                          StorageClass specifies the storage class for DocumentDB persistent volumes.
+                          If not specified, the cluster's default storage class will be used.
+                        type: string
+                    required:
+                    - pvcSize
+                    type: object
                 required:
-                - pvcSize
+                - storage
                 type: object
               sidecarInjectorPluginName:
                 description: SidecarInjectorPluginName is the name of the sidecar

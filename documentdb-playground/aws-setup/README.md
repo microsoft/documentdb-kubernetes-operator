@@ -51,19 +51,9 @@ serviceAnnotations:
   service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "ip"
 ```
 
+**Note**: These annotations are automatically applied by the DocumentDB operator when `environment: eks` is specified in the DocumentDB resource. Manual patching is no longer required.
+
 **Note**: It takes 2-5 minutes for AWS to provision the Network Load Balancer and assign a public IP.
-
-### Manual Service Patching
-
-If you need to manually add LoadBalancer annotations to an existing DocumentDB service:
-
-```bash
-# Auto-detect and patch DocumentDB service
-./scripts/patch-documentdb-service.sh
-
-# Patch specific service
-./scripts/patch-documentdb-service.sh --service-name my-documentdb-svc --namespace my-namespace
-```
 
 ## Script Options
 

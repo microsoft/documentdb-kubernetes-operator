@@ -28,6 +28,12 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 		credentialSecretName = util.DEFAULT_DOCUMENTDB_CREDENTIALS_SECRET
 	}
 
+	// Configure storage class - use specified storage class or nil for default
+	var storageClass *string
+	if documentdb.Spec.Resource.Storage.StorageClass != "" {
+		storageClass = &documentdb.Spec.Resource.Storage.StorageClass
+	}
+
 	return &cnpgv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      req.Name,
@@ -38,8 +44,8 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb dbpreview.DocumentDB, docum
 				Instances: documentdb.Spec.InstancesPerNode,
 				ImageName: documentdb_image,
 				StorageConfiguration: cnpgv1.StorageConfiguration{
-					StorageClass: nil,
-					Size:         documentdb.Spec.Resource.PvcSize,
+					StorageClass: storageClass, // Use configured storage class or default
+					Size:         documentdb.Spec.Resource.Storage.PvcSize,
 				},
 				InheritedMetadata: getInheritedMetadataLabels(documentdb),
 				Plugins: []cnpgv1.PluginConfiguration{

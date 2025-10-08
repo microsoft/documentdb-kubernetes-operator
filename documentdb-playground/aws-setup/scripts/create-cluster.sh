@@ -13,6 +13,12 @@ NODES=2
 NODES_MIN=1
 NODES_MAX=4
 
+# DocumentDB Operator Configuration
+# For testing: use hossain-rayhan/documentdb-operator (fork with AWS enhancements)
+# For production: use microsoft/documentdb-operator (official)
+OPERATOR_GITHUB_ORG="hossain-rayhan"
+OPERATOR_CHART_VERSION="0.1.112"
+
 # Feature flags - set to "true" to enable, "false" to skip
 INSTALL_OPERATOR="${INSTALL_OPERATOR:-false}"
 DEPLOY_INSTANCE="${DEPLOY_INSTANCE:-false}"
@@ -241,15 +247,23 @@ install_load_balancer_controller() {
     log "Downloading AWS Load Balancer Controller IAM policy (latest version)..."
     curl -o /tmp/iam_policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
     
-    # Delete existing policy if it exists to ensure we get the latest version
+    # Get account ID
     ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-    log "Updating IAM policy to latest version..."
-    aws iam delete-policy --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy 2>/dev/null || true
+    
+    # Check if policy exists and create/update as needed
+    if aws iam get-policy --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy &>/dev/null; then
+        log "IAM policy already exists, updating to latest version..."
+        # Delete and recreate to ensure we have the latest version
+        aws iam delete-policy --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy 2>/dev/null || true
+        sleep 5  # Wait for deletion to propagate
+    fi
     
     # Create IAM policy with latest permissions
+    log "Creating IAM policy with latest permissions..."
     aws iam create-policy \
         --policy-name AWSLoadBalancerControllerIAMPolicy \
-        --policy-document file:///tmp/iam_policy.json
+        --policy-document file:///tmp/iam_policy.json 2>/dev/null || \
+    log "IAM policy already exists or was just created"
     
     # Wait a moment for policy to be available
     sleep 5
@@ -374,8 +388,8 @@ install_documentdb_operator() {
         error "Cannot reach ghcr.io. Please check your internet connection and firewall settings."
     fi
     
-    # Install DocumentDB operator using official OCI registry
-    log "Installing DocumentDB operator from GitHub Container Registry..."
+    # Install DocumentDB operator using fork OCI registry with AWS enhancements
+    log "Installing DocumentDB operator from GitHub Container Registry (fork with AWS support)..."
     
     # Check for GitHub authentication
     if [ -z "$GITHUB_TOKEN" ] || [ -z "$GITHUB_USERNAME" ]; then
@@ -400,22 +414,22 @@ Then run the script again with --install-operator"
     fi
     
     # Install DocumentDB operator from OCI registry
-    log "Pulling and installing DocumentDB operator from ghcr.io/microsoft/documentdb-operator..."
+    log "Pulling and installing DocumentDB operator from ghcr.io/${OPERATOR_GITHUB_ORG}/documentdb-operator..."
     helm install documentdb-operator \
-        oci://ghcr.io/microsoft/documentdb-operator \
-        --version 0.1.0 \
+        oci://ghcr.io/${OPERATOR_GITHUB_ORG}/documentdb-operator \
+        --version ${OPERATOR_CHART_VERSION} \
         --namespace documentdb-operator \
         --create-namespace \
         --wait \
         --timeout 10m
 
     if [ $? -eq 0 ]; then
-        success "DocumentDB operator installed successfully from official registry"
+        success "DocumentDB operator installed successfully from ${OPERATOR_GITHUB_ORG}/documentdb-operator:${OPERATOR_CHART_VERSION}"
     else
         error "Failed to install DocumentDB operator from OCI registry. Please verify:
 - Your GitHub token has 'read:packages' scope
-- You have access to microsoft/documentdb-operator repository  
-- The chart version 0.0.1 exists"
+- You have access to ${OPERATOR_GITHUB_ORG}/documentdb-operator repository  
+- The chart version ${OPERATOR_CHART_VERSION} exists"
     fi    # Wait for operator to be ready
     log "Waiting for DocumentDB operator to be ready..."
     kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=documentdb-operator -n documentdb-operator --timeout=300s || warn "DocumentDB operator pods may still be starting"
@@ -466,13 +480,16 @@ metadata:
   name: sample-documentdb
   namespace: documentdb-instance-ns
 spec:
+  environment: eks
   nodeCount: 1
   instancesPerNode: 1
   documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   gatewayImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   documentDbCredentialSecret: documentdb-credentials
   resource:
-    pvcSize: 10Gi
+    storage:
+      pvcSize: 10Gi
+      storageClass: documentdb-storage
   exposeViaService:
     serviceType: LoadBalancer
   sidecarInjectorPluginName: cnpg-i-sidecar-injector.documentdb.io
@@ -484,22 +501,6 @@ EOF
     
     success "DocumentDB instance deployed"
     
-    # Patch the DocumentDB service with LoadBalancer annotations for public IP
-    log "Patching DocumentDB service with LoadBalancer annotations for public IP access..."
-    
-    # Get the script directory (relative to this script)
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    PATCH_SCRIPT="$SCRIPT_DIR/patch-documentdb-service.sh"
-    
-    if [ -f "$PATCH_SCRIPT" ]; then
-        log "Running service patch script..."
-        "$PATCH_SCRIPT" --cluster-name "$CLUSTER_NAME" --region "$REGION" || warn "Service patch failed, you may need to run it manually"
-    else
-        warn "Patch script not found at $PATCH_SCRIPT"
-        log "You can manually patch the service with:"
-        log "  kubectl patch service <service-name> -n documentdb-instance-ns --type='merge' -p='{\"metadata\":{\"annotations\":{\"service.beta.kubernetes.io/aws-load-balancer-type\":\"nlb\",\"service.beta.kubernetes.io/aws-load-balancer-scheme\":\"internet-facing\",\"service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled\":\"true\",\"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type\":\"ip\"}}}'"
-    fi
-    
     # Show connection info
     log "DocumentDB instance connection information:"
     kubectl get documentdb sample-documentdb -o wide
@@ -508,6 +509,8 @@ EOF
     log "🔍 To monitor the service and get the external IP:"
     log "  kubectl get service -n documentdb-instance-ns"
     log ""
+    log "📝 Note: It takes 2-5 minutes for AWS to provision the LoadBalancer and assign a public IP"
+    log "📝 AWS LoadBalancer annotations are automatically applied by the operator based on environment: eks"
     log "📝 Note: It takes 2-5 minutes for AWS to provision the LoadBalancer and assign a public IP"
 }
 

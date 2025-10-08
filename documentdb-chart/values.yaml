@@ -14,10 +14,10 @@ serviceAccount:
   
 image:
   documentdbk8soperator:
-    repository: ghcr.io/hossain-rayhan/documentdb-kubernetes-operator/operator
+    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/operator
     pullPolicy: Always
   sidecarinjector:
-    repository: ghcr.io/hossain-rayhan/documentdb-kubernetes-operator/sidecar
+    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/sidecar
     pullPolicy: Always
     
 cloudnative-pg:

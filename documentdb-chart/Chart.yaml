@@ -1,9 +1,9 @@
 apiVersion: v2
 name: documentdb-operator
-version: 0.1.112
+version: 0.1.0
 description: A Helm chart for deploying the DocumentDB operator
 # appVersion represents the default DocumentDB version for this chart release
-appVersion: "0.1.112"
+appVersion: "0.1.0"
 dependencies:
   - name: cloudnative-pg
     version: "0.23.2"

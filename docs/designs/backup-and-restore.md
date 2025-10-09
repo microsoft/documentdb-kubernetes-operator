@@ -114,6 +114,9 @@ spec:
   retentionPeriod: "14d"  # Keep scheduled backups for 14 days
 ```
 
+Note: CNPG does not yet support retention policies for volume snapshots. This is an ongoing discussion in the CNPG community (see [issue #6009](https://github.com/cloudnative-pg/cloudnative-pg/issues/6009)).
+
+
 ## Deletion Behavior
 
 - **Deleting a Backup resource:** Immediately deletes the associated volume snapshot

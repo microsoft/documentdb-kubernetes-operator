@@ -23,7 +23,7 @@ const documentdbServicePrefix = "documentdb-service-"
 type statusOptions struct {
 	documentDBName  string
 	namespace       string
-	hubContext      string
+	kubeContext     string
 	showConnections bool
 }
 
@@ -57,7 +57,7 @@ func newStatusCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&opts.documentDBName, "documentdb", opts.documentDBName, "Name of the DocumentDB resource")
 	cmd.Flags().StringVarP(&opts.namespace, "namespace", "n", opts.namespace, "Namespace containing the DocumentDB resource")
-	cmd.Flags().StringVar(&opts.hubContext, "hub-context", opts.hubContext, "Kubeconfig context for the fleet hub (defaults to current context)")
+	cmd.Flags().StringVar(&opts.kubeContext, "context", opts.kubeContext, "Kubeconfig context to use (defaults to current context)")
 	cmd.Flags().BoolVar(&opts.showConnections, "show-connections", false, "Include connection strings in the output")
 
 	_ = cmd.MarkFlagRequired("documentdb")
@@ -76,15 +76,15 @@ func (o *statusOptions) complete() error {
 }
 
 func (o *statusOptions) run(ctx context.Context, cmd *cobra.Command) error {
-	hubConfig, hubContextName, err := loadConfig(o.hubContext)
+	mainConfig, contextName, err := loadConfig(o.kubeContext)
 	if err != nil {
-		return fmt.Errorf("failed to load hub kubeconfig: %w", err)
+		return fmt.Errorf("failed to load kubeconfig: %w", err)
 	}
-	if hubContextName == "" {
-		hubContextName = "(current)"
+	if contextName == "" {
+		contextName = "(current)"
 	}
 
-	dynHub, err := dynamic.NewForConfig(hubConfig)
+	dynHub, err := dynamic.NewForConfig(mainConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create hub dynamic client: %w", err)
 	}
@@ -112,7 +112,7 @@ func (o *statusOptions) run(ctx context.Context, cmd *cobra.Command) error {
 	overallConnection, _, _ := unstructured.NestedString(document.Object, "status", "connectionString")
 
 	fmt.Fprintf(cmd.OutOrStdout(), "DocumentDB: %s/%s\n", o.namespace, o.documentDBName)
-	fmt.Fprintf(cmd.OutOrStdout(), "Hub context: %s\n", hubContextName)
+	fmt.Fprintf(cmd.OutOrStdout(), "Context: %s\n", contextName)
 	fmt.Fprintf(cmd.OutOrStdout(), "Primary cluster: %s\n", primaryCluster)
 	if overallPhase != "" {
 		fmt.Fprintf(cmd.OutOrStdout(), "Overall status: %s\n", overallPhase)

@@ -7,7 +7,7 @@
 ```bash
 kubectl documentdb promote \
   --documentdb <name> \
-  --namespace <ns> \
+  [--namespace <ns>] \
   --target-cluster <fleet-member> \
   [--hub-context <kubecontext>] \
   [--cluster-context <kubecontext>] \
@@ -20,7 +20,7 @@ kubectl documentdb promote \
 - `--documentdb` *(required)* – DocumentDB resource name.
 - `--namespace` – Namespace hosting the resource. Defaults to `default`.
 - `--target-cluster` *(required)* – Fleet member that should become primary.
-- `--hub-context` – Explicit kubeconfig context for the fleet hub. Falls back to the current context when omitted.
+- `--hub-context` – Explicit kubeconfig context for the fleet hub. Defaults to `hub`; override when your environment uses a different name.
 - `--cluster-context` – Context used for member polling during the wait loop. Defaults to whatever context was resolved for the hub.
 - `--skip-wait` – Submit the promotion and exit immediately, without verifying convergence.
 
@@ -30,7 +30,7 @@ kubectl documentdb promote \
   - `complete()` clamps `wait-timeout` / `poll-interval` to sensible defaults whenever the user supplies zero or negative values.
   - Cobra enforces required flags (`--documentdb`, `--target-cluster`) before `RunE` executes.
 2. **Resolve hub configuration**
-  - `loadConfig(--hub-context)` reads the user’s kubeconfig and optionally forces a specific context via overrides.
+  - `loadConfig(--hub-context)` reads the user’s kubeconfig and optionally forces a specific context via overrides (default `hub`).
   - Missing contexts throw `kubeconfig context <name> not found`; the command exits before touching the API.
   - Returns the REST config and resolved context name, which doubles as the default for `--cluster-context` and is echoed back to the user.
 3. **Patch DocumentDB on the hub**
@@ -67,4 +67,4 @@ Throughout, the hub DocumentDB serves as the source of truth for desired state, 
 ## Operational Notes
 - The command relies on the updated binary at `plugins/bin/kubectl-documentdb`; ensure the directory precedes other `kubectl-documentdb` binaries on `$PATH`.
 - For live progress, pair the command with hub-side `kubectl describe documentdb <name>` or operator log streaming to monitor status and events during the promotion.
-- The companion command `kubectl documentdb events --documentdb <name> --namespace <ns> [--hub-context hub]` streams the Kubernetes events emitted for the DocumentDB resource, making it easy to watch promotions that outlast the CLI wait timeout.
+- The companion command `kubectl documentdb events --documentdb <name> --namespace <ns> [--context <kubecontext>]` streams the Kubernetes events emitted for the DocumentDB resource, making it easy to watch promotions that outlast the CLI wait timeout.

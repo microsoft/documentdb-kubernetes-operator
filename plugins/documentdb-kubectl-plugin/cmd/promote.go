@@ -34,7 +34,7 @@ type promoteOptions struct {
 }
 
 func newPromoteCommand() *cobra.Command {
-	opts := &promoteOptions{}
+	opts := &promoteOptions{hubContext: "hub"}
 
 	cmd := &cobra.Command{
 		Use:   "promote",
@@ -49,7 +49,7 @@ func newPromoteCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&opts.documentDBName, "documentdb", opts.documentDBName, "Name of the DocumentDB resource to promote")
 	cmd.Flags().StringVarP(&opts.namespace, "namespace", "n", "default", "Namespace containing the DocumentDB resource")
-	cmd.Flags().StringVar(&opts.hubContext, "hub-context", opts.hubContext, "Kubeconfig context for the fleet hub (defaults to current context)")
+	cmd.Flags().StringVar(&opts.hubContext, "hub-context", opts.hubContext, "Kubeconfig context for the fleet hub (defaults to \"hub\")")
 	cmd.Flags().StringVar(&opts.targetCluster, "target-cluster", opts.targetCluster, "Name of the cluster that should become primary (required)")
 	cmd.Flags().StringVar(&opts.targetContext, "cluster-context", opts.targetContext, "Kubeconfig context for verifying member status (defaults to current context)")
 	cmd.Flags().BoolVar(&opts.skipWait, "skip-wait", opts.skipWait, "Return immediately after submitting the promotion request")

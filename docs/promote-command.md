@@ -21,9 +21,8 @@ kubectl documentdb promote \
 - `--namespace` – Namespace hosting the resource. Defaults to `default`.
 - `--target-cluster` *(required)* – Fleet member that should become primary.
 - `--hub-context` – Explicit kubeconfig context for the fleet hub. Falls back to the current context when omitted.
-- `--cluster-context` – Member context used for validation. Defaults to the target cluster name.
+- `--cluster-context` – Context used for member polling during the wait loop. Defaults to whatever context was resolved for the hub.
 - `--skip-wait` – Submit the promotion and exit immediately, without verifying convergence.
-- `--force` – Bypass the pre-flight health check on the target cluster (use with caution).
 
 ## Control Flow
 1. **Parse & validate input**
@@ -34,16 +33,13 @@ kubectl documentdb promote \
   - `loadConfig(--hub-context)` reads the user’s kubeconfig and optionally forces a specific context via overrides.
   - Missing contexts throw `kubeconfig context <name> not found`; the command exits before touching the API.
   - Returns the REST config and resolved context name, which doubles as the default for `--cluster-context` and is echoed back to the user.
-3. **Derive target configuration**
-  - If `--cluster-context` is omitted, default to the `--target-cluster` name (assuming kube contexts follow the fleet naming convention).
-  - `loadConfig(--cluster-context)` produces another REST config and context string whenever a target context is required (either because `--skip-wait` is false or `--force` is not set).
-  - Build a second `dynamic.Interface` (`dynTarget`) for member polling and/or health checks.
-  - Pre-flight guard: when `--force` is **not** set, fetch the target DocumentDB and ensure it reports a healthy status. Fail fast with guidance when the target cluster is missing or unhealthy.
-4. **Patch DocumentDB on the hub**
+3. **Patch DocumentDB on the hub**
   - Build a JSON merge payload: `{ "spec": { "clusterReplication": { "primary": <targetCluster> } } }`.
   - Execute `dynHub.Resource(gvr).Namespace(ns).Patch(..., types.MergePatchType, patchBytes, ...)` to update only the `primary` field.
   - Any API failure surfaces immediately as `failed to patch DocumentDB <name>` and aborts the command.
-5. **Optional wait loop** (skipped when `--skip-wait` is supplied)
+4. **Optional wait loop** (skipped when `--skip-wait` is supplied)
+  - When waiting is enabled, resolve the target kubeconfig context. If `--cluster-context` was left empty, reuse the hub context that `loadConfig` returned earlier.
+  - Build a second `dynamic.Interface` (`dynTarget`) for member polling; errors while loading the context surface immediately.
   - Start a context with timeout (`--wait-timeout`, default 10m) and a ticker (`--poll-interval`, default 10s).
   - **Hub probe**
     1. Fetch the authoritative DocumentDB from the hub using `dynHub`.
@@ -57,7 +53,7 @@ kubectl documentdb promote \
     3. Re-run `isDocumentReady` to ensure the member sees the right primary and reports a healthy status.
   - Loop until both probes succeed or the timeout expires.
   - On timeout the command returns `timed out waiting for promotion to complete after <duration>`—the spec patch already succeeded, so follow-up inspection is recommended.
-6. **Success reporting**
+5. **Success reporting**
   - Print “Promotion completed successfully.” and exit 0.
 
 Throughout, the hub DocumentDB serves as the source of truth for desired state, while the target member check confirms propagation across the fleet.

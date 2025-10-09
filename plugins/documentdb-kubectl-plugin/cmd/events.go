@@ -16,7 +16,7 @@ import (
 type eventsOptions struct {
 	documentDBName string
 	namespace      string
-	hubContext     string
+	kubeContext    string
 	follow         bool
 	since          time.Duration
 }
@@ -37,7 +37,7 @@ func newEventsCommand() *cobra.Command {
 
 	cmd.Flags().StringVar(&opts.documentDBName, "documentdb", opts.documentDBName, "Name of the DocumentDB resource to inspect")
 	cmd.Flags().StringVarP(&opts.namespace, "namespace", "n", opts.namespace, "Namespace containing the DocumentDB resource")
-	cmd.Flags().StringVar(&opts.hubContext, "hub-context", opts.hubContext, "Kubeconfig context for the fleet hub (defaults to current context)")
+	cmd.Flags().StringVar(&opts.kubeContext, "context", opts.kubeContext, "Kubeconfig context to use (defaults to current context)")
 	cmd.Flags().BoolVarP(&opts.follow, "follow", "f", true, "Stream events until interrupted")
 	cmd.Flags().DurationVar(&opts.since, "since", 0, "Only show events newer than this duration (e.g. 1h); 0 shows all available")
 
@@ -57,9 +57,9 @@ func (o *eventsOptions) complete() error {
 }
 
 func (o *eventsOptions) run(ctx context.Context, cmd *cobra.Command) error {
-	config, contextName, err := loadConfig(o.hubContext)
+	config, contextName, err := loadConfig(o.kubeContext)
 	if err != nil {
-		return fmt.Errorf("failed to load hub kubeconfig: %w", err)
+		return fmt.Errorf("failed to load kubeconfig: %w", err)
 	}
 	if contextName == "" {
 		contextName = "(current)"

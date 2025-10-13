@@ -61,7 +61,9 @@ spec:
             description: BackupSpec defines the desired state of Backup.
             properties:
               cluster:
-                description: Cluster specifies the DocumentDB cluster to backup.
+                description: |-
+                  Cluster specifies the DocumentDB cluster to backup.
+                  The cluster must exist in the same namespace as the Backup resource.
                 properties:
                   name:
                     description: Name of the referent.

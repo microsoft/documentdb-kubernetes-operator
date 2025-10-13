@@ -11,6 +11,8 @@ import (
 // BackupSpec defines the desired state of Backup.
 type BackupSpec struct {
 	// Cluster specifies the DocumentDB cluster to backup.
+	// The cluster must exist in the same namespace as the Backup resource.
+	// +kubebuilder:validation:Required
 	Cluster cnpgv1.LocalObjectReference `json:"cluster"`
 }
 
@@ -39,8 +41,6 @@ type BackupStatus struct {
 // +kubebuilder:printcolumn:name="Started",type=date,JSONPath=".status.startedAt",description="Backup start time"
 // +kubebuilder:printcolumn:name="Stopped",type=date,JSONPath=".status.stoppedAt",description="Backup completion time"
 // +kubebuilder:printcolumn:name="Error",type=string,JSONPath=".status.error",description="Backup error information"
-
-// Backup is the Schema for the backups API.
 type Backup struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

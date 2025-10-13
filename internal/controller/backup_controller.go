@@ -19,11 +19,6 @@ import (
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
 )
 
-const (
-	requeueAfterShort = 10 * time.Second
-	requeueAfterLong  = 30 * time.Second
-)
-
 // BackupReconciler reconciles a Backup object
 type BackupReconciler struct {
 	client.Client
@@ -38,6 +33,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	backup := &dbpreview.Backup{}
 	if err := r.Get(ctx, req.NamespacedName, backup); err != nil {
 		if apierrors.IsNotFound(err) {
+			// TODO: cleanup if needed
 			return ctrl.Result{}, nil
 		}
 		logger.Error(err, "Failed to get Backup")
@@ -83,6 +79,7 @@ func (r *BackupReconciler) createCNPGBackup(ctx context.Context, backup *dbprevi
 	}
 
 	// Set owner reference for garbage collection
+	// This ensures that the CNPG Backup is deleted when the DocumentDB Backup is deleted.
 	if err := controllerutil.SetControllerReference(backup, cnpgBackup, r.Scheme); err != nil {
 		logger.Error(err, "Failed to set owner reference on CNPG Backup")
 		return ctrl.Result{}, err
@@ -96,34 +93,20 @@ func (r *BackupReconciler) createCNPGBackup(ctx context.Context, backup *dbprevi
 	logger.Info("Successfully created CNPG Backup", "name", cnpgBackup.Name)
 
 	// Requeue to check status
-	return ctrl.Result{RequeueAfter: requeueAfterShort}, nil
+	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
 // updateBackupStatus updates the Backup status based on CNPG Backup status
 func (r *BackupReconciler) updateBackupStatus(ctx context.Context, backup *dbpreview.Backup, cnpgBackup *cnpgv1.Backup) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Check if status needs update
-	needsUpdate := false
 	newPhase := cnpgBackup.Status.Phase
 
 	if backup.Status.Phase != newPhase {
 		backup.Status.Phase = newPhase
-		backup.Status.Error = cnpgBackup.Status.Error
-		needsUpdate = true
-	}
-
-	if !areTimesEqual(backup.Status.StartedAt, cnpgBackup.Status.StartedAt) {
 		backup.Status.StartedAt = cnpgBackup.Status.StartedAt
-		needsUpdate = true
-	}
-
-	if !areTimesEqual(backup.Status.StoppedAt, cnpgBackup.Status.StoppedAt) {
 		backup.Status.StoppedAt = cnpgBackup.Status.StoppedAt
-		needsUpdate = true
-	}
-
-	if needsUpdate {
+		backup.Status.Error = cnpgBackup.Status.Error
 		if err := r.Status().Update(ctx, backup); err != nil {
 			logger.Error(err, "Failed to update Backup status")
 			return ctrl.Result{}, err
@@ -144,20 +127,7 @@ func (r *BackupReconciler) updateBackupStatus(ctx context.Context, backup *dbpre
 	}
 
 	// Backup is still in progress, requeue to check status again
-	return ctrl.Result{RequeueAfter: requeueAfterLong}, nil
-}
-
-// Helper functions
-
-// areTimesEqual compares two metav1.Time pointers for equality
-func areTimesEqual(t1, t2 *metav1.Time) bool {
-	if t1 == nil && t2 == nil {
-		return true
-	}
-	if t1 == nil || t2 == nil {
-		return false
-	}
-	return t1.Equal(t2)
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

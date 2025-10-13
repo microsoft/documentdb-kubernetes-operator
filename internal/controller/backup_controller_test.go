@@ -35,6 +35,27 @@ var _ = Describe("Backup Controller", func() {
 		testScheme *runtime.Scheme
 	)
 
+	// Helper function to verify backup status matches CNPG backup status
+	verifyBackupStatus := func(backup *dbpreview.Backup, cnpgBackup *cnpgv1.Backup) {
+		Expect(string(backup.Status.Phase)).To(Equal(string(cnpgBackup.Status.Phase)))
+
+		if cnpgBackup.Status.StartedAt != nil {
+			Expect(backup.Status.StartedAt).NotTo(BeNil())
+			Expect(backup.Status.StartedAt.Equal(cnpgBackup.Status.StartedAt)).To(BeTrue())
+		} else {
+			Expect(backup.Status.StartedAt).To(BeNil())
+		}
+
+		if cnpgBackup.Status.StoppedAt != nil {
+			Expect(backup.Status.StoppedAt).NotTo(BeNil())
+			Expect(backup.Status.StoppedAt.Equal(cnpgBackup.Status.StoppedAt)).To(BeTrue())
+		} else {
+			Expect(backup.Status.StoppedAt).To(BeNil())
+		}
+
+		Expect(backup.Status.Error).To(Equal(cnpgBackup.Status.Error))
+	}
+
 	BeforeEach(func() {
 		testCtx = context.Background()
 		testScheme = runtime.NewScheme()
@@ -83,7 +104,7 @@ var _ = Describe("Backup Controller", func() {
 			})
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(requeueAfterShort))
+			Expect(result.RequeueAfter).To(Equal(5 * time.Second))
 
 			// Verify CNPG backup was created
 			cnpgBackup := &cnpgv1.Backup{}
@@ -91,6 +112,7 @@ var _ = Describe("Backup Controller", func() {
 				Name:      backupName,
 				Namespace: backupNamespace,
 			}, cnpgBackup)
+
 			Expect(err).NotTo(HaveOccurred())
 			Expect(cnpgBackup.Spec.Cluster.Name).To(Equal(clusterName))
 			Expect(cnpgBackup.Spec.Method).To(Equal(cnpgv1.BackupMethodVolumeSnapshot))
@@ -99,9 +121,10 @@ var _ = Describe("Backup Controller", func() {
 			Expect(cnpgBackup.OwnerReferences).To(HaveLen(1))
 			Expect(cnpgBackup.OwnerReferences[0].Name).To(Equal(backupName))
 			Expect(cnpgBackup.OwnerReferences[0].Kind).To(Equal("Backup"))
+			Expect(cnpgBackup.OwnerReferences[0].APIVersion).To(Equal(dbpreview.GroupVersion.String()))
 		})
 
-		It("should return error when backup resource is not found", func() {
+		It("should not requeue when backup resource is not found", func() {
 			nonExistentBackup := reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "non-existent",
@@ -116,7 +139,7 @@ var _ = Describe("Backup Controller", func() {
 		})
 	})
 
-	Context("When updating backup status", func() {
+	Context("When backup resource already exists", func() {
 		var (
 			backup     *dbpreview.Backup
 			cnpgBackup *cnpgv1.Backup
@@ -133,6 +156,9 @@ var _ = Describe("Backup Controller", func() {
 					Cluster: cnpgv1.LocalObjectReference{
 						Name: clusterName,
 					},
+				},
+				Status: dbpreview.BackupStatus{
+					Phase: cnpgv1.BackupPhasePending,
 				},
 			}
 
@@ -186,7 +212,7 @@ var _ = Describe("Backup Controller", func() {
 			})
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(requeueAfterLong))
+			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
 
 			// Verify backup status was updated
 			updatedBackup := &dbpreview.Backup{}
@@ -194,17 +220,17 @@ var _ = Describe("Backup Controller", func() {
 				Name:      backupName,
 				Namespace: backupNamespace,
 			}, updatedBackup)
+
 			Expect(err).NotTo(HaveOccurred())
-			Expect(string(updatedBackup.Status.Phase)).To(Equal(cnpgv1.BackupPhaseRunning))
-			Expect(updatedBackup.Status.StartedAt).NotTo(BeNil())
-			Expect(updatedBackup.Status.StartedAt.Equal(cnpgBackup.Status.StartedAt)).To(BeTrue())
+			verifyBackupStatus(updatedBackup, cnpgBackup)
 		})
 
 		It("should not requeue when CNPG backup is completed", func() {
 			// Update CNPG backup status to completed
-			now := metav1.Now()
 			cnpgBackup.Status.Phase = cnpgv1.BackupPhaseCompleted
-			cnpgBackup.Status.StartedAt = &now
+			now := metav1.Now()
+			startTime := metav1.NewTime(now.Add(-10 * time.Second))
+			cnpgBackup.Status.StartedAt = &startTime
 			cnpgBackup.Status.StoppedAt = &now
 			err := fakeClient.Status().Update(testCtx, cnpgBackup)
 			Expect(err).NotTo(HaveOccurred())
@@ -228,16 +254,15 @@ var _ = Describe("Backup Controller", func() {
 				Namespace: backupNamespace,
 			}, updatedBackup)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(string(updatedBackup.Status.Phase)).To(Equal(cnpgv1.BackupPhaseCompleted))
-			Expect(updatedBackup.Status.StartedAt).NotTo(BeNil())
-			Expect(updatedBackup.Status.StoppedAt).NotTo(BeNil())
+			verifyBackupStatus(updatedBackup, cnpgBackup)
 		})
 
 		It("should not requeue when CNPG backup has failed", func() {
 			// Update CNPG backup status to failed
-			now := metav1.Now()
 			cnpgBackup.Status.Phase = cnpgv1.BackupPhaseFailed
-			cnpgBackup.Status.StartedAt = &now
+			now := metav1.Now()
+			startTime := metav1.NewTime(now.Add(-10 * time.Second))
+			cnpgBackup.Status.StartedAt = &startTime
 			cnpgBackup.Status.StoppedAt = &now
 			cnpgBackup.Status.Error = "Backup failed due to some error"
 			err := fakeClient.Status().Update(testCtx, cnpgBackup)
@@ -262,8 +287,7 @@ var _ = Describe("Backup Controller", func() {
 				Namespace: backupNamespace,
 			}, updatedBackup)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(string(updatedBackup.Status.Phase)).To(Equal(string(cnpgv1.BackupPhaseFailed)))
-			Expect(updatedBackup.Status.Error).To(Equal("Backup failed due to some error"))
+			verifyBackupStatus(updatedBackup, cnpgBackup)
 		})
 
 		It("should only update status when it has changed", func() {
@@ -289,7 +313,7 @@ var _ = Describe("Backup Controller", func() {
 			})
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(requeueAfterLong))
+			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
 
 			// Verify backup status remains the same
 			updatedBackup := &dbpreview.Backup{}
@@ -298,10 +322,7 @@ var _ = Describe("Backup Controller", func() {
 				Namespace: backupNamespace,
 			}, updatedBackup)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(string(updatedBackup.Status.Phase)).To(Equal(cnpgv1.BackupPhaseRunning))
-			Expect(updatedBackup.Status.StartedAt).NotTo(BeNil())
-			Expect(updatedBackup.Status.StartedAt.Equal(cnpgBackup.Status.StartedAt)).To(BeTrue())
-			Expect(updatedBackup.Status.StoppedAt).To(BeNil())
+			verifyBackupStatus(updatedBackup, cnpgBackup)
 		})
 
 		It("should handle status transitions correctly", func() {
@@ -318,7 +339,7 @@ var _ = Describe("Backup Controller", func() {
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(requeueAfterLong))
+			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
 
 			// Update to running
 			now := metav1.Now()
@@ -335,7 +356,7 @@ var _ = Describe("Backup Controller", func() {
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(requeueAfterLong))
+			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
 
 			// Update to completed
 			cnpgBackup.Status.Phase = cnpgv1.BackupPhaseCompleted
@@ -360,31 +381,7 @@ var _ = Describe("Backup Controller", func() {
 				Namespace: backupNamespace,
 			}, updatedBackup)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(string(updatedBackup.Status.Phase)).To(Equal(cnpgv1.BackupPhaseCompleted))
-			Expect(updatedBackup.Status.StartedAt).NotTo(BeNil())
-			Expect(updatedBackup.Status.StoppedAt).NotTo(BeNil())
-		})
-	})
-
-	Context("Helper functions", func() {
-		It("should correctly compare metav1.Time pointers", func() {
-			now := metav1.Now()
-			later := metav1.NewTime(now.Add(time.Minute))
-			sameTime := metav1.NewTime(now.Time)
-
-			// Both nil
-			Expect(areTimesEqual(nil, nil)).To(BeTrue())
-
-			// Same time
-			Expect(areTimesEqual(&now, &now)).To(BeTrue())
-			Expect(areTimesEqual(&now, &sameTime)).To(BeTrue())
-
-			// One nil
-			Expect(areTimesEqual(&now, nil)).To(BeFalse())
-			Expect(areTimesEqual(nil, &now)).To(BeFalse())
-
-			// Different times
-			Expect(areTimesEqual(&now, &later)).To(BeFalse())
+			verifyBackupStatus(updatedBackup, cnpgBackup)
 		})
 	})
 
@@ -422,7 +419,7 @@ var _ = Describe("Backup Controller", func() {
 			})
 
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(requeueAfterShort))
+			Expect(result.RequeueAfter).To(Equal(5 * time.Second))
 		})
 	})
 
@@ -459,7 +456,7 @@ var _ = Describe("Backup Controller", func() {
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(requeueAfterShort))
+			Expect(result.RequeueAfter).To(Equal(5 * time.Second))
 
 			// Verify CNPG backup exists
 			cnpgBackup := &cnpgv1.Backup{}
@@ -483,7 +480,7 @@ var _ = Describe("Backup Controller", func() {
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(requeueAfterLong))
+			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
 
 			// Step 3: CNPG backup running
 			cnpgBackup.Status.Phase = cnpgv1.BackupPhaseRunning
@@ -497,7 +494,7 @@ var _ = Describe("Backup Controller", func() {
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(requeueAfterLong))
+			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
 
 			// Step 4: CNPG backup completes
 			stopTime := metav1.Now()
@@ -522,9 +519,7 @@ var _ = Describe("Backup Controller", func() {
 				Namespace: backupNamespace,
 			}, finalBackup)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(string(finalBackup.Status.Phase)).To(Equal(cnpgv1.BackupPhaseCompleted))
-			Expect(finalBackup.Status.StartedAt).NotTo(BeNil())
-			Expect(finalBackup.Status.StoppedAt).NotTo(BeNil())
+			verifyBackupStatus(finalBackup, cnpgBackup)
 		})
 
 		It("should handle backup failure scenario", func() {
@@ -590,7 +585,7 @@ var _ = Describe("Backup Controller", func() {
 				Namespace: backupNamespace,
 			}, failedBackup)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(string(failedBackup.Status.Phase)).To(Equal(cnpgv1.BackupPhaseFailed))
+			verifyBackupStatus(failedBackup, cnpgBackup)
 		})
 	})
 })

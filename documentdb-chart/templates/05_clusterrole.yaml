@@ -40,6 +40,10 @@ rules:
 - apiGroups: ["db.microsoft.com"]
   resources: ["backups", "backups/status", "backups/finalizers"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# ScheduledBackup permissions
+- apiGroups: ["db.microsoft.com"]
+  resources: ["scheduledbackups", "scheduledbackups/status", "scheduledbackups/finalizers"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 # CNPG Backup permissions
 - apiGroups: ["postgresql.cnpg.io"]
   resources: ["backups", "backups/status"]

@@ -4,41 +4,26 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: backups.db.microsoft.com
+  name: scheduledbackups.db.microsoft.com
 spec:
   group: db.microsoft.com
   names:
-    kind: Backup
-    listKind: BackupList
-    plural: backups
-    singular: backup
+    kind: ScheduledBackup
+    listKind: ScheduledBackupList
+    plural: scheduledbackups
+    singular: scheduledbackup
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - description: Target DocumentDB cluster
-      jsonPath: .spec.cluster.name
+    - jsonPath: .spec.cluster.name
       name: Cluster
       type: string
-    - description: Backup phase
-      jsonPath: .status.phase
-      name: Phase
-      type: string
-    - description: Backup start time
-      jsonPath: .status.startedAt
-      name: Started
-      type: date
-    - description: Backup completion time
-      jsonPath: .status.stoppedAt
-      name: Stopped
-      type: date
-    - description: Backup error information
-      jsonPath: .status.error
-      name: Error
+    - jsonPath: .spec.schedule
+      name: Schedule
       type: string
     name: preview
     schema:
       openAPIV3Schema:
-        description: Backup is the Schema for the backups API.
         properties:
           apiVersion:
             description: |-
@@ -58,12 +43,12 @@ spec:
           metadata:
             type: object
           spec:
-            description: BackupSpec defines the desired state of Backup.
+            description: ScheduledBackupSpec defines the desired state of ScheduledBackup
             properties:
               cluster:
                 description: |-
                   Cluster specifies the DocumentDB cluster to backup.
-                  The cluster must exist in the same namespace as the Backup resource.
+                  The cluster must exist in the same namespace as the ScheduledBackup resource.
                 properties:
                   name:
                     description: Name of the referent.
@@ -71,28 +56,20 @@ spec:
                 required:
                 - name
                 type: object
+              schedule:
+                description: Schedule defines when backups should be created using
+                  cron expression format.
+                type: string
             required:
             - cluster
+            - schedule
             type: object
           status:
-            description: BackupStatus defines the observed state of Backup.
-            properties:
-              error:
-                description: Error contains error information if the backup failed.
-                type: string
-              phase:
-                description: Phase represents the current phase of the backup operation.
-                type: string
-              startedAt:
-                description: StartedAt is the time when the backup operation started.
-                format: date-time
-                type: string
-              stoppedAt:
-                description: StoppedAt is the time when the backup operation completed
-                  or failed.
-                format: date-time
-                type: string
+            description: ScheduledBackupStatus defines the observed state of ScheduledBackup
             type: object
+        required:
+        - metadata
+        - spec
         type: object
     served: true
     storage: true

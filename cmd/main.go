@@ -195,11 +195,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.GatewayTLSReconciler{
+	if err = (&controller.CertificateReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "GatewayTLS")
+		setupLog.Error(err, "unable to create controller", "controller", "Certificate")
 		os.Exit(1)
 	}
 

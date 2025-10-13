@@ -1,3 +1,6 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
 package controller
 
 import (
@@ -20,8 +23,9 @@ import (
 	util "github.com/microsoft/documentdb-operator/internal/utils"
 )
 
-// GatewayTLSReconciler manages the TLS assets for DocumentDB gateway endpoints.
-type GatewayTLSReconciler struct {
+// CertificateReconciler manages certificate lifecycle for DocumentDB components.
+// Today it provisions gateway TLS assets; future work can layer in additional surfaces.
+type CertificateReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
@@ -32,7 +36,7 @@ type GatewayTLSReconciler struct {
 // +kubebuilder:rbac:groups=cert-manager.io,resources=certificates/status;issuers/status,verbs=get
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
-func (r *GatewayTLSReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *CertificateReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	ddb := &dbpreview.DocumentDB{}
@@ -43,14 +47,14 @@ func (r *GatewayTLSReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	res, err := r.reconcileGatewayTLS(ctx, ddb)
+	res, err := r.reconcileCertificates(ctx, ddb)
 	if err != nil {
-		logger.Error(err, "failed to reconcile gateway TLS")
+		logger.Error(err, "failed to reconcile certificate resources")
 	}
 	return res, err
 }
 
-func (r *GatewayTLSReconciler) reconcileGatewayTLS(ctx context.Context, ddb *dbpreview.DocumentDB) (ctrl.Result, error) {
+func (r *CertificateReconciler) reconcileCertificates(ctx context.Context, ddb *dbpreview.DocumentDB) (ctrl.Result, error) {
 	if ddb.Spec.TLS == nil || ddb.Spec.TLS.Gateway == nil {
 		return ctrl.Result{}, nil
 	}
@@ -82,7 +86,7 @@ func (r *GatewayTLSReconciler) reconcileGatewayTLS(ctx context.Context, ddb *dbp
 	}
 }
 
-func (r *GatewayTLSReconciler) ensureProvidedSecret(ctx context.Context, ddb *dbpreview.DocumentDB) (ctrl.Result, error) {
+func (r *CertificateReconciler) ensureProvidedSecret(ctx context.Context, ddb *dbpreview.DocumentDB) (ctrl.Result, error) {
 	gatewayCfg := ddb.Spec.TLS.Gateway
 	if gatewayCfg == nil || gatewayCfg.Provided == nil || gatewayCfg.Provided.SecretName == "" {
 		ddb.Status.TLS.Message = "Provided TLS secret name missing"
@@ -122,7 +126,7 @@ func (r *GatewayTLSReconciler) ensureProvidedSecret(ctx context.Context, ddb *db
 	return ctrl.Result{}, nil
 }
 
-func (r *GatewayTLSReconciler) ensureCertManagerManagedCert(ctx context.Context, ddb *dbpreview.DocumentDB) (ctrl.Result, error) {
+func (r *CertificateReconciler) ensureCertManagerManagedCert(ctx context.Context, ddb *dbpreview.DocumentDB) (ctrl.Result, error) {
 	gatewayCfg := ddb.Spec.TLS.Gateway
 	if gatewayCfg == nil || gatewayCfg.CertManager == nil {
 		ddb.Status.TLS.Message = "CertManager configuration missing"
@@ -216,7 +220,7 @@ func (r *GatewayTLSReconciler) ensureCertManagerManagedCert(ctx context.Context,
 	return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 }
 
-func (r *GatewayTLSReconciler) ensureSelfSignedCert(ctx context.Context, ddb *dbpreview.DocumentDB) (ctrl.Result, error) {
+func (r *CertificateReconciler) ensureSelfSignedCert(ctx context.Context, ddb *dbpreview.DocumentDB) (ctrl.Result, error) {
 	namespace := ddb.Namespace
 	issuerName := ddb.Name + "-gateway-selfsigned"
 	certName := ddb.Name + "-gateway-cert"
@@ -296,11 +300,11 @@ func (r *GatewayTLSReconciler) ensureSelfSignedCert(ctx context.Context, ddb *db
 	return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 }
 
-func (r *GatewayTLSReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *CertificateReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&dbpreview.DocumentDB{}).
 		Owns(&cmapi.Certificate{}).
 		Owns(&cmapi.Issuer{}).
-		Named("gateway-tls-controller").
+		Named("certificate-controller").
 		Complete(r)
 }

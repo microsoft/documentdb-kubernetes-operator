@@ -19,7 +19,7 @@ Example snippets below mirror the setup we used previously; adapt namespaces and
 
 ## Set variables
 ```bash
-export suffix="093001"
+export suffix="093002"
 #export suffix=$(date +%m%d%H)
 export SUBSCRIPTION_ID="81901d5e-31aa-46c5-b61a-537dbd5df1e7"
 export LOCATION="eastus2"

@@ -249,18 +249,18 @@ func DeleteRoleBinding(ctx context.Context, c client.Client, name, namespace str
 	return nil
 }
 
-// GenerateConnectionString returns a MongoDB connection string for the DocumentDB instance
-func GenerateConnectionString(documentdb *dbpreview.DocumentDB, serviceIp string) string {
+// GenerateConnectionString returns a MongoDB connection string for the DocumentDB instance.
+// When trustTLS is true, tlsAllowInvalidCertificates is omitted for strict verification.
+func GenerateConnectionString(documentdb *dbpreview.DocumentDB, serviceIp string, trustTLS bool) string {
 	secretName := documentdb.Spec.DocumentDbCredentialSecret
 	if secretName == "" {
 		secretName = DEFAULT_DOCUMENTDB_CREDENTIALS_SECRET
 	}
-	return fmt.Sprintf("mongodb://$(kubectl get secret %s -n %s -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret %s -n %s -o jsonpath='{.data.password}' | base64 -d)@%s:%d/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0", secretName, documentdb.Namespace, secretName, documentdb.Namespace, serviceIp, GetPortFor(GATEWAY_PORT))
-}
-
-// GenerateSecureConnectionString returns a MongoDB connection string without tlsAllowInvalidCertificates, assuming a trusted cert.
-func GenerateSecureConnectionString(documentdb *dbpreview.DocumentDB, serviceIp string) string {
-	return fmt.Sprintf("mongodb://$(kubectl get secret documentdb-credentials -n %s -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret documentdb-credentials -n %s -o jsonpath='{.data.password}' | base64 -d)@%s:%d/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&replicaSet=rs0", documentdb.Namespace, documentdb.Namespace, serviceIp, GetPortFor(GATEWAY_PORT))
+	conn := fmt.Sprintf("mongodb://$(kubectl get secret %s -n %s -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret %s -n %s -o jsonpath='{.data.password}' | base64 -d)@%s:%d/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true", secretName, documentdb.Namespace, secretName, documentdb.Namespace, serviceIp, GetPortFor(GATEWAY_PORT))
+	if !trustTLS {
+		conn += "&tlsAllowInvalidCertificates=true"
+	}
+	return conn + "&replicaSet=rs0"
 }
 
 // GetGatewayImageForDocumentDB returns the gateway image for a DocumentDB instance.

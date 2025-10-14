@@ -39,7 +39,8 @@ spec:
   nodeCount: 1
   instancesPerNode: 1
   resource:
-    pvcSize: "10Gi"
+    storage:
+      pvcSize: "10Gi"
   documentDBImage: "mcr.microsoft.com/documentdb/documentdb:16-v1.3.0"
   # Explicitly specify gateway image
   gatewayImage: "ghcr.io/microsoft/documentdb/documentdb-local:17"
@@ -109,7 +110,8 @@ spec:
   nodeCount: 1
   instancesPerNode: 1
   resource:
-    pvcSize: "10Gi"
+    storage:
+      pvcSize: "10Gi"
   gatewayImage: "ghcr.io/microsoft/documentdb/documentdb-local:17"
 ```
 
@@ -124,7 +126,8 @@ spec:
   nodeCount: 1
   instancesPerNode: 1
   resource:
-    pvcSize: "20Gi"
+    storage:
+      pvcSize: "20Gi"
   documentDBImage: "mcr.microsoft.com/documentdb/documentdb:16-v1.3.0"
   gatewayImage: "ghcr.io/microsoft/documentdb/documentdb-local:17"
   sidecarInjectorPluginName: "cnpg-i-sidecar-injector.documentdb.io"

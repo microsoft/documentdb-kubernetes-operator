@@ -22,7 +22,8 @@ spec:
   nodeCount: 1
   instancesPerNode: 1
   resource:
-    pvcSize: 10Gi
+    storage:
+      pvcSize: 10Gi
   # No explicit versions - should use operator defaults/env vars
   exposeViaService:
     serviceType: LoadBalancer

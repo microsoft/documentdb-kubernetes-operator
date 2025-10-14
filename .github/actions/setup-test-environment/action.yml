@@ -571,7 +571,8 @@ runs:
           documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
           gatewayImage: ghcr.io/microsoft/documentdb/documentdb-local:16
           resource:
-            pvcSize: 5Gi
+            storage:
+              pvcSize: 5Gi
           exposeViaService:
             serviceType: ClusterIP
         EOF

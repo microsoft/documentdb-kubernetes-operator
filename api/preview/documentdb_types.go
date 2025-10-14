@@ -4,6 +4,7 @@
 package preview
 
 import (
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -53,6 +54,24 @@ type DocumentDBSpec struct {
 	ExposeViaService ExposeViaService `json:"exposeViaService,omitempty"`
 
 	Timeouts Timeouts `json:"timeouts,omitempty"`
+
+	// Bootstrap configures the initialization of the DocumentDB cluster.
+	// +optional
+	Bootstrap *BootstrapConfiguration `json:"bootstrap,omitempty"`
+}
+
+// BootstrapConfiguration defines how to bootstrap a DocumentDB cluster.
+type BootstrapConfiguration struct {
+	// Recovery configures recovery from a backup.
+	// +optional
+	Recovery *RecoveryConfiguration `json:"recovery,omitempty"`
+}
+
+// RecoveryConfiguration defines backup recovery settings.
+type RecoveryConfiguration struct {
+	// Backup specifies the source backup to restore from.
+	// +optional
+	Backup cnpgv1.LocalObjectReference `json:"backup,omitempty"`
 }
 
 type Resource struct {

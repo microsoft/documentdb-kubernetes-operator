@@ -371,6 +371,10 @@ runs:
           echo "Found platform-specific chart file: $EXPECTED_CHART_FILE"
           tar -xzf "$EXPECTED_CHART_FILE"
           
+          # Extract the image tag from the built image for Helm overrides
+          LOCAL_IMAGE_TAG="${{ inputs.image-tag }}-${{ inputs.architecture }}"
+          echo "Using local image tag: $LOCAL_IMAGE_TAG"
+          
           # If cert-manager is not ready, we need to modify the chart to skip cert-manager resources
           if [[ "$CERT_MANAGER_READY" != "true" ]]; then
             echo "Modifying chart to skip cert-manager Certificate resources..."
@@ -387,16 +391,22 @@ runs:
             echo "✓ Chart modified to skip cert-manager resources"
           fi
           
-          # Install the operator using the platform-specific local chart
+          # Install the operator using the platform-specific local chart with image tag overrides
           if [[ "$CERT_MANAGER_READY" == "true" ]]; then
             helm install documentdb-operator ./documentdb-chart-${{ inputs.architecture }} \
               --namespace ${{ inputs.operator-namespace }} \
               --create-namespace \
+              --set documentDbVersion="$LOCAL_IMAGE_TAG" \
+              --set image.documentdbk8soperator.tag="$LOCAL_IMAGE_TAG" \
+              --set image.sidecarinjector.tag="$LOCAL_IMAGE_TAG" \
               --wait --timeout=15m
           else
             helm install documentdb-operator ./documentdb-chart-${{ inputs.architecture }} \
               --namespace ${{ inputs.operator-namespace }} \
               --create-namespace \
+              --set documentDbVersion="$LOCAL_IMAGE_TAG" \
+              --set image.documentdbk8soperator.tag="$LOCAL_IMAGE_TAG" \
+              --set image.sidecarinjector.tag="$LOCAL_IMAGE_TAG" \
               --values /tmp/values-override.yaml \
               --wait --timeout=15m
           fi
@@ -504,8 +514,8 @@ runs:
         echo "Verifying DocumentDB operator installation..."
         kubectl wait --for=condition=Available deployment/documentdb-operator -n ${{ inputs.operator-namespace }} --timeout=300s
         
-        # Verify that the external images are being used
-        echo "Verifying operator deployment uses external images with tag ${{ inputs.image-tag }}..."
+        # Verify that the external images are being used with chart defaults
+        echo "Verifying operator deployment uses external images with chart default version..."
         echo "Operator image:"
         kubectl get deployment documentdb-operator -n ${{ inputs.operator-namespace }} -o jsonpath='{.spec.template.spec.containers[0].image}'
         echo ""

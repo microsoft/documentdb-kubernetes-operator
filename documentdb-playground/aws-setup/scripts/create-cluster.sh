@@ -429,7 +429,8 @@ Then run the script again with --install-operator"
 - Your GitHub token has 'read:packages' scope
 - You have access to ${OPERATOR_GITHUB_ORG}/documentdb-operator repository  
 - The chart version ${OPERATOR_CHART_VERSION} exists"
-    fi    # Wait for operator to be ready
+    fi    
+    # Wait for operator to be ready
     log "Waiting for DocumentDB operator to be ready..."
     kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=documentdb-operator -n documentdb-operator --timeout=300s || warn "DocumentDB operator pods may still be starting"
     
@@ -510,7 +511,6 @@ EOF
     log ""
     log "📝 Note: It takes 2-5 minutes for AWS to provision the LoadBalancer and assign a public IP"
     log "📝 AWS LoadBalancer annotations are automatically applied by the operator based on environment: eks"
-    log "📝 Note: It takes 2-5 minutes for AWS to provision the LoadBalancer and assign a public IP"
 }
 
 # Print summary

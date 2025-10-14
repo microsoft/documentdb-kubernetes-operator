@@ -18,7 +18,6 @@ spec:
   resource:
     storage:
       pvcSize: 10Gi
-      storageClass: documentdb-storage
   exposeViaService:
     serviceType: LoadBalancer
   environment: eks

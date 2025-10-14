@@ -164,7 +164,8 @@ spec:
   instancesPerNode: 1
   documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   resource:
-    pvcSize: 10Gi
+    storage:
+      pvcSize: 10Gi
   exposeViaService:
     serviceType: ClusterIP
 EOF

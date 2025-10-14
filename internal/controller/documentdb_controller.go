@@ -146,15 +146,20 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 func (r *DocumentDBReconciler) cleanupResources(ctx context.Context, req ctrl.Request, documentdb *dbpreview.DocumentDB) error {
 	log := log.FromContext(ctx)
 
-	// Cleanup DocumentDB Service
-	if documentdb.Spec.ExposeViaService.ServiceType != "" {
-		serviceName := util.DOCUMENTDB_SERVICE_PREFIX + req.Name
-		if err := util.DeleteService(ctx, r.Client, serviceName, req.Namespace); err != nil {
-			return err
-		}
+	// Cleanup DocumentDB Service - Always attempt cleanup since we can't check the spec of a deleted resource
+	// The service follows a predictable naming pattern, so we can attempt deletion
+	serviceName := util.DOCUMENTDB_SERVICE_PREFIX + req.Name
+	log.Info("Attempting to cleanup DocumentDB Service", "ServiceName", serviceName, "Namespace", req.Namespace)
+	if err := util.DeleteService(ctx, r.Client, serviceName, req.Namespace); err != nil {
+		log.Error(err, "Failed to delete DocumentDB Service during cleanup", "ServiceName", serviceName)
+		// Don't return error for service deletion failure - continue with other cleanup
+	} else {
+		log.Info("DocumentDB Service deleted successfully during cleanup", "ServiceName", serviceName)
 	}
+
 	// Cleanup CNPG Cluster
 	cnpgCluster := cnpg.GetCnpgClusterSpec(req, dbpreview.DocumentDB{}, "", req.Name, log)
+	log.Info("Attempting to cleanup CNPG Cluster", "ClusterName", cnpgCluster.Name, "Namespace", req.Namespace)
 	if err := r.Client.Delete(ctx, cnpgCluster); err != nil {
 		if errors.IsNotFound(err) {
 			log.Info("CNPG Cluster not found, skipping deletion.")
@@ -166,17 +171,25 @@ func (r *DocumentDBReconciler) cleanupResources(ctx context.Context, req ctrl.Re
 		log.Info("CNPG Cluster deleted successfully", "Cluster.Name", cnpgCluster.Name, "Namespace", cnpgCluster.Namespace)
 	}
 
-	// Cleanup ServiceAccount, Role and RoleBinding
+	// Cleanup ServiceAccount, Role and RoleBinding - Always attempt cleanup
+	log.Info("Attempting to cleanup RBAC resources", "ResourceName", req.Name, "Namespace", req.Namespace)
+
 	if err := util.DeleteRoleBinding(ctx, r.Client, req.Name, req.Namespace); err != nil {
-		return err
-	}
-	if err := util.DeleteServiceAccount(ctx, r.Client, req.Name, req.Namespace); err != nil {
-		return err
-	}
-	if err := util.DeleteRole(ctx, r.Client, req.Name, req.Namespace); err != nil {
-		return err
+		log.Error(err, "Failed to delete RoleBinding during cleanup", "RoleBindingName", req.Name)
+		// Continue with other cleanup even if this fails
 	}
 
+	if err := util.DeleteServiceAccount(ctx, r.Client, req.Name, req.Namespace); err != nil {
+		log.Error(err, "Failed to delete ServiceAccount during cleanup", "ServiceAccountName", req.Name)
+		// Continue with other cleanup even if this fails
+	}
+
+	if err := util.DeleteRole(ctx, r.Client, req.Name, req.Namespace); err != nil {
+		log.Error(err, "Failed to delete Role during cleanup", "RoleName", req.Name)
+		// Continue with other cleanup even if this fails
+	}
+
+	log.Info("Cleanup process completed", "DocumentDB", req.Name, "Namespace", req.Namespace)
 	return nil
 }
 

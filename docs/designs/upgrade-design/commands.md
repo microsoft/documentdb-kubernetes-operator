@@ -96,7 +96,8 @@ spec:
   nodeCount: 3
   instancesPerNode: 1
   resource:
-    pvcSize: 100Gi
+    storage:
+      pvcSize: 100Gi
 EOF
 
 # Updated v2 deployment file:
@@ -110,7 +111,8 @@ spec:
   nodeCount: 3
   instancesPerNode: 1
   resource:
-    pvcSize: 100Gi
+    storage:
+      pvcSize: 100Gi
   # v2-specific features
   enhancedMonitoring: true
   advancedFeatures:

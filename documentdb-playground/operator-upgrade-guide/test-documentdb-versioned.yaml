@@ -8,6 +8,7 @@ spec:
   instancesPerNode: 1
   documentDBVersion: "v1.0.0"  # Explicit version - should NOT change during upgrade
   resource:
-    pvcSize: 10Gi
+    storage:
+      pvcSize: 10Gi
   exposeViaService:
     serviceType: LoadBalancer

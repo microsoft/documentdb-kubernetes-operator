@@ -52,12 +52,26 @@ type DocumentDBSpec struct {
 	// This can be a LoadBalancer or ClusterIP service.
 	ExposeViaService ExposeViaService `json:"exposeViaService,omitempty"`
 
+	// Environment specifies the cloud environment for deployment
+	// This determines cloud-specific service annotations for LoadBalancer services
+	// +kubebuilder:validation:Enum=eks;aks;gke
+	Environment string `json:"environment,omitempty"`
+
 	Timeouts Timeouts `json:"timeouts,omitempty"`
 }
 
 type Resource struct {
+	// Storage configuration for DocumentDB persistent volumes.
+	Storage StorageConfiguration `json:"storage"`
+}
+
+type StorageConfiguration struct {
 	// PvcSize is the size of the persistent volume claim for DocumentDB storage (e.g., "10Gi").
 	PvcSize string `json:"pvcSize"`
+
+	// StorageClass specifies the storage class for DocumentDB persistent volumes.
+	// If not specified, the cluster's default storage class will be used.
+	StorageClass string `json:"storageClass,omitempty"`
 }
 
 type ClusterReplication struct {

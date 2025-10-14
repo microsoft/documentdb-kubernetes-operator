@@ -170,7 +170,7 @@ Assumptions
 
 Set variables
 ```
-suffix=092901
+suffix=101301
 export SUBSCRIPTION_ID="81901d5e-31aa-46c5-b61a-537dbd5df1e7"
 export LOCATION="eastus2"
 export RG="documentdb-aks${suffix}-rg"

@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -62,16 +63,22 @@ func (r *CertificateReconciler) reconcileCertificates(ctx context.Context, ddb *
 	gatewayCfg := ddb.Spec.TLS.Gateway
 	if gatewayCfg.Mode == "" || gatewayCfg.Mode == "Disabled" {
 		if ddb.Status.TLS != nil && ddb.Status.TLS.Ready {
-			ddb.Status.TLS.Ready = false
-			ddb.Status.TLS.Message = "Gateway TLS disabled"
-			_ = r.Status().Update(ctx, ddb)
+			if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+				status.Ready = false
+				status.Message = "Gateway TLS disabled"
+			}); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 		return ctrl.Result{}, nil
 	}
 
 	if ddb.Status.TLS == nil {
-		ddb.Status.TLS = &dbpreview.TLSStatus{Ready: false}
-		_ = r.Status().Update(ctx, ddb)
+		if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+			status.Ready = false
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	switch gatewayCfg.Mode {
@@ -89,48 +96,70 @@ func (r *CertificateReconciler) reconcileCertificates(ctx context.Context, ddb *
 func (r *CertificateReconciler) ensureProvidedSecret(ctx context.Context, ddb *dbpreview.DocumentDB) (ctrl.Result, error) {
 	gatewayCfg := ddb.Spec.TLS.Gateway
 	if gatewayCfg == nil || gatewayCfg.Provided == nil || gatewayCfg.Provided.SecretName == "" {
-		ddb.Status.TLS.Message = "Provided TLS secret name missing"
-		_ = r.Status().Update(ctx, ddb)
+		if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+			status.Message = "Provided TLS secret name missing"
+			status.Ready = false
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 
 	secret := &corev1.Secret{}
 	if err := r.Get(ctx, types.NamespacedName{Name: gatewayCfg.Provided.SecretName, Namespace: ddb.Namespace}, secret); err != nil {
 		if errors.IsNotFound(err) {
-			ddb.Status.TLS.Ready = false
-			ddb.Status.TLS.SecretName = gatewayCfg.Provided.SecretName
-			ddb.Status.TLS.Message = "Waiting for provided TLS secret"
-			_ = r.Status().Update(ctx, ddb)
+			if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+				status.Ready = false
+				status.SecretName = gatewayCfg.Provided.SecretName
+				status.Message = "Waiting for provided TLS secret"
+			}); err != nil {
+				return ctrl.Result{}, err
+			}
 			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 		}
 		return ctrl.Result{}, err
 	}
 
 	if _, crtOk := secret.Data["tls.crt"]; !crtOk {
-		ddb.Status.TLS.Ready = false
-		ddb.Status.TLS.Message = "Provided secret missing tls.crt"
-		_ = r.Status().Update(ctx, ddb)
+		if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+			status.Ready = false
+			status.Message = "Provided secret missing tls.crt"
+			status.SecretName = gatewayCfg.Provided.SecretName
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 	}
 	if _, keyOk := secret.Data["tls.key"]; !keyOk {
-		ddb.Status.TLS.Ready = false
-		ddb.Status.TLS.Message = "Provided secret missing tls.key"
-		_ = r.Status().Update(ctx, ddb)
+		if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+			status.Ready = false
+			status.Message = "Provided secret missing tls.key"
+			status.SecretName = gatewayCfg.Provided.SecretName
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 	}
 
-	ddb.Status.TLS.Ready = true
-	ddb.Status.TLS.SecretName = gatewayCfg.Provided.SecretName
-	ddb.Status.TLS.Message = "Using provided TLS secret"
-	_ = r.Status().Update(ctx, ddb)
+	if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+		status.Ready = true
+		status.SecretName = gatewayCfg.Provided.SecretName
+		status.Message = "Using provided TLS secret"
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
 }
 
 func (r *CertificateReconciler) ensureCertManagerManagedCert(ctx context.Context, ddb *dbpreview.DocumentDB) (ctrl.Result, error) {
 	gatewayCfg := ddb.Spec.TLS.Gateway
 	if gatewayCfg == nil || gatewayCfg.CertManager == nil {
-		ddb.Status.TLS.Message = "CertManager configuration missing"
-		_ = r.Status().Update(ctx, ddb)
+		if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+			status.Ready = false
+			status.Message = "CertManager configuration missing"
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -194,29 +223,38 @@ func (r *CertificateReconciler) ensureCertManagerManagedCert(ctx context.Context
 		if err := r.Create(ctx, cert); err != nil {
 			return ctrl.Result{}, err
 		}
-		ddb.Status.TLS.Ready = false
-		ddb.Status.TLS.SecretName = secretName
-		ddb.Status.TLS.Message = "Creating cert-manager certificate"
-		_ = r.Status().Update(ctx, ddb)
+		if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+			status.Ready = false
+			status.SecretName = secretName
+			status.Message = "Creating cert-manager certificate"
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 	}
 
 	for _, cond := range cert.Status.Conditions {
 		if cond.Type == cmapi.CertificateConditionReady && cond.Status == cmmeta.ConditionTrue {
 			if !ddb.Status.TLS.Ready {
-				ddb.Status.TLS.Ready = true
-				ddb.Status.TLS.SecretName = cert.Spec.SecretName
-				ddb.Status.TLS.Message = "Gateway TLS certificate ready (cert-manager)"
-				_ = r.Status().Update(ctx, ddb)
+				if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+					status.Ready = true
+					status.SecretName = cert.Spec.SecretName
+					status.Message = "Gateway TLS certificate ready (cert-manager)"
+				}); err != nil {
+					return ctrl.Result{}, err
+				}
 			}
 			return ctrl.Result{}, nil
 		}
 	}
 
-	ddb.Status.TLS.Ready = false
-	ddb.Status.TLS.SecretName = cert.Spec.SecretName
-	ddb.Status.TLS.Message = "Waiting for cert-manager certificate to become ready"
-	_ = r.Status().Update(ctx, ddb)
+	if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+		status.Ready = false
+		status.SecretName = cert.Spec.SecretName
+		status.Message = "Waiting for cert-manager certificate to become ready"
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 }
 
@@ -274,30 +312,58 @@ func (r *CertificateReconciler) ensureSelfSignedCert(ctx context.Context, ddb *d
 		if err := r.Create(ctx, cert); err != nil {
 			return ctrl.Result{}, err
 		}
-		ddb.Status.TLS.Ready = false
-		ddb.Status.TLS.SecretName = secretName
-		ddb.Status.TLS.Message = "Creating self-signed certificate"
-		_ = r.Status().Update(ctx, ddb)
+		if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+			status.Ready = false
+			status.SecretName = secretName
+			status.Message = "Creating self-signed certificate"
+		}); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 	}
 
 	for _, cond := range cert.Status.Conditions {
 		if cond.Type == cmapi.CertificateConditionReady && cond.Status == cmmeta.ConditionTrue {
 			if !ddb.Status.TLS.Ready {
-				ddb.Status.TLS.Ready = true
-				ddb.Status.TLS.SecretName = cert.Spec.SecretName
-				ddb.Status.TLS.Message = "Gateway TLS certificate ready"
-				_ = r.Status().Update(ctx, ddb)
+				if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+					status.Ready = true
+					status.SecretName = cert.Spec.SecretName
+					status.Message = "Gateway TLS certificate ready"
+				}); err != nil {
+					return ctrl.Result{}, err
+				}
 			}
 			return ctrl.Result{}, nil
 		}
 	}
 
-	ddb.Status.TLS.Ready = false
-	ddb.Status.TLS.SecretName = cert.Spec.SecretName
-	ddb.Status.TLS.Message = "Waiting for gateway TLS certificate to become ready"
-	_ = r.Status().Update(ctx, ddb)
+	if err := r.updateTLSStatus(ctx, ddb, func(status *dbpreview.TLSStatus) {
+		status.Ready = false
+		status.SecretName = cert.Spec.SecretName
+		status.Message = "Waiting for gateway TLS certificate to become ready"
+	}); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+}
+
+func (r *CertificateReconciler) updateTLSStatus(ctx context.Context, ddb *dbpreview.DocumentDB, mutate func(*dbpreview.TLSStatus)) error {
+	key := types.NamespacedName{Name: ddb.Name, Namespace: ddb.Namespace}
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		current := &dbpreview.DocumentDB{}
+		if err := r.Get(ctx, key, current); err != nil {
+			return err
+		}
+		if current.Status.TLS == nil {
+			current.Status.TLS = &dbpreview.TLSStatus{}
+		}
+		mutate(current.Status.TLS)
+		if err := r.Status().Update(ctx, current); err != nil {
+			return err
+		}
+		ddb.Status = current.Status
+		return nil
+	})
 }
 
 func (r *CertificateReconciler) SetupWithManager(mgr ctrl.Manager) error {

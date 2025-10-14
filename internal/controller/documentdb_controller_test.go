@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
@@ -24,7 +25,20 @@ func buildCertificateReconciler(t *testing.T, objs ...runtime.Object) *Certifica
 	require.NoError(t, dbpreview.AddToScheme(scheme))
 	require.NoError(t, cmapi.AddToScheme(scheme))
 	require.NoError(t, corev1.AddToScheme(scheme))
-	c := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).Build()
+	builder := fake.NewClientBuilder().WithScheme(scheme)
+	if len(objs) > 0 {
+		builder = builder.WithRuntimeObjects(objs...)
+		clientObjs := make([]client.Object, 0, len(objs))
+		for _, obj := range objs {
+			if co, ok := obj.(client.Object); ok {
+				clientObjs = append(clientObjs, co)
+			}
+		}
+		if len(clientObjs) > 0 {
+			builder = builder.WithStatusSubresource(clientObjs...)
+		}
+	}
+	c := builder.Build()
 	return &CertificateReconciler{Client: c, Scheme: scheme}
 }
 

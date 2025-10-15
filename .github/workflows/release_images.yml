@@ -31,7 +31,7 @@ jobs:
   # Optional test jobs - run both E2E and integration tests in parallel if enabled
   test-e2e:
     name: E2E Test Images Before Release
-    if: ${{ inputs.run_tests == true }}
+    if: ${{ inputs.run_tests == 'true' }}
     uses: ./.github/workflows/test-E2E.yml
     with:
       image_tag: ${{ inputs.image_tag }}
@@ -39,7 +39,7 @@ jobs:
 
   test-integration:
     name: Integration Test Images Before Release
-    if: ${{ inputs.run_tests == true }}
+    if: ${{ inputs.run_tests == 'true' }}
     uses: ./.github/workflows/test-integration.yml
     with:
       image_tag: ${{ inputs.image_tag }}
@@ -49,7 +49,7 @@ jobs:
     name: Release Images
     runs-on: ubuntu-latest
     needs: [test-e2e, test-integration]
-    if: ${{ always() && ( !inputs.run_tests || ((needs.test-e2e.result == 'success' || needs.test-e2e.result == 'skipped') && (needs.test-integration.result == 'success' || needs.test-integration.result == 'skipped')) ) }}
+    if: ${{ always() && ( inputs.run_tests != 'true' || ((needs.test-e2e.result == 'success' || needs.test-e2e.result == 'skipped') && (needs.test-integration.result == 'success' || needs.test-integration.result == 'skipped')) ) }}
     strategy:
       matrix:
         image: [operator, sidecar]

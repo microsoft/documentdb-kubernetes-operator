@@ -14,11 +14,11 @@ serviceAccount:
   
 image:
   documentdbk8soperator:
-    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/operator
+    repository: ghcr.io/guanzhousongmicrosoft/documentdb-kubernetes-operator/operator
     pullPolicy: Always
     tag: preview
   sidecarinjector:
-    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/sidecar
+    repository: ghcr.io/guanzhousongmicrosoft/documentdb-kubernetes-operator/sidecar
     pullPolicy: Always
     tag: preview
     

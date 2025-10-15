@@ -13,7 +13,7 @@ This guide shows how to validate Provided TLS mode end-to-end using Azure Key Va
 - You are Owner on the target Azure subscription
 - Tools on your machine: Azure CLI, Docker, kubectl, and Helm
   - Login later with `az login`
-  - We’ll create all Azure resources (RG, ACR, AKS, Key Vault) and install all cluster add-ons (cert-manager, CSI + Azure provider)
+  - We’ll create all Azure resources (RG, AKS, Key Vault) and install all cluster add-ons (cert-manager, CSI + Azure provider). You’ll also push custom images to GHCR.
 
 Repo examples you can reference:
 - `EXAMPLE_k8s_cert_management/azure-key-vault/azure-secret-provider-class.yaml`
@@ -31,10 +31,26 @@ export NS="documentdb-preview-ns"
 export DOCDB_NAME="documentdb-preview"
 export CERT_NAME="documentdb-gateway"
 export SECRET_NAME="documentdb-provided-tls"
-export ACR_NAME="guanzhoutest"             # must be globally unique
-export OPERATOR_IMAGE_REPO="$ACR_NAME.azurecr.io/documentdb/operator"
-export SIDECAR_IMAGE_REPO="$ACR_NAME.azurecr.io/documentdb/sidecar"
-export IMAGE_TAG="$(date +%Y%m%d%H%M%S)"
+export GHCR_USER="guanzhousongmicrosoft"                             # GitHub username with push access
+export GHCR_PAT="<ghcr-personal-access-token-write-packages>" # scoped for write/read packages
+export OPERATOR_IMAGE_REPO="ghcr.io/guanzhousongmicrosoft/documentdb-kubernetes-operator/operator"
+export SIDECAR_IMAGE_REPO="ghcr.io/guanzhousongmicrosoft/documentdb-kubernetes-operator/sidecar"
+export IMAGE_TAG="$(date +%Y%m%d)"
+
+echo "suffix=$suffix"
+echo "SUBSCRIPTION_ID=$SUBSCRIPTION_ID"
+echo "LOCATION=$LOCATION"
+echo "RG=$RG"
+echo "AKS_NAME=$AKS_NAME"
+echo "KV_NAME=$KV_NAME"
+echo "NS=$NS"
+echo "DOCDB_NAME=$DOCDB_NAME"
+echo "CERT_NAME=$CERT_NAME"
+echo "SECRET_NAME=$SECRET_NAME"
+echo "GHCR_USER=$GHCR_USER"
+echo "OPERATOR_IMAGE_REPO=$OPERATOR_IMAGE_REPO"
+echo "SIDECAR_IMAGE_REPO=$SIDECAR_IMAGE_REPO"
+echo "IMAGE_TAG=$IMAGE_TAG"
 ```
 
 Select subscription
@@ -50,13 +66,13 @@ az group create -n "$RG" -l "$LOCATION"
 ```
 
 
-Create AKS with managed identity and attach ACR:
+Create AKS with managed identity:
 ```bash
 az aks create -g "$RG" -n "$AKS_NAME" -l "$LOCATION" \
   --enable-managed-identity \
   --node-count 3 \
   -s Standard_d8s_v5 \
-  --attach-acr "$ACR_NAME"
+  --generate-ssh-keys
 ```
 
 Get kubeconfig credentials:
@@ -64,14 +80,8 @@ Get kubeconfig credentials:
 az aks get-credentials -g "$RG" -n "$AKS_NAME" --overwrite-existing
 ```
 
-Login to ACR, build and push operator images:
-```bash
-az acr login -n "$ACR_NAME"
-docker build -t "$OPERATOR_IMAGE_REPO:$IMAGE_TAG" -f Dockerfile .
-docker build -t "$SIDECAR_IMAGE_REPO:$IMAGE_TAG" -f plugins/sidecar-injector/Dockerfile plugins/sidecar-injector
-docker push "$OPERATOR_IMAGE_REPO:$IMAGE_TAG"
-docker push "$SIDECAR_IMAGE_REPO:$IMAGE_TAG"
-```
+build images in Github...
+
 
 Preflight: verify cluster connectivity (fix before proceeding):
 ```bash
@@ -104,9 +114,7 @@ helm repo add csi-azure https://azure.github.io/secrets-store-csi-driver-provide
 helm repo update
 # IMPORTANT: Do not mix with the AKS managed add-on. If it's enabled, disable it first or skip Helm.
 kubectl -n kube-system get ds | grep -E 'aks-secrets-store-provider-azure' && echo "AKS add-on detected; disable it or skip Helm" || true
-# az aks disable-addons -g "$RG" -n "$AKS_NAME" -a azure-keyvault-secrets-provider
-# If you previously installed the driver separately, remove it to avoid Helm ownership conflicts
-helm uninstall csi-secrets-store -n kube-system || true
+
 
 # Install the Azure provider; it bundles the CSI driver. Enable secret sync on the bundled driver.
 helm upgrade --install csi-azure-provider csi-azure/csi-secrets-store-provider-azure -n kube-system \
@@ -120,44 +128,9 @@ kubectl -n kube-system wait --for=condition=Ready pod -l app=csi-secrets-store-p
 kubectl -n kube-system get ds -l app=secrets-store-csi-driver -o wide
 kubectl -n kube-system get ds -l app=csi-secrets-store-provider-azure -o wide
 
-# If you just installed the provider and already created cert-puller, restart it to retry the mount
-kubectl -n "$NS" rollout restart deploy cert-puller || true
+> Important: The SecretProviderClass `spec.provider` must be `azure` (lowercase), and any pod mounting it must set `volumeAttributes.secretProviderClass` to the same name.
 
-# If you see IMDS 400 errors complaining about multiple user-assigned identities, patch the SPC
-# with the kubelet user-assigned identity clientId using a CRLF-safe patch file:
-KUBELET_CLIENT_ID=$(az aks show -g "$RG" -n "$AKS_NAME" --query identityProfile.kubeletidentity.clientId -o tsv | tr -d '\r')
-cat > /tmp/spc-patch.json <<PATCH
-{
-  "spec": {
-    "parameters": {
-      "userAssignedIdentityID": "${KUBELET_CLIENT_ID}"
-    }
-  }
-}
-PATCH
-kubectl -n "$NS" patch secretproviderclass documentdb-azure-tls --type merge -p "$(cat /tmp/spc-patch.json)"
-kubectl -n "$NS" rollout restart deploy cert-puller || true
-```
-
-Tip: Helm release names prefix the DaemonSet resources. To see the exact DS name, use a label selector:
-```bash
-kubectl -n kube-system get ds -l app=csi-secrets-store-provider-azure -o name
-```
-Important:
-- The SecretProviderClass `spec.provider` must be exactly `azure` (lowercase) to load the Azure provider.
-- Any pod using the secret must reference the SecretProviderClass by name via `volumeAttributes.secretProviderClass` and it must match `metadata.name` of the SecretProviderClass.
-AKS add-on alternative (don’t mix with Helm):
-```bash
-# Enable the managed add-on instead of using Helm
-az aks enable-addons -g "$RG" -n "$AKS_NAME" -a azure-keyvault-secrets-provider
-kubectl -n kube-system get pods -l app=secrets-store-csi-driver
-kubectl -n kube-system get pods -l app=csi-secrets-store-provider-azure
-# If you switch to Helm later, uninstall the add-on first:
-# az aks disable-addons -g "$RG" -n "$AKS_NAME" -a azure-keyvault-secrets-provider
-# Then install the Helm provider as shown above.
-```
-
-Deploy the operator Helm chart using your ACR images:
+Deploy the operator Helm chart using your GHCR images:
 ```bash
 kubectl create namespace documentdb-operator --dry-run=client -o yaml | kubectl apply -f -
 helm upgrade --install documentdb-operator ./documentdb-chart \
@@ -168,6 +141,8 @@ helm upgrade --install documentdb-operator ./documentdb-chart \
   --set image.sidecarinjector.tag="$IMAGE_TAG"
 kubectl -n documentdb-operator get pods
 ```
+
+If your GHCR repositories are private, create a `docker-registry` secret in `documentdb-operator` and `documentdb-preview-ns`, then set `imagePullSecrets` in the chart values or via `--set imagePullSecrets[0].name=...`.
 
 ## 1) Ensure a DocumentDB Service with an external IP
 If you already have a cluster with a LoadBalancer service, skip to step 2.
@@ -219,19 +194,12 @@ Create Key Vault (if not already present). Grant your human account cert permiss
 ```bash
 az keyvault create -g "$RG" -n "$KV_NAME" -l "$LOCATION" --enable-rbac-authorization true
 ```
-```bash
-# Human (you): allow cert import/create (run once)
-MY_OBJECT_ID=$(az ad signed-in-user show --query id -o tsv)
-az role assignment create --assignee-object-id "$MY_OBJECT_ID" \
-  --role "Key Vault Certificates Officer" \
-  --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG/providers/Microsoft.KeyVault/vaults/$KV_NAME"
 
-# AKS kubelet: allow reading secrets (required by CSI Azure provider)
-KUBELET_MI_OBJECT_ID=$(az aks show -g "$RG" -n "$AKS_NAME" --query identityProfile.kubeletidentity.objectId -o tsv)
-az role assignment create --assignee-object-id "$KUBELET_MI_OBJECT_ID" \
-  --role "Key Vault Secrets User" \
-  --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG/providers/Microsoft.KeyVault/vaults/$KV_NAME"
-```
+1. Add your account to have Role assigned: Key Vault Certificates Officer
+2. Add your AKS cluster managed identity to have role assigned: Key Vault Secrets User
+
+
+
 
 ## 3) Create a server certificate in AKV for the SNI host
 Create (or import) a certificate whose CN/SAN matches `$SNI_HOST`. The private key must be exportable.
@@ -423,6 +391,12 @@ Strict TLS (only if clients trust the signer):
 ## Clean up
 ```bash
 kubectl -n "$NS" delete deploy cert-puller || true
+
+  Fetch the chart dependency required by the operator (CloudNativePG):
+  ```bash
+  helm dependency update ./documentdb-chart
+  ```
+
 kubectl -n "$NS" delete secret "$SECRET_NAME" || true
 kubectl -n "$NS" delete secret documentdb-credentials || true
 kubectl -n "$NS" delete documentdb "$DOCDB_NAME" || true

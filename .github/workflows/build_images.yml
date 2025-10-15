@@ -7,9 +7,10 @@ on:
         description: 'Tag for the Docker manifest'
         required: false
       skip_optional_images:
+        type: boolean
         description: 'Set to true to skip building documentdb and gateway images'
         required: false
-        default: 'false'
+        default: false
 
   push:
     branches:

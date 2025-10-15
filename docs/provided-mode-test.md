@@ -6,7 +6,7 @@ This guide shows how to validate Provided TLS mode end-to-end using Azure Key Va
 - Create or reuse a DocumentDB cluster exposed via LoadBalancer
 - Mint a server certificate in Azure Key Vault for the service’s SNI host (<LB-IP>.sslip.io)
 - Use a SecretProviderClass to sync the AKV cert into a Kubernetes TLS secret
-- Switch DocumentDB to `spec.tls.mode: Provided` and point it at that secret
+- Switch DocumentDB to `spec.tls.gateway.mode: Provided` and point it at that secret
 - Connect with mongosh
 
 ## Prerequisites
@@ -15,13 +15,12 @@ This guide shows how to validate Provided TLS mode end-to-end using Azure Key Va
   - Login later with `az login`
   - We’ll create all Azure resources (RG, AKS, Key Vault) and install all cluster add-ons (cert-manager, CSI + Azure provider). You’ll also push custom images to GHCR.
 
-Repo examples you can reference:
-- `EXAMPLE_k8s_cert_management/azure-key-vault/azure-secret-provider-class.yaml`
-- `EXAMPLE_k8s_cert_management/azure-key-vault/busybox-cert-puller.yaml`
+Example snippets below mirror the setup we used previously; adapt namespaces and names to your environment.
 
 ## Set variables
 ```bash
-export suffix=$(date +%m%d%H)
+export suffix="093002"
+#export suffix=$(date +%m%d%H)
 export SUBSCRIPTION_ID="81901d5e-31aa-46c5-b61a-537dbd5df1e7"
 export LOCATION="eastus2"
 export RG="documentdb-aks-${suffix}-rg"
@@ -136,10 +135,15 @@ kubectl create namespace documentdb-operator --dry-run=client -o yaml | kubectl 
 helm upgrade --install documentdb-operator ./documentdb-chart \
   -n documentdb-operator \
   --set image.documentdbk8soperator.repository="$OPERATOR_IMAGE_REPO" \
-  --set image.documentdbk8soperator.tag="$IMAGE_TAG" \
+  --set-string image.documentdbk8soperator.tag="$IMAGE_TAG" \
   --set image.sidecarinjector.repository="$SIDECAR_IMAGE_REPO" \
-  --set image.sidecarinjector.tag="$IMAGE_TAG"
+  --set-string image.sidecarinjector.tag="$IMAGE_TAG" \
+  --set documentDbVersion="$DOCDB_VERSION"
 kubectl -n documentdb-operator get pods
+
+> **Why override `documentDbVersion`?** The Helm chart defaults to `0.1.0`, and the operator uses that value when picking the gateway image. Without this override, the CNPG pod attempts to pull `ghcr.io/microsoft/documentdb/documentdb-local:0.1.0`, which does not exist and leaves the gateway container stuck in `ImagePullBackOff`.
+
+> **Why use `--set-string` for tags?** Helm treats purely numeric values as numbers and will convert them to scientific notation (for example, `20250930125031` → `2.0250930125031e+13`), which breaks image references. Using `--set-string` forces the tag to remain a literal string.
 ```
 
 If your GHCR repositories are private, create a `docker-registry` secret in `documentdb-operator` and `documentdb-preview-ns`, then set `imagePullSecrets` in the chart values or via `--set imagePullSecrets[0].name=...`.
@@ -168,15 +172,23 @@ metadata:
 spec:
   nodeCount: 1
   instancesPerNode: 1
+  documentDBVersion: "16"
   documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+  gatewayImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   resource:
     pvcSize: 10Gi
   exposeViaService:
     serviceType: LoadBalancer
   tls:
-    mode: SelfSigned
+    gateway:
+      mode: SelfSigned
 EOF
 kubectl apply -f /tmp/documentdb-selfsigned.yaml
+
+# Pin the DocumentDB CR to the same version so the gateway image matches
+kubectl -n "$NS" patch documentdb "$DOCDB_NAME" --type merge --patch "{\"spec\":{\"documentDBVersion\":\"$DOCDB_VERSION\"}}"
+
+> **Keep the gateway on the intended build.** If you change `DOCDB_VERSION`, edit the manifest above so `documentDBVersion`, `documentDBImage`, and `gatewayImage` all reference that same tag before creating the resource. This prevents CNPG from capturing the chart default `0.1.0`.
 ```
 
 Wait for the service and capture the IP:
@@ -214,18 +226,41 @@ az keyvault certificate import --vault-name "$KV_NAME" -n "$CERT_NAME" \
 ```
 Important: The certificate’s SAN must include `$SNI_HOST` (e.g., `<LB-IP>.sslip.io`). If it doesn’t, strict hostname verification will fail.
 
-Option B: Create a self-signed certificate in AKV (quick test):
+Option B: Create a self-signed certificate in AKV with SAN set (strict TLS):
 ```bash
-# Uses the default policy as a base; most tenants will need a custom policy
-# for exportable keys. If default isn’t exportable, prefer Option A.
+# Create a custom certificate policy that sets CN and SAN to your SNI host.
+# This makes strict hostname verification pass without tlsAllowInvalidHostnames.
+cat > /tmp/akv-cert-policy.json <<EOF
+{
+  "issuerParameters": { "name": "Self" },
+  "x509CertificateProperties": {
+    "subject": "CN=${SNI_HOST}",
+    "subjectAlternativeNames": { "dnsNames": [ "${SNI_HOST}" ] },
+    "keyUsage": [ "digitalSignature", "keyEncipherment" ],
+    "validityInMonths": 12
+  },
+  "keyProperties": {
+    "exportable": true,
+    "keyType": "RSA",
+    "keySize": 2048,
+    "reuseKey": false
+  },
+  "secretProperties": { "contentType": "application/x-pem-file" }
+}
+EOF
+
+# Create the certificate in Key Vault using the custom policy
 az keyvault certificate create \
   --vault-name "$KV_NAME" -n "$CERT_NAME" \
-  --policy "$(az keyvault certificate get-default-policy)"
+  --policy @/tmp/akv-cert-policy.json
+
+# Tip: If you prefer a public CA, create a CSR with the same SANs and have it signed, then merge.
 ```
-Note: For strict client verification, use a CA-backed certificate or a chain your client trusts.
+Note: The SAN must match ${SNI_HOST}. For a stable name, use a custom domain or a pre-allocated
+Azure Public IP with a DNS label (e.g., <label>.<region>.cloudapp.azure.com) and mint for that.
 
 ## 4) Create a SecretProviderClass to sync the TLS secret
-We’ll sync a Kubernetes TLS secret named `$SECRET_NAME` in namespace `$NS` that contains `tls.crt` and `tls.key`.
+We'll sync a Kubernetes TLS secret named `$SECRET_NAME` in namespace `$NS` that contains `tls.crt` and `tls.key`. The `objectAlias` entries below make sure the provider emits those exact filenames so the gateway TLS controller accepts the secret.
 
 Create the SecretProviderClass manifest with a heredoc:
 ```bash
@@ -271,7 +306,7 @@ env CERT_NAME="$CERT_NAME" KV_NAME="$KV_NAME" envsubst < /tmp/azure-secret-provi
 
 # If you see IMDS errors like "Multiple user assigned identities exist" in pod events,
 # set the kubelet user-assigned identity clientId explicitly on the SPC and restart the puller:
-KUBELET_CLIENT_ID=$(az aks show -g "$RG" -n "$AKS_NAME" --query identityProfile.kubeletidentity.clientId -o tsv)
+KUBELET_CLIENT_ID=$(az aks show -g "$RG" -n "$AKS_NAME" --query identityProfile.kubeletidentity.clientId -o tsv | tr -d '\r')
 kubectl -n "$NS" patch secretproviderclass documentdb-azure-tls --type merge -p '{"spec":{"parameters":{"userAssignedIdentityID":"'"$KUBELET_CLIENT_ID"'"}}}'
 kubectl -n "$NS" rollout restart deploy cert-puller || true
 ```
@@ -327,8 +362,10 @@ kubectl -n "$NS" patch documentdb "$DOCDB_NAME" --type merge -p "$(cat <<JSON
 {
   "spec": {
     "tls": {
-      "mode": "Provided",
-      "provided": { "secretName": "$SECRET_NAME" }
+      "gateway": {
+        "mode": "Provided",
+        "provided": { "secretName": "$SECRET_NAME" }
+      }
     }
   }
 }
@@ -358,7 +395,6 @@ openssl s_client -connect "$SNI_HOST:10260" -servername "$SNI_HOST" -showcerts <
   2>/dev/null | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/ {print}' > /tmp/ca.crt
 ```
 
-TODO: WHY NOT WORK? ASK
 Strict TLS (requires SAN match and trust):
 ```bash
 mongosh "mongodb://$SNI_HOST:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&replicaSet=rs0" \

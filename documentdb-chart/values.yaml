@@ -1,22 +1,26 @@
 namespace: documentdb-operator
 replicaCount: 1
+
+# DocumentDB version - global default for all components when individual tags are not set
+# Priority: individual component tag > documentDbVersion > Chart.appVersion
+# Defaults to Chart.appVersion if not specified  
+documentDbVersion: ""
+
 serviceAccount:
   create: true
   automount: true
   annotations: {}
   name: "documentdb-operator"
+  
 image:
   documentdbk8soperator:
-    # Updated to use ACR repository (operator image)
-    repository: guanzhoutest.azurecr.io/documentdb/operator
+    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/operator
     pullPolicy: Always
-    # Tag overridden at install/upgrade time via --set image.documentdbk8soperator.tag=<TAG>
-    tag: dev-placeholder
+    tag: preview
   sidecarinjector:
-    # Updated to use ACR repository (sidecar gateway injector image)
-    repository: guanzhoutest.azurecr.io/documentdb/sidecar
+    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/sidecar
     pullPolicy: Always
-    # Tag overridden at install/upgrade time via --set image.sidecarinjector.tag=<TAG>
-    tag: dev-placeholder
+    tag: preview
+    
 cloudnative-pg:
   namespaceOverride: cnpg-system

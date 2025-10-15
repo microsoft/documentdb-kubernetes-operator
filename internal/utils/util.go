@@ -249,30 +249,58 @@ func DeleteRoleBinding(ctx context.Context, c client.Client, name, namespace str
 	return nil
 }
 
-// GenerateConnectionString returns a MongoDB connection string for the DocumentDB instance
-func GenerateConnectionString(documentdb *dbpreview.DocumentDB, serviceIp string) string {
-	// TODO: Update the secret name once its configureable through DocumentDB Spec
-	return fmt.Sprintf("mongodb://$(kubectl get secret documentdb-credentials -n %s -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret documentdb-credentials -n %s -o jsonpath='{.data.password}' | base64 -d)@%s:%d/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0", documentdb.Namespace, documentdb.Namespace, serviceIp, GetPortFor(GATEWAY_PORT))
-}
-
-// GenerateSecureConnectionString returns a MongoDB connection string without tlsAllowInvalidCertificates, assuming a trusted cert.
-func GenerateSecureConnectionString(documentdb *dbpreview.DocumentDB, serviceIp string) string {
-	return fmt.Sprintf("mongodb://$(kubectl get secret documentdb-credentials -n %s -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret documentdb-credentials -n %s -o jsonpath='{.data.password}' | base64 -d)@%s:%d/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&replicaSet=rs0", documentdb.Namespace, documentdb.Namespace, serviceIp, GetPortFor(GATEWAY_PORT))
+// GenerateConnectionString returns a MongoDB connection string for the DocumentDB instance.
+// When trustTLS is true, tlsAllowInvalidCertificates is omitted for strict verification.
+func GenerateConnectionString(documentdb *dbpreview.DocumentDB, serviceIp string, trustTLS bool) string {
+	secretName := documentdb.Spec.DocumentDbCredentialSecret
+	if secretName == "" {
+		secretName = DEFAULT_DOCUMENTDB_CREDENTIALS_SECRET
+	}
+	conn := fmt.Sprintf("mongodb://$(kubectl get secret %s -n %s -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret %s -n %s -o jsonpath='{.data.password}' | base64 -d)@%s:%d/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true", secretName, documentdb.Namespace, secretName, documentdb.Namespace, serviceIp, GetPortFor(GATEWAY_PORT))
+	if !trustTLS {
+		conn += "&tlsAllowInvalidCertificates=true"
+	}
+	return conn + "&replicaSet=rs0"
 }
 
 // GetGatewayImageForDocumentDB returns the gateway image for a DocumentDB instance.
-// If GatewayImage is specified in the spec, it uses that; otherwise it returns a default
-// based on the unified versioning strategy.
+// Priority: spec.gatewayImage > spec.documentDBVersion > env.DOCUMENTDB_VERSION > default
 func GetGatewayImageForDocumentDB(documentdb *dbpreview.DocumentDB) string {
 	if documentdb.Spec.GatewayImage != "" {
 		return documentdb.Spec.GatewayImage
 	}
 
-	// Use environment variable if set (for unified versioning)
-	if gatewayImage := os.Getenv("DOCUMENTDB_GATEWAY_IMAGE"); gatewayImage != "" {
-		return gatewayImage
+	// Use spec-level documentDBVersion if set
+	if documentdb.Spec.DocumentDBVersion != "" {
+		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, documentdb.Spec.DocumentDBVersion)
+	}
+
+	// Use global documentDbVersion if set
+	if version := os.Getenv(DOCUMENTDB_VERSION_ENV); version != "" {
+		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, version)
 	}
 
 	// Fall back to default
 	return DEFAULT_GATEWAY_IMAGE
+}
+
+// GetDocumentDBImageForInstance returns the documentdb engine image.
+// Priority: spec.documentDBImage > spec.documentDBVersion > env.DOCUMENTDB_VERSION > default
+func GetDocumentDBImageForInstance(documentdb *dbpreview.DocumentDB) string {
+	if documentdb.Spec.DocumentDBImage != "" {
+		return documentdb.Spec.DocumentDBImage
+	}
+
+	// Use spec-level documentDBVersion if set
+	if documentdb.Spec.DocumentDBVersion != "" {
+		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, documentdb.Spec.DocumentDBVersion)
+	}
+
+	// Use global documentDbVersion if set
+	if version := os.Getenv(DOCUMENTDB_VERSION_ENV); version != "" {
+		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, version)
+	}
+
+	// Fall back to default
+	return DEFAULT_DOCUMENTDB_IMAGE
 }

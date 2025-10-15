@@ -15,17 +15,20 @@ spec:
     serviceType: ClusterIP
   # Uncomment one TLS mode below
   # tls:
-  #   mode: SelfSigned
+  #   gateway:
+  #     mode: SelfSigned
   # tls:
-  #   mode: Provided
-  #   provided:
-  #     secretName: my-existing-tls-secret
+  #   gateway:
+  #     mode: Provided
+  #     provided:
+  #       secretName: my-existing-tls-secret
   # tls:
-  #   mode: CertManager
-  #   certManager:
-  #     issuerRef:
-  #       name: selfsigned
-  #       kind: ClusterIssuer
-  #     # dnsNames optional; service DNS names are auto-added
-  #     dnsNames:
-  #       - extra.example.local
+  #   gateway:
+  #     mode: CertManager
+  #     certManager:
+  #       issuerRef:
+  #         name: selfsigned
+  #         kind: ClusterIssuer
+  #       # dnsNames optional; service DNS names are auto-added
+  #       dnsNames:
+  #         - extra.example.local

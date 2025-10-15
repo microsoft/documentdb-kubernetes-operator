@@ -140,16 +140,16 @@ func (impl Implementation) reconcileMetadata(
 		},
 	}
 
-	// Add USERNAME and PASSWORD environment variables from secret
-	// TODO: Make this configurable and expose it in the configuration
-	log.Printf("Adding USERNAME and PASSWORD environment variables from secret")
+	// Add USERNAME and PASSWORD environment variables from secret defined in configuration
+	credentialSecretName := configuration.DocumentDbCredentialSecret
+	log.Printf("Adding USERNAME and PASSWORD environment variables from secret '%s'", credentialSecretName)
 	envVars = append(envVars,
 		corev1.EnvVar{
 			Name: "USERNAME",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: "documentdb-credentials",
+						Name: credentialSecretName,
 					},
 					Key: "username",
 				},
@@ -160,7 +160,7 @@ func (impl Implementation) reconcileMetadata(
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: "documentdb-credentials",
+						Name: credentialSecretName,
 					},
 					Key: "password",
 				},

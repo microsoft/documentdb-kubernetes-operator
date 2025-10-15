@@ -65,7 +65,7 @@ cert-manager        cert-manager-webhook-6cc5dccc4b-7jmrh           1/1     Runn
 Use the following command to install the DocumentDB operator:
 
 ```sh
-helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator --version 0.0.1 --namespace documentdb-operator --create-namespace
+helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-operator --version 0.0.1-multi-arch --namespace documentdb-operator --create-namespace
 ```
 
 This will install the operator in the `documentdb-operator` namespace. Verify that it is running:
@@ -140,7 +140,7 @@ NAME                     TYPE     DATA   AGE
 documentdb-credentials   Opaque   2      10s
 ```
 
-> **Note:** The sidecar injector plugin requires the secret to be named `documentdb-credentials` and must contain `username` and `password` keys. The plugin will automatically inject these as `USERNAME` and `PASSWORD` environment variables into the DocumentDB gateway container.
+> **Note:** By default the operator expects a credentials secret named `documentdb-credentials` containing `username` and `password` keys. You can override the secret name by setting `spec.documentDbCredentialSecret` in your `DocumentDB` resource. Whatever name you configure (or the default) will be used by the sidecar injector to project the values as `USERNAME` and `PASSWORD` environment variables into the gateway sidecar container.
 
 
 ### Deploy a DocumentDB cluster

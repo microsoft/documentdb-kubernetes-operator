@@ -8,18 +8,14 @@ import (
 	"sync"
 	"time"
 
-	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
@@ -36,233 +32,6 @@ const (
 type DocumentDBReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-}
-
-// reconcileGatewayTLS handles self-signed TLS provisioning (SelfSigned mode) for the gateway.
-// Future: extend for CertManager and Provided modes.
-func (r *DocumentDBReconciler) reconcileGatewayTLS(ctx context.Context, ddb *dbpreview.DocumentDB) error {
-	if ddb.Spec.TLS == nil || ddb.Spec.TLS.Mode == "" || ddb.Spec.TLS.Mode == "Disabled" {
-		return nil
-	}
-	// Initialize status structure if missing
-	if ddb.Status.TLS == nil {
-		ddb.Status.TLS = &dbpreview.TLSStatus{Ready: false}
-		_ = r.Status().Update(ctx, ddb)
-	}
-
-	switch ddb.Spec.TLS.Mode {
-	case "SelfSigned":
-		return r.ensureSelfSignedCert(ctx, ddb)
-	case "Provided":
-		return r.ensureProvidedSecret(ctx, ddb)
-	case "CertManager":
-		return r.ensureCertManagerManagedCert(ctx, ddb)
-	default:
-		return nil
-	}
-}
-
-// ensureProvidedSecret validates presence of a user-provided secret and marks TLS ready.
-func (r *DocumentDBReconciler) ensureProvidedSecret(ctx context.Context, ddb *dbpreview.DocumentDB) error {
-	if ddb.Status.TLS == nil { // defensive init for direct test invocation
-		ddb.Status.TLS = &dbpreview.TLSStatus{}
-	}
-	if ddb.Spec.TLS == nil || ddb.Spec.TLS.Provided == nil || ddb.Spec.TLS.Provided.SecretName == "" {
-		ddb.Status.TLS.Message = "Provided TLS secret name missing"
-		_ = r.Status().Update(ctx, ddb)
-		return nil
-	}
-	secret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Name: ddb.Spec.TLS.Provided.SecretName, Namespace: ddb.Namespace}, secret); err != nil {
-		if errors.IsNotFound(err) {
-			ddb.Status.TLS.Ready = false
-			ddb.Status.TLS.SecretName = ddb.Spec.TLS.Provided.SecretName
-			ddb.Status.TLS.Message = "Waiting for provided TLS secret"
-			_ = r.Status().Update(ctx, ddb)
-			return nil
-		}
-		return err
-	}
-	// Basic key presence check
-	if _, crtOk := secret.Data["tls.crt"]; !crtOk {
-		ddb.Status.TLS.Ready = false
-		ddb.Status.TLS.Message = "Provided secret missing tls.crt"
-		_ = r.Status().Update(ctx, ddb)
-		return nil
-	}
-	if _, keyOk := secret.Data["tls.key"]; !keyOk {
-		ddb.Status.TLS.Ready = false
-		ddb.Status.TLS.Message = "Provided secret missing tls.key"
-		_ = r.Status().Update(ctx, ddb)
-		return nil
-	}
-	ddb.Status.TLS.Ready = true
-	ddb.Status.TLS.SecretName = ddb.Spec.TLS.Provided.SecretName
-	ddb.Status.TLS.Message = "Using provided TLS secret"
-	_ = r.Status().Update(ctx, ddb)
-	return nil
-}
-
-// ensureCertManagerManagedCert ensures a certificate using a user-specified Issuer/ClusterIssuer.
-func (r *DocumentDBReconciler) ensureCertManagerManagedCert(ctx context.Context, ddb *dbpreview.DocumentDB) error {
-	if ddb.Status.TLS == nil { // defensive init for direct test invocation
-		ddb.Status.TLS = &dbpreview.TLSStatus{}
-	}
-	if ddb.Spec.TLS == nil || ddb.Spec.TLS.CertManager == nil {
-		ddb.Status.TLS.Message = "CertManager configuration missing"
-		_ = r.Status().Update(ctx, ddb)
-		return nil
-	}
-	cmCfg := ddb.Spec.TLS.CertManager
-
-	issuerRef := cmmeta.ObjectReference{Name: cmCfg.IssuerRef.Name}
-	if cmCfg.IssuerRef.Kind != "" {
-		issuerRef.Kind = cmCfg.IssuerRef.Kind
-	} else {
-		issuerRef.Kind = "Issuer"
-	}
-	if cmCfg.IssuerRef.Group != "" {
-		issuerRef.Group = cmCfg.IssuerRef.Group
-	} else {
-		issuerRef.Group = "cert-manager.io"
-	}
-
-	// Determine secret name
-	secretName := cmCfg.SecretName
-	if secretName == "" {
-		secretName = ddb.Name + "-gateway-cert-tls"
-	}
-
-	// Build DNS names: include requested + service names
-	serviceBase := util.DOCUMENTDB_SERVICE_PREFIX + ddb.Name
-	baseDNS := []string{serviceBase, serviceBase + "." + ddb.Namespace, serviceBase + "." + ddb.Namespace + ".svc"}
-	dnsSet := map[string]struct{}{}
-	finalDNS := []string{}
-	for _, n := range cmCfg.DNSNames {
-		if _, ok := dnsSet[n]; !ok && n != "" {
-			dnsSet[n] = struct{}{}
-			finalDNS = append(finalDNS, n)
-		}
-	}
-	for _, n := range baseDNS {
-		if _, ok := dnsSet[n]; !ok {
-			dnsSet[n] = struct{}{}
-			finalDNS = append(finalDNS, n)
-		}
-	}
-
-	certName := ddb.Name + "-gateway-cert" // stable logical cert name
-	cert := &cmapi.Certificate{}
-	if err := r.Get(ctx, types.NamespacedName{Name: certName, Namespace: ddb.Namespace}, cert); err != nil {
-		cert = &cmapi.Certificate{
-			ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: ddb.Namespace},
-			Spec: cmapi.CertificateSpec{
-				SecretName:  secretName,
-				DNSNames:    finalDNS,
-				IssuerRef:   issuerRef,
-				Duration:    &metav1.Duration{Duration: 90 * 24 * time.Hour},
-				RenewBefore: &metav1.Duration{Duration: 15 * 24 * time.Hour},
-				Usages:      []cmapi.KeyUsage{cmapi.UsageServerAuth},
-			},
-		}
-		// Ensure the certificate is owned by the DocumentDB resource for GC cleanup
-		_ = controllerutil.SetControllerReference(ddb, cert, r.Scheme)
-		if createErr := r.Create(ctx, cert); createErr != nil {
-			return createErr
-		}
-		ddb.Status.TLS.SecretName = secretName
-		ddb.Status.TLS.Message = "Creating cert-manager certificate"
-		_ = r.Status().Update(ctx, ddb)
-		return nil
-	}
-	// readiness check
-	for _, cond := range cert.Status.Conditions {
-		if cond.Type == cmapi.CertificateConditionReady && cond.Status == cmmeta.ConditionTrue {
-			if !ddb.Status.TLS.Ready {
-				ddb.Status.TLS.Ready = true
-				ddb.Status.TLS.SecretName = cert.Spec.SecretName
-				ddb.Status.TLS.Message = "Gateway TLS certificate ready (cert-manager)"
-				_ = r.Status().Update(ctx, ddb)
-			}
-			return nil
-		}
-	}
-	ddb.Status.TLS.SecretName = cert.Spec.SecretName
-	ddb.Status.TLS.Message = "Waiting for cert-manager certificate to become ready"
-	_ = r.Status().Update(ctx, ddb)
-	return nil
-}
-
-func (r *DocumentDBReconciler) ensureSelfSignedCert(ctx context.Context, ddb *dbpreview.DocumentDB) error {
-	if ddb.Status.TLS == nil { // defensive init for direct test invocation
-		ddb.Status.TLS = &dbpreview.TLSStatus{}
-	}
-	namespace := ddb.Namespace
-	issuerName := ddb.Name + "-gateway-selfsigned"
-	certName := ddb.Name + "-gateway-cert"
-	// Determine secret name (reuse cert name)
-	secretName := certName + "-tls"
-
-	// Create Issuer if absent
-	issuer := &cmapi.Issuer{}
-	if err := r.Get(ctx, types.NamespacedName{Name: issuerName, Namespace: namespace}, issuer); err != nil {
-		issuer = &cmapi.Issuer{
-			ObjectMeta: metav1.ObjectMeta{Name: issuerName, Namespace: namespace},
-			Spec:       cmapi.IssuerSpec{IssuerConfig: cmapi.IssuerConfig{SelfSigned: &cmapi.SelfSignedIssuer{}}},
-		}
-		// Ensure the issuer is owned by the DocumentDB resource for GC cleanup
-		_ = controllerutil.SetControllerReference(ddb, issuer, r.Scheme)
-		_ = r.Create(ctx, issuer)
-	}
-
-	// Build DNS names for service
-	serviceBase := util.DOCUMENTDB_SERVICE_PREFIX + ddb.Name
-	dnsNames := []string{
-		serviceBase,
-		serviceBase + "." + namespace,
-		serviceBase + "." + namespace + ".svc",
-	}
-
-	cert := &cmapi.Certificate{}
-	if err := r.Get(ctx, types.NamespacedName{Name: certName, Namespace: namespace}, cert); err != nil {
-		cert = &cmapi.Certificate{
-			ObjectMeta: metav1.ObjectMeta{Name: certName, Namespace: namespace},
-			Spec: cmapi.CertificateSpec{
-				SecretName:  secretName,
-				Duration:    &metav1.Duration{Duration: 90 * 24 * time.Hour},
-				RenewBefore: &metav1.Duration{Duration: 15 * 24 * time.Hour},
-				DNSNames:    dnsNames,
-				IssuerRef:   cmmeta.ObjectReference{Name: issuerName, Kind: "Issuer", Group: "cert-manager.io"},
-				Usages:      []cmapi.KeyUsage{cmapi.UsageServerAuth},
-			},
-		}
-		// Ensure the certificate is owned by the DocumentDB resource for GC cleanup
-		_ = controllerutil.SetControllerReference(ddb, cert, r.Scheme)
-		if createErr := r.Create(ctx, cert); createErr != nil {
-			return createErr
-		}
-		ddb.Status.TLS.SecretName = secretName
-		ddb.Status.TLS.Message = "Creating self-signed certificate"
-		_ = r.Status().Update(ctx, ddb)
-		return nil
-	}
-
-	// Evaluate readiness
-	for _, cond := range cert.Status.Conditions {
-		if cond.Type == cmapi.CertificateConditionReady && cond.Status == cmmeta.ConditionTrue {
-			if !ddb.Status.TLS.Ready {
-				ddb.Status.TLS.Ready = true
-				ddb.Status.TLS.SecretName = cert.Spec.SecretName
-				ddb.Status.TLS.Message = "Gateway TLS certificate ready"
-				_ = r.Status().Update(ctx, ddb)
-			}
-			return nil
-		}
-	}
-	ddb.Status.TLS.SecretName = cert.Spec.SecretName
-	ddb.Status.TLS.Message = "Waiting for gateway TLS certificate to become ready"
-	_ = r.Status().Update(ctx, ddb)
-	return nil
 }
 
 var reconcileMutex sync.Mutex
@@ -295,10 +64,6 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	var documentDbServiceIp string
 
-	// Phase 1 TLS (skeleton): evaluate desired TLS mode and initialize status if needed.
-	if err := r.reconcileGatewayTLS(ctx, documentdb); err != nil {
-		log.Error(err, "TLS reconciliation failed (non-fatal)")
-	}
 	// Only create/manage the service if ExposeViaService is configured
 	if documentdb.Spec.ExposeViaService.ServiceType != "" {
 		serviceType := corev1.ServiceTypeClusterIP
@@ -331,10 +96,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// create the CNPG Cluster
-	documentdbImage := documentdb.Spec.DocumentDBImage
-	if documentdbImage == "" {
-		documentdbImage = util.DEFAULT_DOCUMENTDB_IMAGE
-	}
+	documentdbImage := util.GetDocumentDBImageForInstance(documentdb)
 
 	currentCnpgCluster := &cnpgv1.Cluster{}
 	desiredCnpgCluster := cnpg.GetCnpgClusterSpec(req, *documentdb, documentdbImage, documentdb.Name, log)
@@ -395,7 +157,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				if currentCnpgCluster.Annotations == nil {
 					currentCnpgCluster.Annotations = map[string]string{}
 				}
-				currentCnpgCluster.Annotations["documentdb.microsoft.com/gateway-tls-rev"] = time.Now().Format(time.RFC3339Nano)
+				currentCnpgCluster.Annotations["db.microsoft.com/gateway-tls-rev"] = time.Now().Format(time.RFC3339Nano)
 				if err := r.Client.Update(ctx, currentCnpgCluster); err == nil {
 					log.Info("Patched CNPG Cluster with TLS settings; requeueing for pod update")
 					return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
@@ -406,11 +168,8 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 		// Update status connection string
 		if documentDbServiceIp != "" {
-			if documentdb.Status.TLS != nil && documentdb.Status.TLS.Ready {
-				documentdb.Status.ConnectionString = util.GenerateSecureConnectionString(documentdb, documentDbServiceIp)
-			} else {
-				documentdb.Status.ConnectionString = util.GenerateConnectionString(documentdb, documentDbServiceIp)
-			}
+			trustTLS := documentdb.Status.TLS != nil && documentdb.Status.TLS.Ready
+			documentdb.Status.ConnectionString = util.GenerateConnectionString(documentdb, documentDbServiceIp, trustTLS)
 		}
 		if err := r.Status().Update(ctx, documentdb); err != nil {
 			log.Error(err, "Failed to update DocumentDB status and connection string")
@@ -498,9 +257,6 @@ func (r *DocumentDBReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&cnpgv1.Cluster{}).
 		Owns(&cnpgv1.Publication{}).
 		Owns(&cnpgv1.Subscription{}).
-		// React to cert-manager resource changes relevant to TLS readiness
-		Owns(&cmapi.Certificate{}).
-		Owns(&cmapi.Issuer{}).
 		Named("documentdb-controller").
 		Complete(r)
 }

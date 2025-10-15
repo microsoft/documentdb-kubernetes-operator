@@ -13,16 +13,18 @@ import (
 )
 
 const (
-	labelsParameter       = "labels"
-	annotationParameter   = "annotations"
-	gatewayImageParameter = "gatewayImage"
+	labelsParameter                     = "labels"
+	annotationParameter                 = "annotations"
+	gatewayImageParameter               = "gatewayImage"
+	documentDbCredentialSecretParameter = "documentDbCredentialSecret"
 )
 
 // Configuration represents the plugin configuration parameters
 type Configuration struct {
-	Labels       map[string]string
-	Annotations  map[string]string
-	GatewayImage string
+	Labels                     map[string]string
+	Annotations                map[string]string
+	GatewayImage               string
+	DocumentDbCredentialSecret string
 }
 
 // FromParameters builds a plugin configuration from the configuration parameters
@@ -51,13 +53,15 @@ func FromParameters(
 		}
 	}
 
-	// Parse gateway image parameter
+	// Parse simple string parameters
 	gatewayImage := helper.Parameters[gatewayImageParameter]
+	credentialSecret := helper.Parameters[documentDbCredentialSecretParameter]
 
 	configuration := &Configuration{
-		Labels:       labels,
-		Annotations:  annotations,
-		GatewayImage: gatewayImage,
+		Labels:                     labels,
+		Annotations:                annotations,
+		GatewayImage:               gatewayImage,
+		DocumentDbCredentialSecret: credentialSecret,
 	}
 
 	configuration.applyDefaults()
@@ -95,9 +99,12 @@ func (config *Configuration) applyDefaults() {
 			"plugin-metadata": "default",
 		}
 	}
-	// Set default gateway image if not specified
+	// Set defaults
 	if config.GatewayImage == "" {
 		config.GatewayImage = "ghcr.io/microsoft/documentdb/documentdb-local:16"
+	}
+	if config.DocumentDbCredentialSecret == "" {
+		config.DocumentDbCredentialSecret = "documentdb-credentials"
 	}
 }
 
@@ -115,6 +122,7 @@ func (config *Configuration) ToParameters() (map[string]string, error) {
 	result[labelsParameter] = string(serializedLabels)
 	result[annotationParameter] = string(serializedAnnotations)
 	result[gatewayImageParameter] = config.GatewayImage
+	result[documentDbCredentialSecretParameter] = config.DocumentDbCredentialSecret
 
 	return result, nil
 }

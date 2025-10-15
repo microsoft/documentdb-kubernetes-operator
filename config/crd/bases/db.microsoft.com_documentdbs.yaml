@@ -48,10 +48,6 @@ spec:
           spec:
             description: DocumentDBSpec defines the desired state of DocumentDB.
             properties:
-              azureDNSPrefix:
-                description: AzureDNSPrefix specifies the Azure specific IP details
-                  for the cluster.
-                type: string
               clusterReplication:
                 description: ClusterReplication configures cross-cluster replication
                   for DocumentDB.

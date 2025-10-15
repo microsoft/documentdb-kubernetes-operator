@@ -42,9 +42,6 @@ type DocumentDBSpec struct {
 	// a default secret name `documentdb-credentials` is used.
 	DocumentDbCredentialSecret string `json:"documentDbCredentialSecret,omitempty"`
 
-	// AzureDNSPrefix specifies the Azure specific IP details for the cluster.
-	AzureDNSPrefix string `json:"azureDNSPrefix,omitempty"`
-
 	// ClusterReplication configures cross-cluster replication for DocumentDB.
 	ClusterReplication *ClusterReplication `json:"clusterReplication,omitempty"`
 

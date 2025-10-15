@@ -42,10 +42,12 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, docu
 			Namespace: req.Namespace,
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion: documentdb.APIVersion,
-					Kind:       documentdb.Kind,
-					Name:       documentdb.Name,
-					UID:        documentdb.UID,
+					APIVersion:         documentdb.APIVersion,
+					Kind:               documentdb.Kind,
+					Name:               documentdb.Name,
+					UID:                documentdb.UID,
+					Controller:         &[]bool{true}[0], // This cluster is controlled by the DocumentDB instance
+					BlockOwnerDeletion: &[]bool{true}[0], // Block DocumentDB deletion until cluster is deleted
 				},
 			},
 		},
@@ -91,10 +93,10 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, docu
 	}
 }
 
-func getInheritedMetadataLabels(name string) *cnpgv1.EmbeddedObjectMetadata {
+func getInheritedMetadataLabels(appName string) *cnpgv1.EmbeddedObjectMetadata {
 	return &cnpgv1.EmbeddedObjectMetadata{
 		Labels: map[string]string{
-			util.LABEL_APP:          name,
+			util.LABEL_APP:          appName,
 			util.LABEL_REPLICA_TYPE: "primary", // TODO: Replace with CNPG default setup
 		},
 	}

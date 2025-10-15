@@ -8,7 +8,7 @@ on:
         required: false
       skip_optional_images:
         type: boolean
-        description: 'Set to true to skip building documentdb and gateway images'
+        description: 'Skip building documentdb and gateway images'
         required: false
         default: false
 

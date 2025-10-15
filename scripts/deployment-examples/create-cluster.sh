@@ -18,7 +18,6 @@ KUBERNETES_VERSION="1.31.11"
 # For production: use microsoft/documentdb-operator (official)
 OPERATOR_GITHUB_ORG="guanzhousongmicrosoft"
 OPERATOR_CHART_VERSION="0.1.2025101401"
-
 # Feature flags - set to "true" to enable, "false" to skip
 INSTALL_OPERATOR="${INSTALL_OPERATOR:-false}"
 DEPLOY_INSTANCE="${DEPLOY_INSTANCE:-false}"

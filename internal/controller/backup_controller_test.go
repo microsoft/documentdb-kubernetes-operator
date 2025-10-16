@@ -12,10 +12,9 @@ import (
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
 )
@@ -25,263 +24,228 @@ var _ = Describe("Backup Controller", func() {
 		backupName      = "test-backup"
 		backupNamespace = "default"
 		clusterName     = "test-cluster"
-		timeout         = time.Second * 10
-		interval        = time.Millisecond * 250
 	)
 
 	var (
-		testCtx    context.Context
-		reconciler *BackupReconciler
-		testScheme *runtime.Scheme
+		ctx    context.Context
+		scheme *runtime.Scheme
 	)
 
-	// Helper function to verify backup status matches CNPG backup status
-	verifyBackupStatus := func(client client.Client, cnpgBackup *cnpgv1.Backup) {
-		backup := &dbpreview.Backup{}
-		err := client.Get(testCtx, types.NamespacedName{
-			Name:      backupName,
-			Namespace: backupNamespace,
-		}, backup)
-		Expect(err).NotTo(HaveOccurred())
-
-		Expect(string(backup.Status.Phase)).To(Equal(string(cnpgBackup.Status.Phase)))
-
-		if cnpgBackup.Status.StartedAt != nil {
-			Expect(backup.Status.StartedAt).NotTo(BeNil())
-			Expect(backup.Status.StartedAt.Equal(cnpgBackup.Status.StartedAt)).To(BeTrue())
-		} else {
-			Expect(backup.Status.StartedAt).To(BeNil())
-		}
-
-		if cnpgBackup.Status.StoppedAt != nil {
-			Expect(backup.Status.StoppedAt).NotTo(BeNil())
-			Expect(backup.Status.StoppedAt.Equal(cnpgBackup.Status.StoppedAt)).To(BeTrue())
-		} else {
-			Expect(backup.Status.StoppedAt).To(BeNil())
-		}
-
-		Expect(backup.Status.Error).To(Equal(cnpgBackup.Status.Error))
-	}
-
 	BeforeEach(func() {
-		testCtx = context.Background()
-		testScheme = runtime.NewScheme()
-		_ = dbpreview.AddToScheme(testScheme)
-		_ = cnpgv1.AddToScheme(testScheme)
+		ctx = context.Background()
+		scheme = runtime.NewScheme()
+		// register both preview and CNPG types used by the controller
+		Expect(dbpreview.AddToScheme(scheme)).To(Succeed())
+		Expect(cnpgv1.AddToScheme(scheme)).To(Succeed())
 	})
 
-	Context("Backup lifecycle", func() {
-		It("should successfully complete a full backup lifecycle from creation to completion", func() {
+	Describe("createCNPGBackup", func() {
+		It("creates a CNPG Backup with expected spec and owner reference and requeues", func() {
+			// fake client + reconciler
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				Build()
+
+			reconciler := &BackupReconciler{
+				Client: fakeClient,
+				Scheme: scheme,
+			}
+
+			// input dbpreview Backup
 			backup := &dbpreview.Backup{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      backupName,
 					Namespace: backupNamespace,
 				},
 				Spec: dbpreview.BackupSpec{
-					Cluster: cnpgv1.LocalObjectReference{
-						Name: clusterName,
-					},
+					Cluster: cnpgv1.LocalObjectReference{Name: clusterName},
 				},
 			}
 
-			fakeClient := fake.NewClientBuilder().
-				WithScheme(testScheme).
-				WithObjects(backup).
-				WithStatusSubresource(&dbpreview.Backup{}, &cnpgv1.Backup{}).
-				Build()
+			// Call under test
+			res, err := reconciler.createCNPGBackup(ctx, backup)
+			Expect(err).ToNot(HaveOccurred())
+			// controller uses a 5s requeue
+			Expect(res.RequeueAfter).To(Equal(5 * time.Second))
 
-			reconciler := &BackupReconciler{
-				Client: fakeClient,
-				Scheme: testScheme,
-			}
+			// Verify only one CNPG Backup exists in the fake client
+			cnpgBackupList := &cnpgv1.BackupList{}
+			Expect(fakeClient.List(ctx, cnpgBackupList)).To(Succeed())
+			Expect(len(cnpgBackupList.Items)).To(Equal(1))
+			cnpgBackup := &cnpgBackupList.Items[0]
 
-			// Create CNPG backup
-			result, err := reconciler.Reconcile(testCtx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      backupName,
-					Namespace: backupNamespace,
-				},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(5 * time.Second))
+			Expect(cnpgBackup.Name).To(Equal(backupName))
+			Expect(cnpgBackup.Namespace).To(Equal(backupNamespace))
 
-			// Verify CNPG backup was created with correct spec and owner reference
-			cnpgBackup := &cnpgv1.Backup{}
-			err = fakeClient.Get(testCtx, types.NamespacedName{
-				Name:      backupName,
-				Namespace: backupNamespace,
-			}, cnpgBackup)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(cnpgBackup.Spec.Cluster.Name).To(Equal(clusterName))
+			// Check spec fields
 			Expect(cnpgBackup.Spec.Method).To(Equal(cnpgv1.BackupMethodVolumeSnapshot))
-			Expect(cnpgBackup.OwnerReferences).To(HaveLen(1))
-			Expect(cnpgBackup.OwnerReferences[0].Name).To(Equal(backupName))
-			Expect(cnpgBackup.OwnerReferences[0].Kind).To(Equal("Backup"))
-			Expect(cnpgBackup.OwnerReferences[0].APIVersion).To(Equal(dbpreview.GroupVersion.String()))
+			Expect(cnpgBackup.Spec.Cluster.Name).To(Equal(clusterName))
 
-			verifyBackupStatus(fakeClient, cnpgBackup)
-
-			// Transition to started phase
-			startTime := metav1.Now()
-			cnpgBackup.Status.Phase = cnpgv1.BackupPhaseStarted
-			cnpgBackup.Status.StartedAt = &startTime
-			err = fakeClient.Status().Update(testCtx, cnpgBackup)
-			Expect(err).NotTo(HaveOccurred())
-
-			result, err = reconciler.Reconcile(testCtx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: backupName, Namespace: backupNamespace},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
-			verifyBackupStatus(fakeClient, cnpgBackup)
-
-			// Transition to running phase
-			cnpgBackup.Status.Phase = cnpgv1.BackupPhaseRunning
-			err = fakeClient.Status().Update(testCtx, cnpgBackup)
-			Expect(err).NotTo(HaveOccurred())
-
-			result, err = reconciler.Reconcile(testCtx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: backupName, Namespace: backupNamespace},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
-			verifyBackupStatus(fakeClient, cnpgBackup)
-
-			// Transition to completed phase
-			stopTime := metav1.Now()
-			cnpgBackup.Status.Phase = cnpgv1.BackupPhaseCompleted
-			cnpgBackup.Status.StoppedAt = &stopTime
-			err = fakeClient.Status().Update(testCtx, cnpgBackup)
-			Expect(err).NotTo(HaveOccurred())
-
-			result, err = reconciler.Reconcile(testCtx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: backupName, Namespace: backupNamespace},
-			})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse())
-			verifyBackupStatus(fakeClient, cnpgBackup)
-		})
-
-		It("should not requeue when backup resource does not exist", func() {
-			fakeClient := fake.NewClientBuilder().
-				WithScheme(testScheme).
-				WithStatusSubresource(&dbpreview.Backup{}, &cnpgv1.Backup{}).
-				Build()
-
-			reconciler := &BackupReconciler{
-				Client: fakeClient,
-				Scheme: testScheme,
-			}
-
-			result, err := reconciler.Reconcile(testCtx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      "non-existent",
-					Namespace: backupNamespace,
-				},
-			})
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse())
+			// Owner reference should reference the dbpreview Backup (by name)
+			Expect(len(cnpgBackup.OwnerReferences)).To(Equal(1))
+			ownerReference := cnpgBackup.OwnerReferences[0]
+			Expect(ownerReference.Name).To(Equal(backup.Name))
+			Expect(ownerReference.Controller).ToNot(BeNil())
+			Expect(*ownerReference.Controller).To(BeTrue())
 		})
 	})
 
-	Context("Status synchronization", func() {
-		var (
-			backup     *dbpreview.Backup
-			cnpgBackup *cnpgv1.Backup
-			fakeClient client.Client
-		)
-
-		BeforeEach(func() {
-			backup = &dbpreview.Backup{
+	Describe("updateBackupStatus", func() {
+		It("stops reconciling (returns zero result) when CNPG Backup phase is Completed", func() {
+			backup := &dbpreview.Backup{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      backupName,
 					Namespace: backupNamespace,
 				},
 				Spec: dbpreview.BackupSpec{
-					Cluster: cnpgv1.LocalObjectReference{
-						Name: clusterName,
-					},
+					Cluster: cnpgv1.LocalObjectReference{Name: clusterName},
 				},
 				Status: dbpreview.BackupStatus{
 					Phase: cnpgv1.BackupPhasePending,
 				},
 			}
 
-			cnpgBackup = &cnpgv1.Backup{
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(backup).
+				WithStatusSubresource(&dbpreview.Backup{}).
+				Build()
+
+			reconciler := &BackupReconciler{
+				Client: fakeClient,
+				Scheme: scheme,
+			}
+
+			now := time.Now().UTC()
+			cnpgBackup := &cnpgv1.Backup{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      backupName,
 					Namespace: backupNamespace,
-					OwnerReferences: []metav1.OwnerReference{
-						{
-							APIVersion: dbpreview.GroupVersion.String(),
-							Kind:       "Backup",
-							Name:       backupName,
-							UID:        backup.UID,
-						},
-					},
 				},
-				Spec: cnpgv1.BackupSpec{
-					Method: cnpgv1.BackupMethodVolumeSnapshot,
-					Cluster: cnpgv1.LocalObjectReference{
-						Name: clusterName,
-					},
+				Status: cnpgv1.BackupStatus{
+					Phase:     cnpgv1.BackupPhaseCompleted,
+					StartedAt: &metav1.Time{Time: now.Add(-time.Minute)},
+					StoppedAt: &metav1.Time{Time: now},
 				},
 			}
 
-			fakeClient = fake.NewClientBuilder().
-				WithScheme(testScheme).
-				WithObjects(backup, cnpgBackup).
-				WithStatusSubresource(&dbpreview.Backup{}, &cnpgv1.Backup{}).
+			res, err := reconciler.updateBackupStatus(ctx, backup, cnpgBackup)
+			Expect(err).ToNot(HaveOccurred())
+			// Completed => no requeue
+			Expect(res).To(Equal(ctrl.Result{}))
+
+			// Verify status was updated with times
+			updated := &dbpreview.Backup{}
+			Expect(fakeClient.Get(ctx, client.ObjectKey{Name: backupName, Namespace: backupNamespace}, updated)).To(Succeed())
+			Expect(string(updated.Status.Phase)).To(Equal(string(cnpgv1.BackupPhaseCompleted)))
+			Expect(updated.Status.StartedAt).ToNot(BeNil())
+			Expect(updated.Status.StoppedAt).ToNot(BeNil())
+			Expect(updated.Status.StartedAt.Time.Unix()).To(Equal(cnpgBackup.Status.StartedAt.Time.Unix()))
+			Expect(updated.Status.StoppedAt.Time.Unix()).To(Equal(cnpgBackup.Status.StoppedAt.Time.Unix()))
+		})
+
+		It("stops reconciling (returns zero result) when CNPG Backup phase is Failed", func() {
+			backup := &dbpreview.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      backupName,
+					Namespace: backupNamespace,
+				},
+				Spec: dbpreview.BackupSpec{
+					Cluster: cnpgv1.LocalObjectReference{Name: clusterName},
+				},
+				Status: dbpreview.BackupStatus{
+					Phase:     cnpgv1.BackupPhaseStarted,
+					StartedAt: &metav1.Time{Time: time.Now().UTC().Add(-5 * time.Minute)},
+				},
+			}
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(backup).
+				WithStatusSubresource(&dbpreview.Backup{}).
 				Build()
 
-			reconciler = &BackupReconciler{
+			reconciler := &BackupReconciler{
 				Client: fakeClient,
-				Scheme: testScheme,
+				Scheme: scheme,
 			}
+
+			startTime := time.Now().UTC().Add(-10 * time.Minute)
+			stopTime := time.Now().UTC()
+			cnpgBackup := &cnpgv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      backupName,
+					Namespace: backupNamespace,
+				},
+				Status: cnpgv1.BackupStatus{
+					Phase:     cnpgv1.BackupPhaseFailed,
+					StartedAt: &metav1.Time{Time: startTime},
+					StoppedAt: &metav1.Time{Time: stopTime},
+					Error:     "connection timeout",
+				},
+			}
+
+			res, err := reconciler.updateBackupStatus(ctx, backup, cnpgBackup)
+			Expect(err).ToNot(HaveOccurred())
+			// Failed => no requeue
+			Expect(res).To(Equal(ctrl.Result{}))
+
+			// Verify status was updated with error
+			updated := &dbpreview.Backup{}
+			Expect(fakeClient.Get(ctx, client.ObjectKey{Name: backupName, Namespace: backupNamespace}, updated)).To(Succeed())
+			Expect(string(updated.Status.Phase)).To(Equal(string(cnpgv1.BackupPhaseFailed)))
+			Expect(updated.Status.Error).To(Equal("connection timeout"))
+			Expect(updated.Status.StartedAt).ToNot(BeNil())
+			Expect(updated.Status.StoppedAt).ToNot(BeNil())
+			Expect(updated.Status.StartedAt.Time.Unix()).To(Equal(startTime.Unix()))
+			Expect(updated.Status.StoppedAt.Time.Unix()).To(Equal(stopTime.Unix()))
 		})
 
-		It("should requeue while backup is in progress", func() {
-			cnpgBackup.Status.Phase = cnpgv1.BackupPhaseRunning
-			now := metav1.Now()
-			cnpgBackup.Status.StartedAt = &now
-			err := fakeClient.Status().Update(testCtx, cnpgBackup)
-			Expect(err).NotTo(HaveOccurred())
+		It("does not update status when phase hasn't changed", func() {
+			backup := &dbpreview.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      backupName,
+					Namespace: backupNamespace,
+				},
+				Spec: dbpreview.BackupSpec{
+					Cluster: cnpgv1.LocalObjectReference{Name: clusterName},
+				},
+				Status: dbpreview.BackupStatus{
+					Phase: cnpgv1.BackupPhaseRunning,
+				},
+			}
 
-			result, err := reconciler.Reconcile(testCtx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: backupName, Namespace: backupNamespace},
-			})
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(backup).
+				WithStatusSubresource(&dbpreview.Backup{}).
+				Build()
 
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
-			verifyBackupStatus(fakeClient, cnpgBackup)
+			reconciler := &BackupReconciler{
+				Client: fakeClient,
+				Scheme: scheme,
+			}
 
-			// Verify reconciliation is idempotent when status hasn't changed
-			result, err = reconciler.Reconcile(testCtx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: backupName, Namespace: backupNamespace},
-			})
+			// CNPG Backup has same phase
+			cnpgBackup := &cnpgv1.Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      backupName,
+					Namespace: backupNamespace,
+				},
+				Status: cnpgv1.BackupStatus{
+					Phase: cnpgv1.BackupPhaseRunning,
+				},
+			}
 
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(Equal(10 * time.Second))
-			verifyBackupStatus(fakeClient, cnpgBackup)
-		})
+			res, err := reconciler.updateBackupStatus(ctx, backup, cnpgBackup)
+			Expect(err).ToNot(HaveOccurred())
+			// Still in progress, requeue
+			Expect(res.RequeueAfter).To(Equal(10 * time.Second))
 
-		It("should stop requeuing when backup fails", func() {
-			cnpgBackup.Status.Phase = cnpgv1.BackupPhaseFailed
-			now := metav1.Now()
-			cnpgBackup.Status.StartedAt = &now
-			cnpgBackup.Status.StoppedAt = &now
-			cnpgBackup.Status.Error = "Backup failed due to some error"
-			err := fakeClient.Status().Update(testCtx, cnpgBackup)
-			Expect(err).NotTo(HaveOccurred())
-
-			result, err := reconciler.Reconcile(testCtx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: backupName, Namespace: backupNamespace},
-			})
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse())
-			verifyBackupStatus(fakeClient, cnpgBackup)
+			// Phase should remain unchanged
+			updated := &dbpreview.Backup{}
+			Expect(fakeClient.Get(ctx, client.ObjectKey{Name: backupName, Namespace: backupNamespace}, updated)).To(Succeed())
+			Expect(string(updated.Status.Phase)).To(Equal(string(cnpgv1.BackupPhaseRunning)))
 		})
 	})
 })

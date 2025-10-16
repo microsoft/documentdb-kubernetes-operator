@@ -47,26 +47,27 @@ func (r *ScheduledBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, err
 	}
 
-	// Get last backup
-	lastBackup, err := r.getLastBackup(ctx, scheduledBackup)
-	if err != nil {
-		logger.Error(err, "Failed to get last backup")
-		lastBackup = dbpreview.Backup{}
+	backupList := &dbpreview.BackupList{}
+	if err := r.List(ctx, backupList, client.InNamespace(scheduledBackup.Namespace), client.MatchingFields{"spec.cluster": scheduledBackup.Spec.Cluster.Name}); err != nil {
+		logger.Error(err, "Failed to list backups")
+		// Requeue and try again shortly on list errors
+		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
-	// If the last backup is still running or pending, requeue after a minute
-	if lastBackup.Status.Phase != cnpgv1.BackupPhaseCompleted && lastBackup.Status.Phase != cnpgv1.BackupPhaseFailed {
+	if r.isBackupRunning(backupList) {
+		// If a backup is currently running, requeue after a short delay
 		return ctrl.Result{RequeueAfter: time.Minute}, nil
 	}
 
 	// Calculate next schedule time
-	now := time.Now()
-	nextScheduleTime := schedule.Next(lastBackup.CreationTimestamp.Time)
+	nextScheduleTime := r.getNextScheduleTime(schedule, scheduledBackup.CreationTimestamp.Time, backupList)
+
 	// If it's time to create a backup
-	if now.After(nextScheduleTime) || now.Equal(nextScheduleTime) {
+	now := time.Now()
+	if !now.Before(nextScheduleTime) {
 		if err := r.createBackup(ctx, scheduledBackup); err != nil {
 			logger.Error(err, "Failed to create backup")
-			return ctrl.Result{}, err
+			return ctrl.Result{RequeueAfter: time.Minute}, nil
 		}
 
 		// Calculate next run time
@@ -83,23 +84,27 @@ func (r *ScheduledBackupReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
-func (r *ScheduledBackupReconciler) getLastBackup(ctx context.Context, scheduledBackup *dbpreview.ScheduledBackup) (dbpreview.Backup, error) {
-	// List all Backups of this cluster
-	backupList := &dbpreview.BackupList{}
-	if err := r.List(ctx, backupList, client.InNamespace(scheduledBackup.Namespace), client.MatchingFields{"spec.cluster": scheduledBackup.Spec.Cluster.Name}); err != nil {
-		return dbpreview.Backup{}, err
-	}
-
-	var lastBackup dbpreview.Backup
-	var lastCreationTime time.Time
+func (r *ScheduledBackupReconciler) isBackupRunning(backupList *dbpreview.BackupList) bool {
 	for _, backup := range backupList.Items {
-		if backup.CreationTimestamp.Time.After(lastCreationTime) {
-			lastCreationTime = backup.CreationTimestamp.Time
-			lastBackup = backup
+		if backup.Status.Phase != "" && backup.Status.Phase != cnpgv1.BackupPhaseCompleted && backup.Status.Phase != cnpgv1.BackupPhaseFailed {
+			return true
 		}
 	}
+	return false
+}
 
-	return lastBackup, nil
+func (r *ScheduledBackupReconciler) getNextScheduleTime(schedule cron.Schedule, scheduledBackupCreationTime time.Time, backupList *dbpreview.BackupList) time.Time {
+	if backupList == nil || len(backupList.Items) == 0 {
+		return schedule.Next(scheduledBackupCreationTime)
+	}
+
+	lastBackupStartTime := time.Time{}
+	for _, backup := range backupList.Items {
+		if backup.CreationTimestamp.After(lastBackupStartTime) {
+			lastBackupStartTime = backup.CreationTimestamp.Time
+		}
+	}
+	return schedule.Next(lastBackupStartTime)
 }
 
 // createBackup creates a new Backup resource for this scheduled backup

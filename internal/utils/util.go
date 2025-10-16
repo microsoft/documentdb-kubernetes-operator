@@ -318,15 +318,16 @@ func GetGatewayImageForDocumentDB(documentdb *dbpreview.DocumentDB) string {
 		return documentdb.Spec.GatewayImage
 	}
 
-	// Use spec-level documentDBVersion if set
-	if documentdb.Spec.DocumentDBVersion != "" {
-		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, documentdb.Spec.DocumentDBVersion)
-	}
+	// TODO: Uncomment when we publish custom gateway images
+	// // Use spec-level documentDBVersion if set
+	// if documentdb.Spec.DocumentDBVersion != "" {
+	// 	return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, documentdb.Spec.DocumentDBVersion)
+	// }
 
-	// Use global documentDbVersion if set
-	if version := os.Getenv(DOCUMENTDB_VERSION_ENV); version != "" {
-		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, version)
-	}
+	// // Use global documentDbVersion if set
+	// if version := os.Getenv(DOCUMENTDB_VERSION_ENV); version != "" {
+	// 	return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, version)
+	// }
 
 	// Fall back to default
 	return DEFAULT_GATEWAY_IMAGE
@@ -339,15 +340,16 @@ func GetDocumentDBImageForInstance(documentdb *dbpreview.DocumentDB) string {
 		return documentdb.Spec.DocumentDBImage
 	}
 
-	// Use spec-level documentDBVersion if set
-	if documentdb.Spec.DocumentDBVersion != "" {
-		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, documentdb.Spec.DocumentDBVersion)
-	}
+	// TODO: Uncomment when we publish custom documentdb images
+	// // Use spec-level documentDBVersion if set
+	// if documentdb.Spec.DocumentDBVersion != "" {
+	// 	return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, documentdb.Spec.DocumentDBVersion)
+	// }
 
-	// Use global documentDbVersion if set
-	if version := os.Getenv(DOCUMENTDB_VERSION_ENV); version != "" {
-		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, version)
-	}
+	// // Use global documentDbVersion if set
+	// if version := os.Getenv(DOCUMENTDB_VERSION_ENV); version != "" {
+	// 	return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, version)
+	// }
 
 	// Fall back to default
 	return DEFAULT_DOCUMENTDB_IMAGE

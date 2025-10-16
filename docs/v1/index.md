@@ -162,7 +162,7 @@ metadata:
 spec:
   nodeCount: 1
   instancesPerNode: 1
-  documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+  documentDbCredentialSecret: documentdb-credentials
   resource:
     storage:
       pvcSize: 10Gi

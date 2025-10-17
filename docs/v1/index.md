@@ -65,7 +65,7 @@ cert-manager        cert-manager-webhook-6cc5dccc4b-7jmrh           1/1     Runn
 Use the following command to install the DocumentDB operator:
 
 ```sh
-helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-operator --version 0.0.1-multi-arch --namespace documentdb-operator --create-namespace
+helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-operator --namespace documentdb-operator --create-namespace
 ```
 
 This will install the operator in the `documentdb-operator` namespace. Verify that it is running:
@@ -112,9 +112,13 @@ metadata:
 # Username: k8s_secret_user
 # Password: K8sSecret100
 #
-# Connect using mongosh:
+# Connect using mongosh (port-forward):
 # mongosh 127.0.0.1:10260 -u k8s_secret_user -p K8sSecret100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates
 #
+# Connect using connection string (port-forward):
+# mongosh "mongodb://k8s_secret_user:K8sSecret100@127.0.0.1:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0"
+#
+
 apiVersion: v1
 kind: Secret
 metadata:
@@ -197,18 +201,53 @@ NAME                 AGE
 documentdb-preview   28m
 ```
 
+To get the full connection string:
+
+```sh
+kubectl get documentdb documentdb-preview -n documentdb-preview-ns -o jsonpath='{.status.connectionString}'
+```
+
+This will show the connection string with the external IP automatically populated.
+
 ### Connect to the DocumentDB cluster
 
-The DocumentDB `Pod` has the Gateway container running as a sidecar. To keep things simple, the quickstart does not use a public load balancer. So you can connect to the DocumentDB instance directly through the Gateway port `10260`. For both `minikube` and `kind`, this can be easily done using port forwarding:
+The DocumentDB `Pod` has the Gateway container running as a sidecar. The connection method depends on your service type:
 
+#### Option 1: ClusterIP Service (Default for local development)
+
+For `ClusterIP` service type, use port forwarding to connect from your local machine:
+
+**Step 1:** Set up port forwarding (keep this terminal open):
 ```sh
 kubectl port-forward pod/documentdb-preview-1 10260:10260 -n documentdb-preview-ns
 ```
 
-Connect using [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/):
+**Step 2:** In a **new terminal**, connect using [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/):
 
 ```sh
-mongosh 127.0.0.1:10260 -u default_user -p Admin100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates
+# Traditional format
+mongosh 127.0.0.1:10260 -u k8s_secret_user -p K8sSecret100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates
+
+# Or connection string format
+mongosh "mongodb://k8s_secret_user:K8sSecret100@127.0.0.1:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0"
+
+# Or get the connection string from status and connect from inside the cluster
+kubectl get documentdb documentdb-preview -n documentdb-preview-ns -o jsonpath='{.status.connectionString}'
+mongosh "PASTE_CONNECTION_STRING_HERE"
+```
+
+
+
+#### Option 2: LoadBalancer Service (For cloud deployments)
+
+If using `LoadBalancer` service type, get the connection string directly:
+
+```sh
+# Get the connection string with loadbalancer IP automatically populated
+kubectl get documentdb documentdb-preview -n documentdb-preview-ns -o jsonpath='{.status.connectionString}'
+
+# Use the output directly with mongosh
+mongosh "PASTE_CONNECTION_STRING_HERE"
 ```
 
 Execute the following commands to create a database and a collection, and insert some documents:

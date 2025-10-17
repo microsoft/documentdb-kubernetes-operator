@@ -219,7 +219,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			documentdb.Status.ConnectionString = util.GenerateConnectionString(documentdb, documentDbServiceIp, trustTLS)
 		}
 		if err := r.Status().Update(ctx, documentdb); err != nil {
-			log.Error(err, "Failed to update DocumentDB status and connection string")
+			logger.Error(err, "Failed to update DocumentDB status and connection string")
 		}
 	}
 

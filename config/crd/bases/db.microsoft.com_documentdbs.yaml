@@ -248,11 +248,13 @@ spec:
             properties:
               connectionString:
                 type: string
-              localPrimary:
-                type: string
               status:
                 description: Status reflects the status field from the underlying
                   CNPG Cluster.
+                type: string
+              targetPrimary:
+                type: string
+              localPrimary:
                 type: string
               tls:
                 description: TLS reports gateway TLS provisioning status (Phase 1).
@@ -264,8 +266,6 @@ spec:
                   secretName:
                     type: string
                 type: object
-              targetPrimary:
-                type: string
             type: object
         type: object
     served: true

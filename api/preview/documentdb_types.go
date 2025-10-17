@@ -64,7 +64,7 @@ type DocumentDBSpec struct {
 
 	// TLS configures certificate management for DocumentDB components.
 	TLS *TLSConfiguration `json:"tls,omitempty"`
-	
+
 	// Overrides default log level for the DocumentDB cluster.
 	LogLevel string `json:"logLevel,omitempty"`
 }
@@ -165,6 +165,8 @@ type DocumentDBStatus struct {
 	// Status reflects the status field from the underlying CNPG Cluster.
 	Status           string `json:"status,omitempty"`
 	ConnectionString string `json:"connectionString,omitempty"`
+	TargetPrimary    string `json:"targetPrimary,omitempty"`
+	LocalPrimary     string `json:"localPrimary,omitempty"`
 
 	// TLS reports gateway TLS provisioning status (Phase 1).
 	TLS *TLSStatus `json:"tls,omitempty"`
@@ -175,8 +177,6 @@ type TLSStatus struct {
 	Ready      bool   `json:"ready,omitempty"`
 	SecretName string `json:"secretName,omitempty"`
 	Message    string `json:"message,omitempty"`
-	TargetPrimary    string `json:"targetPrimary,omitempty"`
-	LocalPrimary     string `json:"localPrimary,omitempty"`
 }
 
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.status",description="CNPG Cluster Status"

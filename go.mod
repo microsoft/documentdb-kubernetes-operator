@@ -7,6 +7,7 @@ godebug default=go1.23
 require (
 	github.com/cert-manager/cert-manager v1.14.4
 	github.com/cloudnative-pg/cloudnative-pg v1.25.1
+	github.com/cloudnative-pg/machinery v0.1.0
 	github.com/go-logr/logr v1.4.2
 	github.com/stretchr/testify v1.10.0
 	go.goms.io/fleet-networking v0.3.0
@@ -26,7 +27,6 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudnative-pg/barman-cloud v0.1.0 // indirect
-	github.com/cloudnative-pg/machinery v0.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.12.1 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect

@@ -16,7 +16,9 @@ spec:
   gatewayImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   documentDbCredentialSecret: documentdb-credentials
   resource:
-    pvcSize: 10Gi
+    storage:
+      pvcSize: 10Gi
   exposeViaService:
     serviceType: LoadBalancer
+  environment: eks
   sidecarInjectorPluginName: cnpg-i-sidecar-injector.documentdb.io

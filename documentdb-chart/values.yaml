@@ -12,15 +12,18 @@ serviceAccount:
   annotations: {}
   name: "documentdb-operator"
   
+# WAL Replica feature flag
+walReplica: false  # Set to true to deploy the WAL replica plugin
+
 image:
   documentdbk8soperator:
     repository: ghcr.io/guanzhousongmicrosoft/documentdb-kubernetes-operator/operator
     pullPolicy: Always
-    tag: preview
   sidecarinjector:
     repository: ghcr.io/guanzhousongmicrosoft/documentdb-kubernetes-operator/sidecar
     pullPolicy: Always
-    tag: preview
-    
+  walreplica:
+    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/wal-replica
+    pullPolicy: Always
 cloudnative-pg:
   namespaceOverride: cnpg-system

@@ -48,19 +48,39 @@ type DocumentDBSpec struct {
 	// SidecarInjectorPluginName is the name of the sidecar injector plugin to use.
 	SidecarInjectorPluginName string `json:"sidecarInjectorPluginName,omitempty"`
 
+	// WalReplicaPluginName is the name of the wal replica plugin to use.
+	WalReplicaPluginName string `json:"walReplicaPluginName,omitempty"`
+
 	// ExposeViaService configures how to expose DocumentDB via a Kubernetes service.
 	// This can be a LoadBalancer or ClusterIP service.
 	ExposeViaService ExposeViaService `json:"exposeViaService,omitempty"`
+
+	// Environment specifies the cloud environment for deployment
+	// This determines cloud-specific service annotations for LoadBalancer services
+	// +kubebuilder:validation:Enum=eks;aks;gke
+	Environment string `json:"environment,omitempty"`
 
 	Timeouts Timeouts `json:"timeouts,omitempty"`
 
 	// TLS configures certificate management for DocumentDB components.
 	TLS *TLSConfiguration `json:"tls,omitempty"`
+	
+	// Overrides default log level for the DocumentDB cluster.
+	LogLevel string `json:"logLevel,omitempty"`
 }
 
 type Resource struct {
+	// Storage configuration for DocumentDB persistent volumes.
+	Storage StorageConfiguration `json:"storage"`
+}
+
+type StorageConfiguration struct {
 	// PvcSize is the size of the persistent volume claim for DocumentDB storage (e.g., "10Gi").
 	PvcSize string `json:"pvcSize"`
+
+	// StorageClass specifies the storage class for DocumentDB persistent volumes.
+	// If not specified, the cluster's default storage class will be used.
+	StorageClass string `json:"storageClass,omitempty"`
 }
 
 type ClusterReplication struct {
@@ -70,6 +90,8 @@ type ClusterReplication struct {
 	Primary string `json:"primary"`
 	// ClusterList is the list of clusters participating in replication.
 	ClusterList []string `json:"clusterList"`
+	// Whether or not to have replicas on the primary cluster.
+	HighAvailability bool `json:"highAvailability,omitempty"`
 }
 
 type ExposeViaService struct {
@@ -153,6 +175,8 @@ type TLSStatus struct {
 	Ready      bool   `json:"ready,omitempty"`
 	SecretName string `json:"secretName,omitempty"`
 	Message    string `json:"message,omitempty"`
+	TargetPrimary    string `json:"targetPrimary,omitempty"`
+	LocalPrimary     string `json:"localPrimary,omitempty"`
 }
 
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.status",description="CNPG Cluster Status"

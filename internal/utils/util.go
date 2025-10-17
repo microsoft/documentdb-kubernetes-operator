@@ -22,36 +22,89 @@ import (
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
 )
 
-// DeleteService deletes a Service for a given DocumentDB instance
-func DeleteService(ctx context.Context, c client.Client, serviceName, namespace string) error {
-	service := &corev1.Service{}
-	err := c.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: namespace}, service)
-	if err == nil {
-		err = c.Delete(ctx, service)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+type JSONPatch struct {
+	Op    string      `json:"op"`
+	Path  string      `json:"path"`
+	Value interface{} `json:"value,omitempty"`
 }
 
 // GetDocumentDBServiceDefinition returns the LoadBalancer Service definition for a given DocumentDB instance
-func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, namespace string, serviceType corev1.ServiceType) *corev1.Service {
-	return &corev1.Service{
+func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, replicationContext *ReplicationContext, namespace string, serviceType corev1.ServiceType) *corev1.Service {
+	// If no local HA, these two should be empty
+	selector := map[string]string{
+		"disabled": "true",
+	}
+	if replicationContext.EndpointEnabled() {
+		selector = map[string]string{
+			LABEL_APP:          documentdb.Name,
+			LABEL_REPLICA_TYPE: "primary", // Service forwards traffic to primary replicas
+			LABEL_ROLE:         "primary",
+		}
+	}
+
+	// Ensure service name doesn't exceed 63 characters (Kubernetes limit)
+	serviceName := DOCUMENTDB_SERVICE_PREFIX + replicationContext.Self
+	if len(serviceName) > 63 {
+		serviceName = serviceName[:63]
+	}
+
+	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      DOCUMENTDB_SERVICE_PREFIX + documentdb.Name, // Unique service name
+			Name:      serviceName,
 			Namespace: namespace,
+			// CRITICAL: Set owner reference so service gets deleted when DocumentDB instance is deleted
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         documentdb.APIVersion,
+					Kind:               documentdb.Kind,
+					Name:               documentdb.Name,
+					UID:                documentdb.UID,
+					Controller:         &[]bool{true}[0], // This service is controlled by the DocumentDB instance
+					BlockOwnerDeletion: &[]bool{true}[0], // Block DocumentDB deletion until service is deleted
+				},
+			},
 		},
 		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{
-				LABEL_APP:          documentdb.Name,
-				LABEL_REPLICA_TYPE: "primary", // Service forwards traffic to primary replicas
-			},
+			Selector: selector,
 			Ports: []corev1.ServicePort{
 				{Name: "gateway", Protocol: corev1.ProtocolTCP, Port: GetPortFor(GATEWAY_PORT), TargetPort: intstr.FromInt(int(GetPortFor(GATEWAY_PORT)))},
 			},
 			Type: serviceType,
 		},
+	}
+
+	// Add environment-specific annotations for LoadBalancer services
+	if serviceType == corev1.ServiceTypeLoadBalancer {
+		service.ObjectMeta.Annotations = getEnvironmentSpecificAnnotations(documentdb.Spec.Environment)
+	}
+
+	return service
+}
+
+// getEnvironmentSpecificAnnotations returns the appropriate service annotations based on the environment
+func getEnvironmentSpecificAnnotations(environment string) map[string]string {
+	switch environment {
+	case "eks":
+		// AWS EKS specific annotations for Network Load Balancer
+		return map[string]string{
+			"service.beta.kubernetes.io/aws-load-balancer-type":                              "nlb",
+			"service.beta.kubernetes.io/aws-load-balancer-scheme":                            "internet-facing",
+			"service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled": "true",
+			"service.beta.kubernetes.io/aws-load-balancer-nlb-target-type":                   "ip",
+		}
+	case "aks":
+		// Azure AKS specific annotations for Load Balancer
+		return map[string]string{
+			"service.beta.kubernetes.io/azure-load-balancer-external": "true",
+		}
+	case "gke":
+		// Google GKE specific annotations for Load Balancer
+		return map[string]string{
+			"cloud.google.com/load-balancer-type": "External",
+		}
+	default:
+		// No specific annotations for unspecified or unknown environments
+		return map[string]string{}
 	}
 }
 
@@ -69,23 +122,31 @@ func EnsureServiceIP(ctx context.Context, service *corev1.Service) (string, erro
 		return "", fmt.Errorf("ClusterIP not assigned")
 	}
 
-	// For LoadBalancer services, wait for external IP to be assigned
+	// For LoadBalancer services, wait for external IP or hostname to be assigned
 	if service.Spec.Type == corev1.ServiceTypeLoadBalancer {
 		retries := 5
 		for i := 0; i < retries; i++ {
-			if len(service.Status.LoadBalancer.Ingress) > 0 && service.Status.LoadBalancer.Ingress[0].IP != "" {
-				return service.Status.LoadBalancer.Ingress[0].IP, nil
+			if len(service.Status.LoadBalancer.Ingress) > 0 {
+				ingress := service.Status.LoadBalancer.Ingress[0]
+				// Check for IP address first (some cloud providers provide IPs)
+				if ingress.IP != "" {
+					return ingress.IP, nil
+				}
+				// Check for hostname (AWS NLB provides hostnames)
+				if ingress.Hostname != "" {
+					return ingress.Hostname, nil
+				}
 			}
 			time.Sleep(time.Second * 10)
 		}
-		return "", fmt.Errorf("LoadBalancer IP not assigned after %d retries", retries)
+		return "", fmt.Errorf("LoadBalancer IP/hostname not assigned after %d retries", retries)
 	}
 
 	return "", fmt.Errorf("unsupported service type: %s", service.Spec.Type)
 }
 
-// GetOrCreateService checks if the Service already exists, and creates it if not.
-func GetOrCreateService(ctx context.Context, c client.Client, service *corev1.Service) (*corev1.Service, error) {
+// UpsertService checks if the Service already exists, and creates it if not.
+func UpsertService(ctx context.Context, c client.Client, service *corev1.Service) (*corev1.Service, error) {
 	log := log.FromContext(ctx)
 	foundService := &corev1.Service{}
 	err := c.Get(ctx, types.NamespacedName{Name: service.Name, Namespace: service.Namespace}, foundService)
@@ -101,6 +162,10 @@ func GetOrCreateService(ctx context.Context, c client.Client, service *corev1.Se
 				return nil, err
 			}
 		} else {
+			return nil, err
+		}
+	} else {
+		if err := c.Update(ctx, foundService); err != nil {
 			return nil, err
 		}
 	}
@@ -270,15 +335,16 @@ func GetGatewayImageForDocumentDB(documentdb *dbpreview.DocumentDB) string {
 		return documentdb.Spec.GatewayImage
 	}
 
-	// Use spec-level documentDBVersion if set
-	if documentdb.Spec.DocumentDBVersion != "" {
-		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, documentdb.Spec.DocumentDBVersion)
-	}
+	// TODO: Uncomment when we publish custom gateway images
+	// // Use spec-level documentDBVersion if set
+	// if documentdb.Spec.DocumentDBVersion != "" {
+	// 	return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, documentdb.Spec.DocumentDBVersion)
+	// }
 
-	// Use global documentDbVersion if set
-	if version := os.Getenv(DOCUMENTDB_VERSION_ENV); version != "" {
-		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, version)
-	}
+	// // Use global documentDbVersion if set
+	// if version := os.Getenv(DOCUMENTDB_VERSION_ENV); version != "" {
+	// 	return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, version)
+	// }
 
 	// Fall back to default
 	return DEFAULT_GATEWAY_IMAGE
@@ -291,16 +357,31 @@ func GetDocumentDBImageForInstance(documentdb *dbpreview.DocumentDB) string {
 		return documentdb.Spec.DocumentDBImage
 	}
 
-	// Use spec-level documentDBVersion if set
-	if documentdb.Spec.DocumentDBVersion != "" {
-		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, documentdb.Spec.DocumentDBVersion)
-	}
+	// TODO: Uncomment when we publish custom documentdb images
+	// // Use spec-level documentDBVersion if set
+	// if documentdb.Spec.DocumentDBVersion != "" {
+	// 	return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, documentdb.Spec.DocumentDBVersion)
+	// }
 
-	// Use global documentDbVersion if set
-	if version := os.Getenv(DOCUMENTDB_VERSION_ENV); version != "" {
-		return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, version)
-	}
+	// // Use global documentDbVersion if set
+	// if version := os.Getenv(DOCUMENTDB_VERSION_ENV); version != "" {
+	// 	return fmt.Sprintf("%s:%s", DOCUMENTDB_IMAGE_REPOSITORY, version)
+	// }
 
 	// Fall back to default
 	return DEFAULT_DOCUMENTDB_IMAGE
+}
+
+func GenerateServiceName(source, target, resourceGroup string) string {
+	name := fmt.Sprintf("%s-%s", source, target)
+	diff := 63 - len(name) - len(resourceGroup) - 2
+	if diff >= 0 {
+		return name
+	} else {
+		// truncate source and target region names equally if needed
+		truncateBy := (-diff + 1) / 2 // +1 to handle odd numbers
+		sourceLen := len(source) - truncateBy
+		targetLen := len(target) - truncateBy
+		return fmt.Sprintf("%s-%s", source[0:sourceLen], target[0:targetLen])
+	}
 }

@@ -5,11 +5,16 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	"github.com/cloudnative-pg/cloudnative-pg/pkg/resources/status"
+	pgTime "github.com/cloudnative-pg/machinery/pkg/postgres/time"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -43,22 +48,27 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	reconcileMutex.Lock()
 	defer reconcileMutex.Unlock()
 
-	log := log.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
 	// Fetch the DocumentDB instance
 	documentdb := &dbpreview.DocumentDB{}
 	err := r.Get(ctx, req.NamespacedName, documentdb)
-
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// DocumentDB resource not found, handle cleanup
-			log.Info("DocumentDB resource not found. Cleaning up associated resources.")
+			logger.Info("DocumentDB resource not found. Cleaning up associated resources.")
 			if err := r.cleanupResources(ctx, req, documentdb); err != nil {
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{}, nil
 		}
-		log.Error(err, "Failed to get DocumentDB resource")
+		logger.Error(err, "Failed to get DocumentDB resource")
+		return ctrl.Result{}, err
+	}
+
+	replicationContext, err := util.GetReplicationContext(ctx, r.Client, *documentdb)
+	if err != nil {
+		logger.Error(err, "Failed to determine replication context")
 		return ctrl.Result{}, err
 	}
 
@@ -72,26 +82,26 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		// Define the Service for this DocumentDB instance
-		ddbService := util.GetDocumentDBServiceDefinition(documentdb, req.Namespace, serviceType)
+		ddbService := util.GetDocumentDBServiceDefinition(documentdb, replicationContext, req.Namespace, serviceType)
 
 		// Check if the DocumentDB Service already exists for this instance
-		foundService, err := util.GetOrCreateService(ctx, r.Client, ddbService)
+		foundService, err := util.UpsertService(ctx, r.Client, ddbService)
 		if err != nil {
-			log.Info("Failed to create DocumentDB Service; Requeuing.")
+			logger.Info("Failed to create DocumentDB Service; Requeuing.")
 			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 		}
 
 		// Ensure DocumentDB Service has an IP assigned
 		documentDbServiceIp, err = util.EnsureServiceIP(ctx, foundService)
 		if err != nil {
-			log.Info("DocumentDB Service IP not assigned, Requeuing.")
+			logger.Info("DocumentDB Service IP not assigned, Requeuing.")
 			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 		}
 	}
 
 	// Ensure App ServiceAccount, Role and RoleBindings are created
 	if err := r.EnsureServiceAccountRoleAndRoleBinding(ctx, documentdb, req.Namespace); err != nil {
-		log.Info("Failed to create ServiceAccount, Role and RoleBinding; Requeuing.")
+		logger.Info("Failed to create ServiceAccount, Role and RoleBinding; Requeuing.")
 		return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 	}
 
@@ -99,29 +109,33 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	documentdbImage := util.GetDocumentDBImageForInstance(documentdb)
 
 	currentCnpgCluster := &cnpgv1.Cluster{}
-	desiredCnpgCluster := cnpg.GetCnpgClusterSpec(req, *documentdb, documentdbImage, documentdb.Name, log)
+	desiredCnpgCluster := cnpg.GetCnpgClusterSpec(req, documentdb, documentdbImage, documentdb.Name, logger)
 
-	err = r.AddClusterReplicationToClusterSpec(ctx, *documentdb, desiredCnpgCluster)
-	if err != nil {
-		log.Error(err, "Failed to add physical replication features cnpg Cluster spec; Proceeding as single cluster.")
-		return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+	if replicationContext.IsReplicating() {
+		err = r.AddClusterReplicationToClusterSpec(ctx, documentdb, replicationContext, desiredCnpgCluster)
+		if err != nil {
+			logger.Error(err, "Failed to add physical replication features cnpg Cluster spec; Proceeding as single cluster.")
+			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+		}
 	}
 
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: desiredCnpgCluster.Name, Namespace: req.Namespace}, currentCnpgCluster); err != nil {
 		if errors.IsNotFound(err) {
 			if err := r.Client.Create(ctx, desiredCnpgCluster); err != nil {
-				log.Error(err, "Failed to create CNPG Cluster")
+				logger.Error(err, "Failed to create CNPG Cluster")
 				return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 			}
-			log.Info("CNPG Cluster created successfully", "Cluster.Name", desiredCnpgCluster.Name, "Namespace", desiredCnpgCluster.Namespace)
+			logger.Info("CNPG Cluster created successfully", "Cluster.Name", desiredCnpgCluster.Name, "Namespace", desiredCnpgCluster.Namespace)
 			return ctrl.Result{RequeueAfter: RequeueAfterLong}, nil
 		}
-		log.Error(err, "Failed to get CNPG Cluster")
+		logger.Error(err, "Failed to get CNPG Cluster")
 		return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 	}
+
+	// Check if anything has changed in the generated cnpg spec
 	err, requeueTime := r.TryUpdateCluster(ctx, currentCnpgCluster, desiredCnpgCluster, documentdb)
 	if err != nil {
-		log.Error(err, "Failed to update CNPG Cluster")
+		logger.Error(err, "Failed to update CNPG Cluster")
 	}
 	if requeueTime > 0 {
 		return ctrl.Result{RequeueAfter: requeueTime}, nil
@@ -131,7 +145,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: desiredCnpgCluster.Name, Namespace: req.Namespace}, currentCnpgCluster); err == nil {
 		// Ensure plugin enabled and TLS secret parameter kept in sync once ready
 		if documentdb.Status.TLS != nil && documentdb.Status.TLS.Ready && documentdb.Status.TLS.SecretName != "" {
-			log.Info("Syncing TLS secret into CNPG Cluster plugin parameters", "secret", documentdb.Status.TLS.SecretName)
+			logger.Info("Syncing TLS secret into CNPG Cluster plugin parameters", "secret", documentdb.Status.TLS.SecretName)
 			updated := false
 			for i := range currentCnpgCluster.Spec.Plugins {
 				p := &currentCnpgCluster.Spec.Plugins[i]
@@ -140,7 +154,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 						trueVal := true
 						p.Enabled = &trueVal
 						updated = true
-						log.Info("Enabled sidecar plugin")
+						logger.Info("Enabled sidecar plugin")
 					}
 					if p.Parameters == nil {
 						p.Parameters = map[string]string{}
@@ -149,7 +163,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 					if currentVal != documentdb.Status.TLS.SecretName {
 						p.Parameters["gatewayTLSSecret"] = documentdb.Status.TLS.SecretName
 						updated = true
-						log.Info("Updated gatewayTLSSecret parameter", "old", currentVal, "new", documentdb.Status.TLS.SecretName)
+						logger.Info("Updated gatewayTLSSecret parameter", "old", currentVal, "new", documentdb.Status.TLS.SecretName)
 					}
 				}
 			}
@@ -159,11 +173,44 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				}
 				currentCnpgCluster.Annotations["db.microsoft.com/gateway-tls-rev"] = time.Now().Format(time.RFC3339Nano)
 				if err := r.Client.Update(ctx, currentCnpgCluster); err == nil {
-					log.Info("Patched CNPG Cluster with TLS settings; requeueing for pod update")
+					logger.Info("Patched CNPG Cluster with TLS settings; requeueing for pod update")
 					return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 				} else {
-					log.Error(err, "Failed to update CNPG Cluster with TLS settings")
+					logger.Error(err, "Failed to update CNPG Cluster with TLS settings")
 				}
+			}
+
+			if err := r.Status().Update(ctx, documentdb); err != nil {
+				logger.Error(err, "Failed to update DocumentDB status and connection string")
+			}
+		}
+	}
+
+	if currentCnpgCluster.Status.Phase == "Cluster in healthy state" && replicationContext.IsPrimary() {
+		grantCommand := "GRANT documentdb_admin_role TO streaming_replica;"
+
+		if err := r.executeSQLCommand(ctx, documentdb, req.Namespace, replicationContext.Self, grantCommand, "grant-permissions"); err != nil {
+			logger.Error(err, "Failed to grant permissions to streaming_replica")
+			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+		}
+	}
+
+	if replicationContext.IsPrimary() && documentdb.Status.TargetPrimary != "" {
+		// If these are different, we need to initiate a failover
+		if documentdb.Status.TargetPrimary != currentCnpgCluster.Status.TargetPrimary {
+
+			if err = Promote(ctx, r.Client, currentCnpgCluster.Namespace, currentCnpgCluster.Name, documentdb.Status.TargetPrimary); err != nil {
+				logger.Error(err, "Failed to promote standby cluster to primary")
+				return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+			}
+		} else if documentdb.Status.TargetPrimary != documentdb.Status.LocalPrimary &&
+			documentdb.Status.TargetPrimary == currentCnpgCluster.Status.CurrentPrimary {
+
+			logger.Info("Marking failover as complete")
+			documentdb.Status.LocalPrimary = currentCnpgCluster.Status.CurrentPrimary
+			if err := r.Status().Update(ctx, documentdb); err != nil {
+				logger.Error(err, "Failed to update DocumentDB status")
+				return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 			}
 		}
 		// Update status connection string
@@ -183,37 +230,23 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 func (r *DocumentDBReconciler) cleanupResources(ctx context.Context, req ctrl.Request, documentdb *dbpreview.DocumentDB) error {
 	log := log.FromContext(ctx)
 
-	// Cleanup DocumentDB Service
-	if documentdb.Spec.ExposeViaService.ServiceType != "" {
-		serviceName := util.DOCUMENTDB_SERVICE_PREFIX + req.Name
-		if err := util.DeleteService(ctx, r.Client, serviceName, req.Namespace); err != nil {
-			return err
-		}
-	}
-	// Cleanup CNPG Cluster
-	cnpgCluster := cnpg.GetCnpgClusterSpec(req, dbpreview.DocumentDB{}, "", req.Name, log)
-	if err := r.Client.Delete(ctx, cnpgCluster); err != nil {
-		if errors.IsNotFound(err) {
-			log.Info("CNPG Cluster not found, skipping deletion.")
-		} else {
-			log.Error(err, "Failed to delete CNPG Cluster")
-			return err
-		}
-	} else {
-		log.Info("CNPG Cluster deleted successfully", "Cluster.Name", cnpgCluster.Name, "Namespace", cnpgCluster.Namespace)
-	}
-
 	// Cleanup ServiceAccount, Role and RoleBinding
 	if err := util.DeleteRoleBinding(ctx, r.Client, req.Name, req.Namespace); err != nil {
-		return err
-	}
-	if err := util.DeleteServiceAccount(ctx, r.Client, req.Name, req.Namespace); err != nil {
-		return err
-	}
-	if err := util.DeleteRole(ctx, r.Client, req.Name, req.Namespace); err != nil {
-		return err
+		log.Error(err, "Failed to delete RoleBinding during cleanup", "RoleBindingName", req.Name)
+		// Continue with other cleanup even if this fails
 	}
 
+	if err := util.DeleteServiceAccount(ctx, r.Client, req.Name, req.Namespace); err != nil {
+		log.Error(err, "Failed to delete ServiceAccount during cleanup", "ServiceAccountName", req.Name)
+		// Continue with other cleanup even if this fails
+	}
+
+	if err := util.DeleteRole(ctx, r.Client, req.Name, req.Namespace); err != nil {
+		log.Error(err, "Failed to delete Role during cleanup", "RoleName", req.Name)
+		// Continue with other cleanup even if this fails
+	}
+
+	log.Info("Cleanup process completed", "DocumentDB", req.Name, "Namespace", req.Namespace)
 	return nil
 }
 
@@ -259,4 +292,92 @@ func (r *DocumentDBReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&cnpgv1.Subscription{}).
 		Named("documentdb-controller").
 		Complete(r)
+}
+
+// COPIED FROM https://github.com/cloudnative-pg/cloudnative-pg/blob/release-1.25/internal/cmd/plugin/promote/promote.go
+func Promote(ctx context.Context, cli client.Client,
+	namespace, clusterName, serverName string,
+) error {
+	var cluster cnpgv1.Cluster
+
+	log := log.FromContext(ctx)
+
+	// Get the Cluster object
+	err := cli.Get(ctx, client.ObjectKey{Namespace: namespace, Name: clusterName}, &cluster)
+	if err != nil {
+		return fmt.Errorf("cluster %s not found in namespace %s: %w", clusterName, namespace, err)
+	}
+
+	log.Info("Promoting new primary node", "serverName", serverName, "clusterName", clusterName)
+
+	// If server name is equal to target primary, there is no need to promote
+	// that instance
+	if cluster.Status.TargetPrimary == serverName {
+		fmt.Printf("%s is already the primary node in the cluster\n", serverName)
+		return nil
+	}
+
+	// Check if the Pod exist
+	var pod v1.Pod
+	err = cli.Get(ctx, client.ObjectKey{Namespace: namespace, Name: serverName}, &pod)
+	if err != nil {
+		return fmt.Errorf("new primary node %s not found in namespace %s: %w", serverName, namespace, err)
+	}
+
+	// The Pod exists, let's update the cluster's status with the new target primary
+	reconcileTargetPrimaryFunc := func(cluster *cnpgv1.Cluster) {
+		cluster.Status.TargetPrimary = serverName
+		cluster.Status.TargetPrimaryTimestamp = pgTime.GetCurrentTimestamp()
+		cluster.Status.Phase = cnpgv1.PhaseSwitchover
+		cluster.Status.PhaseReason = fmt.Sprintf("Switching over to %v", serverName)
+	}
+	if err := status.PatchWithOptimisticLock(ctx, cli, &cluster,
+		reconcileTargetPrimaryFunc,
+		status.SetClusterReadyConditionTX,
+	); err != nil {
+		return err
+	}
+	log.Info("Promotion in progress for ", "New primary", serverName, "cluster name", clusterName)
+	return nil
+}
+
+// executeSQLCommand creates a pod to execute SQL commands against the azure-cluster-rw service
+func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdb *dbpreview.DocumentDB, namespace, self, sqlCommand, uniqueName string) error {
+	zero := int32(0)
+	host := self + "-rw"
+	sqlPod := &batchv1.Job{
+		ObjectMeta: ctrl.ObjectMeta{
+			Name:      fmt.Sprintf("%s-%s-sql-executor", documentdb.Name, uniqueName),
+			Namespace: namespace,
+		},
+		Spec: batchv1.JobSpec{
+			Template: v1.PodTemplateSpec{
+				Spec: v1.PodSpec{
+					RestartPolicy: v1.RestartPolicyNever,
+					Containers: []v1.Container{
+						{
+							Name:  "sql-executor",
+							Image: documentdb.Spec.DocumentDBImage,
+							Command: []string{
+								"psql",
+								"-h", host,
+								"-U", "postgres",
+								"-d", "postgres",
+								"-c", sqlCommand,
+							},
+						},
+					},
+				},
+			},
+			TTLSecondsAfterFinished: &zero,
+		},
+	}
+
+	if err := r.Client.Create(ctx, sqlPod); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return err
+		}
+	}
+
+	return nil
 }

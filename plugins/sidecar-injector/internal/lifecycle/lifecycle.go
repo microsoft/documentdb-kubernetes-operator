@@ -222,8 +222,10 @@ func (impl Implementation) reconcileMetadata(
 	// Build base args and append TLS file args if a TLS secret is configured
 	args := []string{"--start-pg", "false", "--pg-port", "5432"}
 	// Check if the pod has the label replication_cluster_type=replica
-	if mutatedPod.Labels["replication_cluster_type"] == "replica" {
-		args = append([]string{"--create-user", "false"}, args...)
+
+	// Check if the pod has the label replication_cluster_type=replica or is not a local primary
+	if mutatedPod.Labels["replication_cluster_type"] == "replica" || cluster.Status.TargetPrimary != mutatedPod.Name {
+		sidecar.Args = []string{"--create-user", "false", "--start-pg", "false", "--pg-port", "5432"}
 	} else {
 		args = append([]string{"--create-user", "true"}, args...)
 	}
@@ -238,8 +240,6 @@ func (impl Implementation) reconcileMetadata(
 	if err != nil {
 		return nil, err
 	}
-
-	// Apply any custom logic needed here, in this example we just add some metadata to the pod
 
 	for key, value := range configuration.Labels {
 		mutatedPod.Labels[key] = value

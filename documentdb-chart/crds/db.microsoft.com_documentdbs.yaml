@@ -62,6 +62,9 @@ spec:
                     description: EnableFleetForCrossCloud determines whether to use
                       KubeFleet mechanics for the replication
                     type: boolean
+                  highAvailability:
+                    description: Whether or not to have replicas on the primary cluster.
+                    type: boolean
                   primary:
                     description: Primary is the name of the primary cluster for replication.
                     type: string
@@ -86,6 +89,15 @@ spec:
                   DocumentDbCredentialSecret is the name of the Kubernetes Secret containing credentials
                   for the DocumentDB gateway (expects keys `username` and `password`). If omitted,
                   a default secret name `documentdb-credentials` is used.
+                type: string
+              environment:
+                description: |-
+                  Environment specifies the cloud environment for deployment
+                  This determines cloud-specific service annotations for LoadBalancer services
+                enum:
+                - eks
+                - aks
+                - gke
                 type: string
               exposeViaService:
                 description: |-
@@ -114,6 +126,9 @@ spec:
                 maximum: 1
                 minimum: 1
                 type: integer
+              logLevel:
+                description: Overrides default log level for the DocumentDB cluster.
+                type: string
               nodeCount:
                 description: NodeCount is the number of nodes in the DocumentDB cluster.
                   Must be 1.
@@ -123,12 +138,23 @@ spec:
               resource:
                 description: Resource specifies the storage resources for DocumentDB.
                 properties:
-                  pvcSize:
-                    description: PvcSize is the size of the persistent volume claim
-                      for DocumentDB storage (e.g., "10Gi").
-                    type: string
+                  storage:
+                    description: Storage configuration for DocumentDB persistent volumes.
+                    properties:
+                      pvcSize:
+                        description: PvcSize is the size of the persistent volume
+                          claim for DocumentDB storage (e.g., "10Gi").
+                        type: string
+                      storageClass:
+                        description: |-
+                          StorageClass specifies the storage class for DocumentDB persistent volumes.
+                          If not specified, the cluster's default storage class will be used.
+                        type: string
+                    required:
+                    - pvcSize
+                    type: object
                 required:
-                - pvcSize
+                - storage
                 type: object
               sidecarInjectorPluginName:
                 description: SidecarInjectorPluginName is the name of the sidecar
@@ -208,6 +234,10 @@ spec:
                       for future phases).
                     type: object
                 type: object
+              walReplicaPluginName:
+                description: WalReplicaPluginName is the name of the wal replica plugin
+                  to use.
+                type: string
             required:
             - instancesPerNode
             - nodeCount
@@ -217,6 +247,8 @@ spec:
             description: DocumentDBStatus defines the observed state of DocumentDB.
             properties:
               connectionString:
+                type: string
+              localPrimary:
                 type: string
               status:
                 description: Status reflects the status field from the underlying
@@ -232,6 +264,8 @@ spec:
                   secretName:
                     type: string
                 type: object
+              targetPrimary:
+                type: string
             type: object
         type: object
     served: true

@@ -3,12 +3,12 @@
 # DocumentDB AKS Cluster Creation Script
 # This script creates a complete AKS cluster with all dependencies for DocumentDB
 
-set -e  # Exit on any error
+#set -e  # Exit on any error
 
 # Configuration
-CLUSTER_NAME="guanzhou-101701"
-RESOURCE_GROUP="guanzhou-101701-rg"
-LOCATION="West US 2"
+CLUSTER_NAME="guanzhou-101702"
+RESOURCE_GROUP="guanzhou-101702-rg"
+LOCATION="East US 2"
 NODE_COUNT=2
 NODE_SIZE="Standard_D4s_v5"
 KUBERNETES_VERSION="1.31.11"
@@ -17,7 +17,7 @@ KUBERNETES_VERSION="1.31.11"
 # For testing: use hossain-rayhan/documentdb-operator (fork with Azure enhancements)
 # For production: use microsoft/documentdb-operator (official)
 OPERATOR_GITHUB_ORG="guanzhousongmicrosoft"
-OPERATOR_CHART_VERSION="0.1.112"
+OPERATOR_CHART_VERSION="0.1.101701"
 
 # Feature flags - set to "true" to enable, "false" to skip
 INSTALL_OPERATOR="${INSTALL_OPERATOR:-false}"

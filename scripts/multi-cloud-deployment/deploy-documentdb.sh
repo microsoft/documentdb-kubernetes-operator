@@ -8,12 +8,13 @@ set -euo pipefail
 # Environment variables:
 #   RESOURCE_GROUP: Azure resource group (default: german-aks-fleet-rg)
 #   DOCUMENTDB_PASSWORD: Database password (will be generated if not provided)
-#   ENABLE_TRAFFIC_MANAGER: Enable Traffic Manager creation (default: true)
-#   TRAFFIC_MANAGER_PROFILE_NAME: Traffic Manager profile name (default: ${RESOURCE_GROUP}-documentdb-tm)
+#   ENABLE_AZURE_DNS: Enable Azure DNS creation (default: true)
+#   AZURE_DNS_ZONE_NAME: Azure DNS zone name (default: same as resource group)
+#   AZURE_DNS_PARENT_ZONE_RESOURCE_ID: Azure DNS parent zone resource ID (default: multi-cloud.pgmongo-dev.cosmos.windows-int.net)
 #
 # Examples:
 #   ./deploy-multi-region.sh
-#   ENABLE_TRAFFIC_MANAGER=false ./deploy-multi-region.sh mypassword
+#   ENABLE_AZURE_DNS=false ./deploy-multi-region.sh mypassword
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,9 +24,10 @@ RESOURCE_GROUP="${RESOURCE_GROUP:-german-aks-fleet-rg}"
 
 GKE_CLUSTER_NAME="${GKE_CLUSTER_NAME:-gke-documentdb-cluster}"
 
-# Traffic Manager configuration
-TRAFFIC_MANAGER_PROFILE_NAME="${TRAFFIC_MANAGER_PROFILE_NAME:-${RESOURCE_GROUP}-documentdb-tm}"
-ENABLE_TRAFFIC_MANAGER="${ENABLE_TRAFFIC_MANAGER:-false}"
+# Azure DNS configuration
+AZURE_DNS_ZONE_NAME="${AZURE_DNS_ZONE_NAME:-${RESOURCE_GROUP}}"
+AZURE_DNS_PARENT_ZONE_RESOURCE_ID="${AZURE_DNS_PARENT_ZONE_RESOURCE_ID:-/subscriptions/81901d5e-31aa-46c5-b61a-537dbd5df1e7/resourceGroups/alaye-documentdb-dns/providers/Microsoft.Network/dnszones/multi-cloud.pgmongo-dev.cosmos.windows-int.net}"
+ENABLE_AZURE_DNS="${ENABLE_AZURE_DNS:-true}"
 
 # Set password from argument or environment variable
 DOCUMENTDB_PASSWORD="${1:-${DOCUMENTDB_PASSWORD:-}}"
@@ -157,10 +159,10 @@ if [ -n "$EXISTING_RESOURCES" ]; then
       for cluster in "${CLUSTER_ARRAY[@]}"; do
         kubectl --context "$cluster" wait --for=delete namespace/documentdb-preview-ns --timeout=60s 
       done
-      # Delete Traffic Manager if it exists
-      if az network traffic-manager profile show --name "$TRAFFIC_MANAGER_PROFILE_NAME" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
-        echo "Deleting Traffic Manager profile: $TRAFFIC_MANAGER_PROFILE_NAME"
-        az network traffic-manager profile delete --name "$TRAFFIC_MANAGER_PROFILE_NAME" --resource-group "$RESOURCE_GROUP"
+      # Delete Azure DNS zone if it exists
+      if az network dns zone show --name "$AZURE_DNS_ZONE_NAME" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+        echo "Deleting Azure DNS zone: $AZURE_DNS_ZONE_NAME"
+        az network dns zone delete --name "$AZURE_DNS_ZONE_NAME" --resource-group "$RESOURCE_GROUP" --yes
       fi
       ;;
     2)
@@ -287,42 +289,35 @@ for cluster in "${CLUSTER_ARRAY[@]}"; do
   fi
 done
 
-# Step 4: Create Traffic Manager for DocumentDB load balancing
-if [ "$ENABLE_TRAFFIC_MANAGER" = "true" ]; then
+# Step 4: Create Azure DNS zone for DocumentDB
+if [ "$ENABLE_AZURE_DNS" = "true" ]; then
   echo ""
   echo "======================================="
-  echo "Creating Traffic Manager for DocumentDB..."
+  echo "Creating Azure DNS zone for DocumentDB..."
   echo "======================================="
   
-  # Create Traffic Manager profile
-  echo "Creating Traffic Manager profile: $TRAFFIC_MANAGER_PROFILE_NAME"
-  if az network traffic-manager profile show --name "$TRAFFIC_MANAGER_PROFILE_NAME" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
-    echo "Traffic Manager profile already exists, updating..."
+  parentName=$(az network dns zone show --id $AZURE_DNS_PARENT_ZONE_RESOURCE_ID | jq -r ".name")
+  fullName="${AZURE_DNS_ZONE_NAME}.${parentName}"
+  
+  # Create Azure DNS zone
+  if az network dns zone show --name "$AZURE_DNS_ZONE_NAME" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+    echo "Azure DNS zone already exists, updating..."
   else
-    az network traffic-manager profile create \
-      --name "$TRAFFIC_MANAGER_PROFILE_NAME" \
+    az network dns zone create \
+      --name "$fullName" \
       --resource-group "$RESOURCE_GROUP" \
-      --routing-method "Priority" \
-      --unique-dns-name "$TRAFFIC_MANAGER_PROFILE_NAME" \
-      --ttl 30 \
-      --protocol TCP \
-      --port 10260 \
-      --interval 30 \
-      --timeout 10 \
-      --max-failures 3
+      --parent-name "$AZURE_DNS_PARENT_ZONE_RESOURCE_ID"
   fi
   
   # Wait for DocumentDB services to be ready and create endpoints
   echo ""
   echo "Waiting for DocumentDB services to be ready..."
   sleep 30
-  
-  # Create Traffic Manager endpoints for each cluster
-  for i in "${!CLUSTER_ARRAY[@]}"; do
-    cluster="${CLUSTER_ARRAY[$i]}"
-    
-    echo "Creating Traffic Manager endpoint: $cluster"
-    
+
+  # Create DNS records for each cluster
+  for cluster in "${CLUSTER_ARRAY[@]}"; do
+    echo "Creating DNS record: $cluster"
+
     # Create service name by concatenating documentdb-preview with cluster name (max 63 chars)
     SERVICE_NAME="documentdb-service-${cluster}"
     SERVICE_NAME="${SERVICE_NAME:0:63}"
@@ -340,94 +335,66 @@ if [ "$ENABLE_TRAFFIC_MANAGER" = "true" ]; then
     
     if [ -n "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "<pending>" ]; then
       echo "  External IP for $cluster: $EXTERNAL_IP"
-      
-      # Delete existing endpoint if it exists
-      az network traffic-manager endpoint delete \
-        --name "$cluster" \
-        --profile-name "$TRAFFIC_MANAGER_PROFILE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --type ExternalEndpoints &>/dev/null || true
-      
-      # Set priority to 1 for primary cluster, 2+ for others
-      if [ "$cluster" = "$PRIMARY_CLUSTER" ]; then
-        PRIORITY=1
-      else
-        PRIORITY=$((i + 2))
-      fi
-      
-      # Create Traffic Manager endpoint
-      az network traffic-manager endpoint create \
-        --name "$cluster" \
-        --profile-name "$TRAFFIC_MANAGER_PROFILE_NAME" \
-        --resource-group "$RESOURCE_GROUP" \
-        --type ExternalEndpoints \
-        --target "$EXTERNAL_IP" \
-        --priority "$PRIORITY" 
 
-      echo "  ✓ Created endpoint $cluster with priority $PRIORITY"
+      # TODO Delete existing DNS record if it exists
+      az network dns record-set a delete \
+        --name "$cluster" \
+        --zone-name "$fullName" \
+        --resource-group "$RESOURCE_GROUP" \
+        --yes
+      
+      # Create DNS record
+      az network dns record-set a create \
+        --name "$cluster" \
+        --zone-name "$fullName" \
+        --resource-group "$RESOURCE_GROUP" \
+        --ttl 5
+      az network dns record-set a add-record \
+        --record-set-name "$cluster" \
+        --zone-name "$fullName" \
+        --resource-group "$RESOURCE_GROUP" \
+        --ipv4-address "$EXTERNAL_IP"
+
+      echo "  ✓ Created DNS record $cluster"
     else
       echo "  ✗ Failed to get external IP for $cluster"
     fi
   done
-  
-  # Get Traffic Manager FQDN
-  TRAFFIC_MANAGER_FQDN=$(az network traffic-manager profile show \
-    --name "$TRAFFIC_MANAGER_PROFILE_NAME" \
+
+  az network dns record-set srv delete \
+    --name "_mongodb._tcp" \
+    --zone-name "$fullName" \
     --resource-group "$RESOURCE_GROUP" \
-    --query dnsConfig.fqdn -o tsv)
+    --yes 
+  
+  az network dns record-set srv create \
+    --name "_mongodb._tcp" \
+    --zone-name "$fullName" \
+    --resource-group "$RESOURCE_GROUP" \
+    --ttl 5
+
+  mongoFQDN=$(az network dns record-set srv add-record \
+    --record-set-name "_mongodb._tcp" \
+    --zone-name "$fullName" \
+    --resource-group "$RESOURCE_GROUP" \
+    --priority 0 \
+    --weight 0 \
+    --port 10260 \
+    --target "$PRIMARY_CLUSTER.$fullName" | jq -r ".fqdn")
   
   echo ""
-  echo "✓ Traffic Manager created successfully!"
-  echo "  Profile: $TRAFFIC_MANAGER_PROFILE_NAME"
-  echo "  FQDN: $TRAFFIC_MANAGER_FQDN"
+  echo "✓ DNS zone created successfully!"
+  echo "  Zone Name: $fullName"
+  echo "  MongoDB FQDN: $mongoFQDN"
 fi
 
 echo ""
-echo "======================================="
-echo "Connection Information"
-echo "======================================="
-echo ""
-echo "Username: default_user"
-echo "Password: $DOCUMENTDB_PASSWORD"
-echo ""
-
-if [ "$ENABLE_TRAFFIC_MANAGER" = "true" ] && [ -n "${TRAFFIC_MANAGER_FQDN:-}" ]; then
-  echo "🌐 Connect via Traffic Manager (load balanced):"
-  echo "mongosh $TRAFFIC_MANAGER_FQDN:10260 -u default_user -p \$DOCUMENTDB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates"
-  echo ""
-  echo "Or use port forwarding:"
-  echo "kubectl --context $PRIMARY_CLUSTER port-forward -n documentdb-preview-ns svc/documentdb-preview 10260:10260"
-  echo "mongosh localhost:10260 -u default_user -p \$DOCUMENTDB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates"
-else
-  echo "To connect to the primary cluster ($PRIMARY_CLUSTER):"
-  echo "kubectl --context $PRIMARY_CLUSTER port-forward -n documentdb-preview-ns svc/documentdb-preview 10260:10260"
-  echo "mongosh localhost:10260 -u default_user -p \$DOCUMENTDB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates"
-fi
-echo ""
-echo "Connection string:"
-kubectl --context $PRIMARY_CLUSTER get documentdb -n documentdb-preview-ns  -A -o json | jq ".items[0].status.connectionString"
-echo ""
-
+echo "Connection Information:"
+echo "  Username: default_user"
+echo "  Password: $DOCUMENTDB_PASSWORD"
 echo ""
 echo "To monitor the deployment:"
 echo "watch 'kubectl --context $HUB_CONTEXT get clusterresourceplacement documentdb-crp -o wide'"
-
-if [ "$ENABLE_TRAFFIC_MANAGER" = "true" ]; then
-  echo ""
-  echo "To manage Traffic Manager:"
-  echo "# Check Traffic Manager status"
-  echo "az network traffic-manager profile show --name $TRAFFIC_MANAGER_PROFILE_NAME --resource-group $RESOURCE_GROUP"
-  echo ""
-  echo "# List endpoints"
-  echo "az network traffic-manager endpoint list --profile-name $TRAFFIC_MANAGER_PROFILE_NAME --resource-group $RESOURCE_GROUP"
-  echo ""
-  echo "# Test DNS resolution"
-  echo "nslookup ${TRAFFIC_MANAGER_FQDN:-$TRAFFIC_MANAGER_PROFILE_NAME.trafficmanager.net}"
-  echo ""
-  echo "# Delete Traffic Manager (if needed)"
-  echo "az network traffic-manager profile delete --name $TRAFFIC_MANAGER_PROFILE_NAME --resource-group $RESOURCE_GROUP"
-fi
-
 echo ""
 echo "To check DocumentDB status across all clusters:"
 # Create a space-separated string from the array

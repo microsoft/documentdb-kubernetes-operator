@@ -150,7 +150,7 @@ az role assignment create --role "${ROLE}" --assignee ${IDENTITY} --scope ${FLEE
 gcloud config set account $GCP_USER
 gcloud auth login --brief
 # TODO move this to a check at the top
-sudo apt-get install google-cloud-cli-gke-gcloud-auth-plugin
+# sudo apt-get install google-cloud-cli-gke-gcloud-auth-plugin
 
 # Create project if it doesn't exist
 if ! gcloud projects describe $PROJECT_ID &>/dev/null; then

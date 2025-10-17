@@ -24,7 +24,6 @@ print("-" * 65)
 start_time = time.time()
 end_time = start_time + (10 * 60)  # 10 minutes
 count = 0
-restart = True
 
 while time.time() < end_time:
     failed = False
@@ -41,16 +40,6 @@ while time.time() < end_time:
         failed = True
         short_err = getattr(getattr(e, 'details', {}), 'get', lambda *_: None)('errmsg')
         print(f"Error: {short_err or str(e)}")
-        if restart:
-            client.close()
-            print(f"Reconnecting write client...")
-            print(f"Still using: {connection_string.split('@')[1] if '@' in connection_string else 'local'}")
-            time.sleep(120) # Wait for DNS cache to expire
-            # Create new client to force DNS re-resolution
-            client = MongoClient(connection_string)
-            db = client.testdb
-            collection = db.testcollection 
-            restart = False
 
     try:
         read_count = collection.count_documents({})

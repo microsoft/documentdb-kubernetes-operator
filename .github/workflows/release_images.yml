@@ -19,7 +19,7 @@ on:
       chart_version:
         description: 'Helm chart version to publish'
         required: false
-        default: '0.1.0'
+        default: '0.1.1'
 
 permissions:
   contents: read
@@ -85,22 +85,24 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
-      - name: Update values.yaml with target tag
-        if: ${{ github.event.inputs.target_tag != 'preview' }}
-        run: |
-          echo "Updating values.yaml with target tag: ${{ github.event.inputs.target_tag }}"
-          sed -i "s/tag: preview/tag: '${{ github.event.inputs.target_tag }}'/g" documentdb-chart/values.yaml
-          echo "Updated values.yaml content:"
-          cat documentdb-chart/values.yaml
-
       - name: Set chart version
         run: |
             CHART_VERSION_INPUT="${{ github.event.inputs.chart_version }}"
             if [[ -z "$CHART_VERSION_INPUT" ]]; then
-              CHART_VERSION_INPUT="0.1.0"
+              CHART_VERSION_FROM_FILE=$(awk -F': *' '/^version:/ {print $2; exit}' documentdb-chart/Chart.yaml)
+              if [[ -z "$CHART_VERSION_FROM_FILE" ]]; then
+                echo "Failed to determine chart version from documentdb-chart/Chart.yaml" >&2
+                exit 1
+              fi
+              CHART_VERSION_INPUT="$CHART_VERSION_FROM_FILE"
             fi
             echo "CHART_VERSION=${CHART_VERSION_INPUT}" >> $GITHUB_ENV
             echo "Using chart version: ${CHART_VERSION_INPUT}"
+
+      - name: Update Chart.yaml metadata
+        run: |
+          sed -i "s/^version: .*/version: ${CHART_VERSION}/" documentdb-chart/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"${CHART_VERSION}\"/" documentdb-chart/Chart.yaml
 
       - name: Package Helm chart
         run: |

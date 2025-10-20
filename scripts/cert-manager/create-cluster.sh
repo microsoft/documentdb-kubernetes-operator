@@ -6,8 +6,8 @@
 #set -e  # Exit on any error
 
 # Configuration
-CLUSTER_NAME="guanzhou-101702"
-RESOURCE_GROUP="guanzhou-101702-rg"
+CLUSTER_NAME="guanzhou-102001"
+RESOURCE_GROUP="guanzhou-102001-rg"
 LOCATION="East US 2"
 NODE_COUNT=2
 NODE_SIZE="Standard_D4s_v5"

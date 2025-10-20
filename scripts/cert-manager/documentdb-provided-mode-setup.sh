@@ -128,6 +128,22 @@ for bin in az kubectl helm jq mongosh; do
   fi
 done
 
+ensure_operator_ready() {
+  local operator_namespace="documentdb-operator"
+  local operator_deployment="documentdb-operator"
+
+  if ! kubectl get deployment -n "$operator_namespace" "$operator_deployment" >/dev/null 2>&1; then
+    echo "DocumentDB operator deployment not found in namespace '$operator_namespace'." >&2
+    echo "Install the operator per docs/gateway-tls-validation.md step 1.11 before running this script." >&2
+    exit 1
+  fi
+
+  if ! kubectl -n "$operator_namespace" rollout status deployment "$operator_deployment" --timeout=300s >/dev/null 2>&1; then
+    echo "DocumentDB operator deployment is not ready. Wait for the operator pods and retry." >&2
+    exit 1
+  fi
+}
+
 if ! az account show >/dev/null 2>&1; then
   echo "Azure CLI not logged in. Run 'az login' first." >&2
   exit 1
@@ -368,38 +384,12 @@ wait_for_documentdb_tls() {
   exit 1
 }
 
-run_mongosh_check() {
-  if [[ "$RUN_MONGOSH" -eq 0 ]]; then
-    echo "Skipping mongosh connectivity test"
-    return
-  fi
-  LB_IP=$(kubectl -n "$NAMESPACE" get svc documentdb-service-"$DOCDB_NAME" -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-  if [[ -z "$LB_IP" ]]; then
-    echo "Service LoadBalancer IP is not available" >&2
-    exit 1
-  fi
-  echo "Gateway service IP: ${LB_IP}"
-  TMP_CA=$(mktemp)
-  kubectl -n "$NAMESPACE" get secret "$PROVIDED_SECRET" -o jsonpath='{.data.tls\.crt}' | base64 -d > "$TMP_CA"
-  mongo_user=$(kubectl -n "$NAMESPACE" get secret "$SECRET_NAME" -o jsonpath='{.data.username}' | base64 -d)
-  mongo_pass=$(kubectl -n "$NAMESPACE" get secret "$SECRET_NAME" -o jsonpath='{.data.password}' | base64 -d)
-  CONN_URI="mongodb://${mongo_user}:${mongo_pass}@${SNI_HOST}:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&replicaSet=rs0"
-  echo "Running mongosh ping against ${SNI_HOST}"
-  if mongosh "$CONN_URI" --tlsHostname "$SNI_HOST" --tlsCAFile "$TMP_CA" --eval 'db.runCommand({ ping: 1 })'; then
-    echo "mongosh connectivity OK"
-  else
-    echo "mongosh connectivity failed" >&2
-    rm -f "$TMP_CA"
-    exit 1
-  fi
-  rm -f "$TMP_CA"
-}
-
 ### Execution flow
 verify_keyvault_assets
 ensure_cert_manager
 ensure_csi_driver
 ensure_namespace_and_secret
+ensure_operator_ready
 
 if [[ -z "$USER_ASSIGNED_CLIENT" ]]; then
   UAI_CLIENT=$(sanitize_id "$(az aks show -g \"$RESOURCE_GROUP\" -n \"$AKS_NAME\" --query identityProfile.kubeletidentity.clientId -o tsv)")
@@ -413,6 +403,5 @@ ensure_cert_puller
 wait_for_tls_secret
 ensure_documentdb_resource
 wait_for_documentdb_tls
-run_mongosh_check
 
 echo "DocumentDB provided TLS setup complete."

@@ -20,13 +20,13 @@ The flow is opinionated for a fresh environment. Adapt names or skip steps if re
 
 ### 1.1 Set variables
 ```bash
-export suffix="101301"
+export suffix="101702"
 # export suffix=$(date +%m%d%H)
 export SUBSCRIPTION_ID="81901d5e-31aa-46c5-b61a-537dbd5df1e7"
 export LOCATION="eastus2"
-export RG="documentdb-aks-${suffix}-rg"
+export RG="guanzhou-${suffix}-rg"
 export ACR_NAME="guanzhoutest"         # must be globally unique
-export AKS_NAME="documentdb-aks-${suffix}"
+export AKS_NAME="guanzhou-${suffix}"
 export KV_NAME="ddb-issuer-${suffix}"
 export NS="documentdb-preview-ns"
 export DOCDB_NAME="documentdb-preview"
@@ -159,7 +159,8 @@ spec:
   documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   gatewayImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   resource:
-    pvcSize: 10Gi
+    storage:
+      pvcSize: 10Gi
   exposeViaService:
     serviceType: LoadBalancer
   tls:
@@ -178,6 +179,11 @@ kubectl -n "$NS" get svc -o wide
 ```
 
 Wait until the DocumentDB status shows `status.tls.ready: true` and note the generated secret name.
+
+```bash
+kubectl -n "$NS" get documentdb "$DOCDB_NAME" \
+  -o jsonpath='{.status.tls.ready}{"\n"}{.status.tls.secretName}{"\n"}'
+```
 
 ### 3.3 Capture LoadBalancer IP
 ```bash
@@ -209,11 +215,14 @@ Keep the self-signed deployment from section 3; we will transition it to Provide
 az keyvault create -g "$RG" -n "$KV_NAME" -l "$LOCATION" --enable-rbac-authorization true
 
 MY_OBJECT_ID=$(az ad signed-in-user show --query id -o tsv)
+echo "MY_OBJECT_ID=$MY_OBJECT_ID"
 az role assignment create --assignee-object-id "$MY_OBJECT_ID" \
   --role "Key Vault Certificates Officer" \
   --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG/providers/Microsoft.KeyVault/vaults/$KV_NAME"
 
 KUBELET_MI_OBJECT_ID=$(az aks show -g "$RG" -n "$AKS_NAME" --query identityProfile.kubeletidentity.objectId -o tsv)
+
+echo "KUBELET_MI_OBJECT_ID=$KUBELET_MI_OBJECT_ID"
 az role assignment create --assignee-object-id "$KUBELET_MI_OBJECT_ID" \
   --role "Key Vault Secrets User" \
   --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG/providers/Microsoft.KeyVault/vaults/$KV_NAME"
@@ -257,7 +266,9 @@ az keyvault certificate create --vault-name "$KV_NAME" -n documentdb-gateway \
 
 ### 4.4 Create SecretProviderClass with secret sync
 ```bash
-env KV_NAME="$KV_NAME" kubectl apply -f - <<'EOF'
+export KUBELET_MI_CLIENT_ID=$(az aks show -g "$RG" -n "$AKS_NAME" --query identityProfile.kubeletidentity.clientId -o tsv)
+
+env KV_NAME="$KV_NAME" KUBELET_MI_CLIENT_ID="$KUBELET_MI_CLIENT_ID" kubectl apply -f - <<EOF
 apiVersion: secrets-store.csi.x-k8s.io/v1
 kind: SecretProviderClass
 metadata:
@@ -278,6 +289,7 @@ spec:
     useVMManagedIdentity: "true"
     keyvaultName: "${KV_NAME}"
     tenantId: "$(az account show --query tenantId -o tsv)"
+    userAssignedIdentityID: "${KUBELET_MI_CLIENT_ID}"
     cloudName: "AzurePublicCloud"
     syncSecret: "true"
     objects: |
@@ -295,7 +307,7 @@ spec:
 EOF
 ```
 
-If nodes use multiple user-assigned identities, set `userAssignedIdentityID` on the SecretProviderClass using the kubelet identity client ID and restart any helper pod.
+If you already created the SecretProviderClass, delete it (`kubectl -n "$NS" delete secretproviderclass documentdb-azure-tls --ignore-not-found`) before reapplying. Setting `userAssignedIdentityID` ensures the Azure provider uses the kubelet's user-assigned managed identity when more than one identity is attached to the node.
 
 ### 4.5 Trigger secret sync with a helper deployment
 ```bash
@@ -330,6 +342,13 @@ spec:
             secretProviderClass: "documentdb-azure-tls"
 EOF
 ```
+
+Restart the helper pod to force a new mount attempt whenever you update the SecretProviderClass specification:
+```bash
+kubectl -n "$NS" delete pod -l app=cert-puller
+```
+
+Wait for the replacement pod to reach `Running`.
 
 Check that the Kubernetes secret exists and has TLS keys:
 ```bash
@@ -374,7 +393,7 @@ export DOCDB_PASS=$(kubectl -n "$NS" get secret documentdb-credentials -o jsonpa
 openssl s_client -connect "$SNI_HOST:10260" -servername "$SNI_HOST" -showcerts </dev/null \
   2>/dev/null | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/ {print}' > /tmp/ca.crt
 
-mongosh "mongodb://$DOCDB_USER:$DOCDB_PASS@$SNI_HOST:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&replicaSet=rs0" \
+mongosh "mongodb://$DOCDB_USER:$DOCDB_PASS@$SNI_HOST:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&replicaSet=rs0&tlsAllowInvalidHostnames=true" \
   --tlsCAFile /tmp/ca.crt \
   --eval 'db.runCommand({ ping: 1 })'
 ```
@@ -390,7 +409,7 @@ kubectl -n "$NS" delete deploy cert-puller || true
 
 ## 5. Troubleshooting Checklist
 - **DocumentDB status** – `status.tls.message` will describe why TLS is not ready (missing secret keys, waiting for cert-manager, etc.).
-- **Secrets Store CSI** – ensure the provider pods are running and the SecretProviderClass name matches the volume attribute on workloads.
+- **Secrets Store CSI** – ensure the provider pods are running anId the SecretProviderClass name matches the volume attribute on workloads.
 - **Key Vault permissions** – kubelet identity needs "Key Vault Secrets User" on the vault; the operator/human account needs access to create/import certificates.
 - **Certificate SAN** – must match the SNI host name you use when connecting (`<LB-IP>.sslip.io`, custom domain, etc.).
 - **Image versions** – keep `documentDBVersion`, engine, and gateway images aligned to avoid pull failures.

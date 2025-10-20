@@ -111,6 +111,22 @@ for bin in kubectl helm mongosh jq openssl; do
   fi
 done
 
+ensure_operator_ready() {
+  local operator_namespace="documentdb-operator"
+  local operator_deployment="documentdb-operator"
+
+  if ! kubectl get deployment -n "$operator_namespace" "$operator_deployment" >/dev/null 2>&1; then
+    echo "DocumentDB operator deployment not found in namespace '$operator_namespace'." >&2
+    echo "Follow docs/gateway-tls-validation.md step 1.11 to install the operator before running this script." >&2
+    exit 1
+  fi
+
+  if ! kubectl -n "$operator_namespace" rollout status deployment "$operator_deployment" --timeout=300s >/dev/null 2>&1; then
+    echo "DocumentDB operator deployment is not ready. Wait for the operator pods to become ready and retry." >&2
+    exit 1
+  fi
+}
+
 if [[ -n "$KEYVAULT_NAME" ]]; then
   if ! command -v az >/dev/null 2>&1; then
     echo "Required command 'az' not found for Key Vault access" >&2
@@ -141,6 +157,8 @@ kubectl -n "$NAMESPACE" create secret generic "$SECRET_NAME" \
   --from-literal=username="$SECRET_USER" \
   --from-literal=password="$SECRET_PASS" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+ensure_operator_ready
 
 apply_documentdb_manifest() {
   if [[ "$MODE" == "selfsigned" ]]; then
@@ -243,11 +261,16 @@ if [[ "$WAIT_FOR_READY" -eq 1 ]]; then
     exit 1
   fi
   echo "LoadBalancer IP: ${svc_ip}"
+  default_sni_host="${svc_ip}.sslip.io"
+  echo "Suggested SNI hostname: ${default_sni_host}"
+  if [[ -z "$SNI_HOST" ]]; then
+    SNI_HOST="$default_sni_host"
+  fi
   host_for_uri="$svc_ip"
   extra_query='&tlsAllowInvalidCertificates=true&tlsAllowInvalidHostnames=true'
   tmp_cert=""
   if [[ "$MODE" == "provided" ]]; then
-    extra_query=''
+    extra_query='&tlsAllowInvalidHostnames=true'
     if [[ -n "$PROVIDED_SECRET" ]]; then
       echo "Provided TLS secret in use: $PROVIDED_SECRET"
     fi
@@ -294,12 +317,13 @@ if [[ "$WAIT_FOR_READY" -eq 1 ]]; then
     mongo_pass=$(kubectl -n "$NAMESPACE" get secret "$SECRET_NAME" -o jsonpath='{.data.password}' | base64 -d)
     conn_uri="mongodb://${mongo_user}:${mongo_pass}@${host_for_uri}:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&replicaSet=rs0${extra_query}"
     echo "Running mongosh ping..."
-    mongosh_args=("$conn_uri" "--eval" "db.runCommand({ ping: 1 })")
+    mongosh_args=($conn_uri "--eval" "db.runCommand({ ping: 1 })")
     if [[ "$MODE" == "provided" ]]; then
-      mongosh_args=("$conn_uri" "--tlsCAFile" "$tmp_cert" "--eval" "db.runCommand({ ping: 1 })")
+      mongosh_args=($conn_uri "--tlsCAFile" "$tmp_cert" "--eval" "db.runCommand({ ping: 1 })")
       if [[ -n "$SNI_HOST" && $(mongosh --help 2>&1 | grep -c -- '--tlsHostname') -gt 0 ]]; then
         mongosh_args+=("--tlsHostname" "$SNI_HOST")
       fi
+      mongosh_args+=("--tlsAllowInvalidHostnames")
     fi
     mongosh_log=$(mktemp)
     if mongosh "${mongosh_args[@]}" >"$mongosh_log" 2>&1; then

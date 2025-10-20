@@ -255,7 +255,31 @@ if [[ "$WAIT_FOR_READY" -eq 1 ]]; then
     exit 1
   fi
 
-  svc_ip=$(kubectl -n "$NAMESPACE" get svc documentdb-service-"$DOCDB_NAME" -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  svc_name="documentdb-service-${DOCDB_NAME}"
+  echo "Waiting for service ${svc_name} (timeout ${TIMEOUT}s)..."
+  while (( SECONDS < deadline )); do
+    if kubectl -n "$NAMESPACE" get svc "$svc_name" >/dev/null 2>&1; then
+      break
+    fi
+    echo "Service ${svc_name} not created yet, retrying..."
+    sleep 5
+  done
+
+  if (( SECONDS >= deadline )); then
+    echo "Timed out waiting for service ${svc_name}" >&2
+    exit 1
+  fi
+
+  svc_ip=""
+  while (( SECONDS < deadline )); do
+    svc_ip=$(kubectl -n "$NAMESPACE" get svc "$svc_name" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+    if [[ -n "$svc_ip" ]]; then
+      break
+    fi
+    echo "Service ${svc_name} pending LoadBalancer IP, retrying..."
+    sleep 5
+  done
+
   if [[ -z "$svc_ip" ]]; then
     echo "Service LoadBalancer IP not assigned yet" >&2
     exit 1

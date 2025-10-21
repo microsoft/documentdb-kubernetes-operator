@@ -159,11 +159,6 @@ if [ -n "$EXISTING_RESOURCES" ]; then
       for cluster in "${CLUSTER_ARRAY[@]}"; do
         kubectl --context "$cluster" wait --for=delete namespace/documentdb-preview-ns --timeout=60s 
       done
-      # Delete Azure DNS zone if it exists
-      if az network dns zone show --name "$AZURE_DNS_ZONE_NAME" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
-        echo "Deleting Azure DNS zone: $AZURE_DNS_ZONE_NAME"
-        az network dns zone delete --name "$AZURE_DNS_ZONE_NAME" --resource-group "$RESOURCE_GROUP" --yes
-      fi
       ;;
     2)
       echo "Updating existing deployment..."

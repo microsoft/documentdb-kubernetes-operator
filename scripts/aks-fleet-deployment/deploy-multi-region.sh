@@ -129,19 +129,15 @@ echo "======================================="
 # Determine hub context
 HUB_CONTEXT="${HUB_CONTEXT:-hub}"
 if ! kubectl config get-contexts "$HUB_CONTEXT" &>/dev/null; then
-  echo "Hub context not found, trying to find first member cluster..."
-  HUB_CONTEXT="${CLUSTER_ARRAY[0]}"
-  if [ -z "$HUB_CONTEXT" ]; then
-    echo "Error: No suitable context found. Please ensure you have credentials for the fleet."
-    exit 1
-  fi
+  echo "Error: Hub context not found. Please ensure you have credentials for the fleet."
+  exit 1
 fi
 
 echo "Using hub context: $HUB_CONTEXT"
 
 # Check if resources already exist
 EXISTING_RESOURCES=""
-if kubectl --context "$HUB_CONTEXT" get namespace documentdb-preview-ns &>/dev/null 2>&1; then
+if kubectl --context "$HUB_CONTEXT" get namespace documentdb-preview-ns; then
   EXISTING_RESOURCES="${EXISTING_RESOURCES}namespace "
 fi
 if kubectl --context "$HUB_CONTEXT" get secret documentdb-credentials -n documentdb-preview-ns &>/dev/null 2>&1; then
@@ -174,17 +170,6 @@ if [ -n "$EXISTING_RESOURCES" ]; then
       for cluster in "${CLUSTER_ARRAY[@]}"; do
         kubectl --context "$cluster" wait --for=delete namespace/documentdb-preview-ns --timeout=60s 2>/dev/null || true
       done
-      # Delete Azure DNS zone if it exists
-      if [ "$ENABLE_AZURE_DNS" = "true" ]; then
-        parentName=$(az network dns zone show --id $AZURE_DNS_PARENT_ZONE_RESOURCE_ID 2>/dev/null | jq -r ".name" || echo "")
-        if [ -n "$parentName" ]; then
-          fullName="${AZURE_DNS_ZONE_NAME}.${parentName}"
-          if az network dns zone show --name "$fullName" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
-            echo "Deleting Azure DNS zone: $fullName"
-            az network dns zone delete --name "$fullName" --resource-group "$RESOURCE_GROUP" --yes
-          fi
-        fi
-      fi
       ;;
     2)
       echo "Updating existing deployment..."

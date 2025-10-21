@@ -45,7 +45,10 @@ while time.time() < end_time:
         read_count = collection.count_documents({})
         if not failed:
             print(f"{str(write_result):<30} {read_count:<15}")
+        else :
+            print(f"{'READ AVAILABLE':<30} {read_count:<15}")
     except Exception as e:
+        print("read error")
         pass
     
     time.sleep(1)  

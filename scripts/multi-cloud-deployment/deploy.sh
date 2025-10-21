@@ -358,12 +358,15 @@ metadata:
     istio-injection: enabled
 EOF
 
-# Build/package chart if not present
-if [ ! -f "$CHART_PKG" ] && [ -d "$CHART_DIR" ]; then
-  echo "Packaging chart..."
-  helm dependency update "$CHART_DIR" >/dev/null 2>&1
-  helm package "$CHART_DIR" --version 0.0."${VERSION}" --destination "$TEMPLATE_DIR" >/dev/null 2>&1
+# Build/package chart and remove previous
+if [ -f "$CHART_PKG" ] && [ -d "$CHART_DIR" ]; then
+  echo "Removing previous chart package $CHART_PKG..."
+  rm -f "$CHART_PKG"
 fi
+
+echo "Packaging chart..."
+helm dependency update "$CHART_DIR"
+helm package "$CHART_DIR" --version 0.0."${VERSION}" --destination "$TEMPLATE_DIR"
 
 # Install operator
 echo "Installing DocumentDB operator on hub ($HUB_CONTEXT)..."

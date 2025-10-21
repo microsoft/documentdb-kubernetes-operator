@@ -3,7 +3,9 @@ package cmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -34,7 +36,7 @@ type promoteOptions struct {
 }
 
 func newPromoteCommand() *cobra.Command {
-	opts := &promoteOptions{hubContext: "hub"}
+	opts := &promoteOptions{}
 
 	cmd := &cobra.Command{
 		Use:   "promote",
@@ -48,8 +50,8 @@ func newPromoteCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&opts.documentDBName, "documentdb", opts.documentDBName, "Name of the DocumentDB resource to promote")
-	cmd.Flags().StringVarP(&opts.namespace, "namespace", "n", "default", "Namespace containing the DocumentDB resource")
-	cmd.Flags().StringVar(&opts.hubContext, "hub-context", opts.hubContext, "Kubeconfig context for the fleet hub (defaults to \"hub\")")
+	cmd.Flags().StringVarP(&opts.namespace, "namespace", "n", defaultDocumentDBNamespace, "Namespace containing the DocumentDB resource")
+	cmd.Flags().StringVar(&opts.hubContext, "hub-context", opts.hubContext, "Kubeconfig context for the fleet hub (defaults to current context)")
 	cmd.Flags().StringVar(&opts.targetCluster, "target-cluster", opts.targetCluster, "Name of the cluster that should become primary (required)")
 	cmd.Flags().StringVar(&opts.targetContext, "cluster-context", opts.targetContext, "Kubeconfig context for verifying member status (defaults to current context)")
 	cmd.Flags().BoolVar(&opts.skipWait, "skip-wait", opts.skipWait, "Return immediately after submitting the promotion request")
@@ -63,12 +65,32 @@ func newPromoteCommand() *cobra.Command {
 }
 
 func (o *promoteOptions) complete() error {
+	o.documentDBName = strings.TrimSpace(o.documentDBName)
+	if o.documentDBName == "" {
+		return errors.New("--documentdb is required")
+	}
+
+	if strings.TrimSpace(o.namespace) == "" {
+		o.namespace = defaultDocumentDBNamespace
+	} else {
+		o.namespace = strings.TrimSpace(o.namespace)
+	}
+
+	o.hubContext = strings.TrimSpace(o.hubContext)
+	o.targetCluster = strings.TrimSpace(o.targetCluster)
+	if o.targetCluster == "" {
+		return errors.New("--target-cluster is required")
+	}
+
+	o.targetContext = strings.TrimSpace(o.targetContext)
+
 	if o.waitTimeout <= 0 {
 		o.waitTimeout = 10 * time.Minute
 	}
 	if o.pollInterval <= 0 {
 		o.pollInterval = 10 * time.Second
 	}
+
 	return nil
 }
 

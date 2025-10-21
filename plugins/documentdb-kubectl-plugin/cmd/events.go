@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -22,7 +23,7 @@ type eventsOptions struct {
 }
 
 func newEventsCommand() *cobra.Command {
-	opts := &eventsOptions{namespace: "default"}
+	opts := &eventsOptions{namespace: defaultDocumentDBNamespace}
 
 	cmd := &cobra.Command{
 		Use:   "events",
@@ -47,11 +48,13 @@ func newEventsCommand() *cobra.Command {
 }
 
 func (o *eventsOptions) complete() error {
+	o.documentDBName = strings.TrimSpace(o.documentDBName)
 	if o.documentDBName == "" {
 		return fmt.Errorf("--documentdb is required")
 	}
+	o.namespace = strings.TrimSpace(o.namespace)
 	if o.namespace == "" {
-		o.namespace = "default"
+		o.namespace = defaultDocumentDBNamespace
 	}
 	return nil
 }

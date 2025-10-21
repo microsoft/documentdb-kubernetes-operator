@@ -41,7 +41,7 @@ type clusterStatus struct {
 
 func newStatusCommand() *cobra.Command {
 	opts := &statusOptions{
-		namespace: "documentdb-preview-ns",
+		namespace: defaultDocumentDBNamespace,
 	}
 
 	cmd := &cobra.Command{
@@ -66,11 +66,13 @@ func newStatusCommand() *cobra.Command {
 }
 
 func (o *statusOptions) complete() error {
-	if strings.TrimSpace(o.documentDBName) == "" {
+	o.documentDBName = strings.TrimSpace(o.documentDBName)
+	if o.documentDBName == "" {
 		return errors.New("--documentdb is required")
 	}
-	if strings.TrimSpace(o.namespace) == "" {
-		o.namespace = "default"
+	o.namespace = strings.TrimSpace(o.namespace)
+	if o.namespace == "" {
+		o.namespace = defaultDocumentDBNamespace
 	}
 	return nil
 }

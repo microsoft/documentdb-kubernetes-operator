@@ -21,6 +21,9 @@ spec:
     - jsonPath: .spec.schedule
       name: Schedule
       type: string
+    - jsonPath: .spec.retentionDays
+      name: Retention Days
+      type: integer
     name: preview
     schema:
       openAPIV3Schema:
@@ -56,6 +59,11 @@ spec:
                 required:
                 - name
                 type: object
+              retentionDays:
+                description: |-
+                  RetentionDays specifies how many days the backups should be retained.
+                  If not specified, the default retention period from the cluster's backup policy is used.
+                type: integer
               schedule:
                 description: Schedule defines when backups should be created using
                   cron expression format.
@@ -66,6 +74,17 @@ spec:
             type: object
           status:
             description: ScheduledBackupStatus defines the observed state of ScheduledBackup
+            properties:
+              lastScheduledTime:
+                description: LastScheduledTime is the time when the last backup was
+                  scheduled by this ScheduledBackup.
+                format: date-time
+                type: string
+              nextScheduledTime:
+                description: NextScheduledTime is the time when the next backup is
+                  scheduled to be created by this ScheduledBackup.
+                format: date-time
+                type: string
             type: object
         required:
         - metadata

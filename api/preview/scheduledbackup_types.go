@@ -16,17 +16,26 @@ type ScheduledBackupSpec struct {
 	Cluster cnpgv1.LocalObjectReference `json:"cluster"`
 
 	// Schedule defines when backups should be created using cron expression format.
+	// See https://pkg.go.dev/github.com/robfig/cron#hdr-CRON_Expression_Format
 	// +kubebuilder:validation:Required
 	Schedule string `json:"schedule"`
 
 	// RetentionDays specifies how many days the backups should be retained.
-	// If not specified, the default retention period from the cluster's backup policy is used.
+	// If not specified, the default retention period from the cluster's backup retention policy will be used.
 	// +optional
 	RetentionDays *int `json:"retentionDays,omitempty"`
 }
 
 // ScheduledBackupStatus defines the observed state of ScheduledBackup
 type ScheduledBackupStatus struct {
+
+	// LastScheduledTime is the time when the last backup was scheduled by this ScheduledBackup.
+	// +optional
+	LastScheduledTime *metav1.Time `json:"lastScheduledTime,omitempty"`
+
+	// NextScheduledTime is the time when the next backup is scheduled by this ScheduledBackup.
+	// +optional
+	NextScheduledTime *metav1.Time `json:"nextScheduledTime,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -37,8 +46,9 @@ type ScheduledBackupStatus struct {
 type ScheduledBackup struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
-	Spec              ScheduledBackupSpec   `json:"spec"`
-	Status            ScheduledBackupStatus `json:"status,omitempty"`
+
+	Spec   ScheduledBackupSpec   `json:"spec"`
+	Status ScheduledBackupStatus `json:"status,omitempty"`
 }
 
 // ScheduledBackupList contains a list of ScheduledBackup resources

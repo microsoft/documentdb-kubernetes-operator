@@ -9,13 +9,13 @@ import (
 	"time"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
+	"github.com/go-logr/logr"
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
@@ -29,28 +29,31 @@ type BackupReconciler struct {
 
 // Reconcile handles the reconciliation loop for Backup resources.
 func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	logger := log.FromContext(ctx, "namespace", req.NamespacedName.Namespace, "backupName", req.NamespacedName.Name)
 
 	// Fetch the Backup resource
 	backup := &dbpreview.Backup{}
 	if err := r.Get(ctx, req.NamespacedName, backup); err != nil {
 		if apierrors.IsNotFound(err) {
+			logger.Info("Backup resource not found, might have been deleted")
 			return ctrl.Result{}, nil
 		}
 		logger.Error(err, "Failed to get Backup")
 		return ctrl.Result{}, err
 	}
 
-	if backup.Status.ExpiredAt != nil && time.Now().After(backup.Status.ExpiredAt.Time) {
-		// Backup has expired, delete it
+	// Delete the Backup resource if it has expired
+	if backup.Status.IsExpired() {
+		logger.Info("Backup has expired, deleting it")
 		if err := r.Delete(ctx, backup); err != nil {
-			logger.Error(err, "Failed to delete expired Backup", "backupName", backup.Name)
+			logger.Error(err, "Failed to delete expired Backup")
 			return ctrl.Result{}, err
 		}
-		logger.Info("Successfully deleted expired Backup", "backupName", backup.Name)
+		logger.Info("Successfully deleted expired Backup")
 		return ctrl.Result{}, nil
 	}
 
+	// Fetch the associated DocumentDB cluster
 	cluster := &dbpreview.DocumentDB{}
 	clusterKey := client.ObjectKey{
 		Name:      backup.Spec.Cluster.Name,
@@ -77,19 +80,17 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		Name:      backup.Name,
 		Namespace: backup.Namespace,
 	}
-
-	err := r.Get(ctx, cnpgBackupKey, cnpgBackup)
-	if err != nil {
+	if err := r.Get(ctx, cnpgBackupKey, cnpgBackup); err != nil {
 		if apierrors.IsNotFound(err) {
-			// Create CNPG Backup
-			return r.createCNPGBackup(ctx, backup)
+			logger.Info("Creating new CNPG Backup for DocumentDB Backup")
+			return r.createCNPGBackup(ctx, backup, logger)
 		}
 		logger.Error(err, "Failed to get CNPG Backup")
 		return ctrl.Result{}, err
 	}
 
 	// Update status based on CNPG Backup status
-	return r.updateBackupStatus(ctx, backup, cnpgBackup, *cluster)
+	return r.updateBackupStatus(ctx, backup, cnpgBackup, cluster.Spec.Backup, logger)
 }
 
 // ensureVolumeSnapshotClass creates a VolumeSnapshotClass based on the cloud environment
@@ -108,8 +109,8 @@ func (r *BackupReconciler) ensureVolumeSnapshotClass(ctx context.Context, enviro
 			return nil
 		}
 	}
-	logger.Info("No default VolumeSnapshotClass found, will create one")
 
+	logger.Info("No default VolumeSnapshotClass found, will create one")
 	vsc := buildVolumeSnapshotClass(environment)
 	if vsc == nil {
 		err := fmt.Errorf("Please create a default VolumeSnapshotClass before creating backups")
@@ -155,26 +156,10 @@ func buildVolumeSnapshotClass(environment string) *snapshotv1.VolumeSnapshotClas
 }
 
 // createCNPGBackup creates a new CNPG Backup resource
-func (r *BackupReconciler) createCNPGBackup(ctx context.Context, backup *dbpreview.Backup) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-
-	cnpgBackup := &cnpgv1.Backup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      backup.Name,
-			Namespace: backup.Namespace,
-		},
-		Spec: cnpgv1.BackupSpec{
-			Method: cnpgv1.BackupMethodVolumeSnapshot,
-			Cluster: cnpgv1.LocalObjectReference{
-				Name: backup.Spec.Cluster.Name,
-			},
-		},
-	}
-
-	// Set owner reference for garbage collection
-	// This ensures that the CNPG Backup is deleted when the DocumentDB Backup is deleted.
-	if err := controllerutil.SetControllerReference(backup, cnpgBackup, r.Scheme); err != nil {
-		logger.Error(err, "Failed to set owner reference on CNPG Backup")
+func (r *BackupReconciler) createCNPGBackup(ctx context.Context, backup *dbpreview.Backup, logger logr.Logger) (ctrl.Result, error) {
+	cnpgBackup, err := backup.CreateCNPGBackup(r.Scheme)
+	if err != nil {
+		logger.Error(err, "Failed to build CNPG Backup")
 		return ctrl.Result{}, err
 	}
 
@@ -182,7 +167,6 @@ func (r *BackupReconciler) createCNPGBackup(ctx context.Context, backup *dbprevi
 		logger.Error(err, "Failed to create CNPG Backup")
 		return ctrl.Result{}, err
 	}
-
 	logger.Info("Successfully created CNPG Backup", "name", cnpgBackup.Name)
 
 	// Requeue to check status
@@ -190,58 +174,18 @@ func (r *BackupReconciler) createCNPGBackup(ctx context.Context, backup *dbprevi
 }
 
 // updateBackupStatus updates the Backup status based on CNPG Backup status
-func (r *BackupReconciler) updateBackupStatus(ctx context.Context, backup *dbpreview.Backup, cnpgBackup *cnpgv1.Backup, cluster dbpreview.DocumentDB) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-
-	needsUpdate := false
-	newPhase := cnpgBackup.Status.Phase
-
-	if backup.Status.Phase != newPhase {
-		backup.Status.Phase = newPhase
-		needsUpdate = true
-	}
-
-	if !areTimesEqual(backup.Status.StartedAt, cnpgBackup.Status.StartedAt) {
-		backup.Status.StartedAt = cnpgBackup.Status.StartedAt
-		needsUpdate = true
-	}
-
-	if !areTimesEqual(backup.Status.StoppedAt, cnpgBackup.Status.StoppedAt) {
-		backup.Status.StoppedAt = cnpgBackup.Status.StoppedAt
-		needsUpdate = true
-	}
-
-	if backup.Status.Error != cnpgBackup.Status.Error {
-		backup.Status.Error = cnpgBackup.Status.Error
-		needsUpdate = true
-	}
-
-	if backup.Status.IsDone() {
-		retentionHours := 0
-		if backup.Spec.RetentionDays != nil {
-			retentionHours = *backup.Spec.RetentionDays * 24
-		} else if cluster.Spec.Backup != nil {
-			retentionHours = cluster.Spec.Backup.RetentionDays * 24
-		}
-
-		retentionStart := backup.Status.StoppedAt
-		if retentionStart == nil {
-			retentionStart = &backup.CreationTimestamp
-		}
-
-		expirationTime := retentionStart.Add(time.Duration(retentionHours) * time.Hour)
-		backup.Status.ExpiredAt = &metav1.Time{Time: expirationTime}
-		needsUpdate = true
-	}
+func (r *BackupReconciler) updateBackupStatus(ctx context.Context, backup *dbpreview.Backup, cnpgBackup *cnpgv1.Backup, backupConfiguration *dbpreview.BackupConfiguration, logger logr.Logger) (ctrl.Result, error) {
+	original := backup.DeepCopy()
+	needsUpdate := backup.UpdateStatus(cnpgBackup, backupConfiguration)
 
 	if needsUpdate {
-		if err := r.Status().Update(ctx, backup); err != nil {
-			logger.Error(err, "Failed to update Backup status")
+		if err := r.Status().Patch(ctx, backup, client.MergeFrom(original)); err != nil {
+			logger.Error(err, "Failed to patch Backup status")
 			return ctrl.Result{}, err
 		}
 	}
 
-	if backup.Status.IsDone() {
+	if backup.Status.IsDone() && backup.Status.ExpiredAt != nil {
 		requeueAfter := time.Until(backup.Status.ExpiredAt.Time)
 		if requeueAfter < 0 {
 			requeueAfter = time.Minute
@@ -251,17 +195,6 @@ func (r *BackupReconciler) updateBackupStatus(ctx context.Context, backup *dbpre
 
 	// Backup is still in progress, requeue to check status again
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-}
-
-// areTimesEqual compares two metav1.Time pointers for equality
-func areTimesEqual(t1, t2 *metav1.Time) bool {
-	if t1 == nil && t2 == nil {
-		return true
-	}
-	if t1 == nil || t2 == nil {
-		return false
-	}
-	return t1.Equal(t2)
 }
 
 // SetupWithManager sets up the controller with the Manager.

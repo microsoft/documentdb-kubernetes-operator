@@ -10,6 +10,7 @@ import (
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/robfig/cron"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -63,6 +64,44 @@ var _ = Describe("ScheduledBackup", func() {
 			Expect(backup.Labels).To(HaveKeyWithValue("scheduledbackup", "my-scheduled-backup"))
 			Expect(backup.Spec.Cluster.Name).To(Equal("test-cluster"))
 			Expect(reflect.ValueOf(backup.Spec.RetentionDays).IsNil()).To(BeTrue())
+		})
+	})
+
+	Describe("getNextScheduleTime", func() {
+		sb := ScheduledBackup{
+			Spec: ScheduledBackupSpec{
+				Schedule: "0 0 * * *",
+			},
+			Status: ScheduledBackupStatus{
+				NextScheduledTime: &metav1.Time{Time: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
+			},
+		}
+		schedule, _ := cron.ParseStandard("0 0 * * *")
+
+		It("returns next time based on the last backup", func() {
+			backup := &Backup{
+				ObjectMeta: metav1.ObjectMeta{
+					CreationTimestamp: metav1.Time{Time: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
+				},
+			}
+
+			nextScheduleTime := sb.GetNextScheduleTime(schedule, backup)
+			Expect(nextScheduleTime).To(Equal(schedule.Next(backup.CreationTimestamp.Time)))
+		})
+
+		It("returns Status.NextScheduledTime when no backups exist", func() {
+			nextScheduleTime := sb.GetNextScheduleTime(schedule, nil)
+			Expect(nextScheduleTime).To(Equal(sb.Status.NextScheduledTime.Time))
+		})
+
+		It("returns next time based on now when no backups exist and Status.NextScheduledTime is not set", func() {
+			sb := ScheduledBackup{
+				Spec: ScheduledBackupSpec{
+					Schedule: "0 0 * * *",
+				},
+			}
+			nextScheduleTime := sb.GetNextScheduleTime(schedule, nil)
+			Expect(nextScheduleTime.After(time.Now()))
 		})
 	})
 })

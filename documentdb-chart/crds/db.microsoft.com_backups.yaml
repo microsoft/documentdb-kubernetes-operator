@@ -31,6 +31,10 @@ spec:
       jsonPath: .status.stoppedAt
       name: Stopped
       type: date
+    - description: Backup expiration time
+      jsonPath: .status.expiredAt
+      name: Expired
+      type: string
     - description: Backup error information
       jsonPath: .status.error
       name: Error
@@ -70,6 +74,11 @@ spec:
                 required:
                 - name
                 type: object
+              retentionDays:
+                description: |-
+                  RetentionDays specifies how many days the backup should be retained.
+                  If not specified, the default retention period from the cluster's backup policy is used.
+                type: integer
             required:
             - cluster
             type: object
@@ -78,6 +87,11 @@ spec:
             properties:
               error:
                 description: Error contains error information if the backup failed.
+                type: string
+              expiredAt:
+                description: ExpiredAt is the time when the backup is considered expired
+                  and can be deleted.
+                format: date-time
                 type: string
               phase:
                 description: Phase represents the current phase of the backup operation.

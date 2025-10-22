@@ -5,12 +5,10 @@ package controller
 
 import (
 	"context"
-	"time"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/robfig/cron"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -40,6 +38,12 @@ var _ = Describe("ScheduledBackup Controller", func() {
 
 	It("returns error for invalid cron schedule", func() {
 		invalidSchedule := "invalid cron expression"
+		cluster := &dbpreview.DocumentDB{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      clusterName,
+				Namespace: scheduledBackupNamespace,
+			},
+		}
 		scheduledBackup := &dbpreview.ScheduledBackup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      scheduledBackupName,
@@ -55,7 +59,7 @@ var _ = Describe("ScheduledBackup Controller", func() {
 
 		fakeClient := fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(scheduledBackup).
+			WithObjects(scheduledBackup, cluster).
 			Build()
 
 		reconciler := &ScheduledBackupReconciler{
@@ -74,83 +78,5 @@ var _ = Describe("ScheduledBackup Controller", func() {
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("invalid cron expression"))
 		Expect(result.Requeue).To(BeFalse())
-	})
-
-	Describe("getNextScheduleTime", func() {
-		scheduledBackup := dbpreview.ScheduledBackup{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:              scheduledBackupName,
-				Namespace:         scheduledBackupNamespace,
-				CreationTimestamp: metav1.Time{Time: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
-			},
-			Spec: dbpreview.ScheduledBackupSpec{
-				Schedule: "0 0 * * *",
-				Cluster: cnpgv1.LocalObjectReference{
-					Name: clusterName,
-				},
-			},
-		}
-		schedule, _ := cron.ParseStandard("0 0 * * *")
-
-		It("returns next time based on ScheduledBackup creation time when no backups exist", func() {
-			nextFromCreation := getNextScheduleTime(&scheduledBackup, schedule, &dbpreview.BackupList{Items: []dbpreview.Backup{}})
-			Expect(nextFromCreation).To(Equal(schedule.Next(scheduledBackup.CreationTimestamp.Time)))
-
-			nextFromCreation = getNextScheduleTime(&scheduledBackup, schedule, nil)
-			Expect(nextFromCreation).To(Equal(schedule.Next(scheduledBackup.CreationTimestamp.Time)))
-		})
-
-		It("returns next time based on the last backup with matching label", func() {
-			t1 := time.Date(2024, 12, 1, 1, 0, 0, 0, time.UTC)
-			t2 := time.Date(2024, 12, 2, 1, 0, 0, 0, time.UTC)
-			t3 := time.Date(2024, 12, 3, 1, 0, 0, 0, time.UTC)
-
-			backupList := &dbpreview.BackupList{
-				Items: []dbpreview.Backup{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							CreationTimestamp: metav1.Time{Time: t1},
-							Labels:            map[string]string{"scheduledbackup": scheduledBackupName},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							CreationTimestamp: metav1.Time{Time: t2},
-							Labels:            map[string]string{"scheduledbackup": scheduledBackupName},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							CreationTimestamp: metav1.Time{Time: t3},
-							Labels:            map[string]string{"scheduledbackup": "other-scheduled-backup"},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							CreationTimestamp: metav1.Time{Time: t3},
-						},
-					},
-				},
-			}
-
-			nextScheduleTime := getNextScheduleTime(&scheduledBackup, schedule, backupList)
-			Expect(nextScheduleTime).To(Equal(schedule.Next(t2)))
-		})
-
-		It("returns next time based on ScheduledBackup creation time when no matching backups exist", func() {
-			backupList := &dbpreview.BackupList{
-				Items: []dbpreview.Backup{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							CreationTimestamp: metav1.Time{Time: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
-							Labels:            map[string]string{"scheduledbackup": "other-scheduled-backup"},
-						},
-					},
-				},
-			}
-
-			nextScheduleTime := getNextScheduleTime(&scheduledBackup, schedule, backupList)
-			Expect(nextScheduleTime).To(Equal(schedule.Next(scheduledBackup.CreationTimestamp.Time)))
-		})
 	})
 })

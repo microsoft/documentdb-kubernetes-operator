@@ -5,8 +5,11 @@ import time
 from pymongo import MongoClient, errors
 from datetime import datetime
 
+def ts():
+    return datetime.now().strftime("%H:%M:%S")
+
 if len(sys.argv) != 2:
-    print("Usage: python insert_test.py <connection_string>")
+    print(f"[{ts()}] Usage: python insert_test.py <connection_string>")
     sys.exit(1)
 
 connection_string = sys.argv[1]
@@ -16,11 +19,11 @@ client = MongoClient(connection_string)
 db = client.testdb
 collection = db.testcollection
 
-print(f"Starting insert operations for 10 minutes...")
-print(f"Using: {connection_string.split('@')[1] if '@' in connection_string else 'local'}")
+print(f"[{ts()}] Starting insert operations for 10 minutes...")
+print(f"[{ts()}] Using: {connection_string.split('@')[1] if '@' in connection_string else 'local'}")
 print()
-print(f"{'Inserted Document':<30} {'Read Count':<15}")
-print("-" * 65)
+print(f"{'Timestamp':<12} {'Inserted Document':<30} {'Read Count':<15}")
+print("-" * 77)
 start_time = time.time()
 end_time = start_time + (10 * 60)  # 10 minutes
 count = 0
@@ -28,6 +31,7 @@ count = 0
 while time.time() < end_time:
     failed = False
     write_result = ""
+    timestamp = ts()
     try:
         doc = {
             "count": count,
@@ -39,21 +43,21 @@ while time.time() < end_time:
     except Exception as e:
         failed = True
         short_err = getattr(getattr(e, 'details', {}), 'get', lambda *_: None)('errmsg')
-        print(f"Error: {short_err or str(e)}")
+        print(f"[{timestamp}] Error: {short_err or str(e)}")
 
     try:
         read_count = collection.count_documents({})
         if not failed:
-            print(f"{str(write_result):<30} {read_count:<15}")
+            print(f"{timestamp:<12} {str(write_result):<30} {read_count:<15}")
         else :
-            print(f"{'READ AVAILABLE':<30} {read_count:<15}")
+            print(f"{timestamp:<12} {'READ AVAILABLE':<30} {read_count:<15}")
     except Exception as e:
-        print("read error")
+        print(f"[{timestamp}] read error")
         pass
     
     time.sleep(1)  
 
-print(f"Completed {count} insert operations in 10 minutes")
+print(f"[{ts()}] Completed {count} insert operations in 10 minutes")
 final_read_count = collection.count_documents({})
-print(f"Final read count: {final_read_count}")
+print(f"[{ts()}] Final read count: {final_read_count}")
 client.close()

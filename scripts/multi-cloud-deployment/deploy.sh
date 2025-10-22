@@ -24,6 +24,9 @@ GCP_USER="${GCP_USER:-alexanderlaye59@gmail.com}"
 ZONE="${ZONE:-us-central1-a}"
 GKE_CLUSTER_NAME="${GKE_CLUSTER_NAME:-gke-documentdb-cluster}"
 
+EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-eks-documentdb-cluster}"
+EKS_REGION="${EKS_REGION:-us-west-2}"
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -143,6 +146,13 @@ export ROLE="Azure Kubernetes Fleet Manager RBAC Cluster Admin"
 echo "Assigning role '$ROLE' to user '$IDENTITY'..."
 az role assignment create --role "${ROLE}" --assignee ${IDENTITY} --scope ${FLEET_ID} >/dev/null 2>&1 || true
 
+# Fetch kubeconfig contexts
+echo "Fetching kubeconfig contexts..."
+az fleet get-credentials --resource-group "$RESOURCE_GROUP" --name "$FLEET_NAME" --overwrite-existing
+
+az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$AKS_CLUSTER_NAME" --overwrite-existing 
+
+
 # ============================================================================
 # Step 1.2: Deploy GKE Infrastructure
 # ============================================================================
@@ -173,24 +183,11 @@ if gcloud container clusters describe "$GKE_CLUSTER_NAME" --zone "$ZONE" --proje
 fi
 
 gcloud container clusters create "$GKE_CLUSTER_NAME" \
-    --zone "$ZONE" \
-    --num-nodes "2" \
-    --machine-type "e2-standard-4" \
-    --enable-ip-access \
-    --project $PROJECT_ID
-
-# ============================================================================
-# Step 1.3: Collect connection details
-# ============================================================================
-
-MEMBER_CLUSTER_NAMES=("$AKS_CLUSTER_NAME" "$GKE_CLUSTER_NAME")
-
-# Fetch kubeconfig contexts
-echo "Fetching kubeconfig contexts..."
-az fleet get-credentials --resource-group "$RESOURCE_GROUP" --name "$FLEET_NAME" --overwrite-existing
-
-az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$AKS_CLUSTER_NAME" --overwrite-existing 
-
+  --zone "$ZONE" \
+  --num-nodes "2" \
+  --machine-type "e2-standard-4" \
+  --enable-ip-access \
+  --project $PROJECT_ID
 
 kubectl config delete-context "$GKE_CLUSTER_NAME" || true
 kubectl config delete-cluster "$GKE_CLUSTER_NAME" || true
@@ -201,15 +198,196 @@ fullName=$(kubectl config current-context)
 # Replace all occurrences of the generated name with GKE_CLUSTER_NAME in kubeconfig
 sed -i "s|$fullName|$GKE_CLUSTER_NAME|g" ~/.kube/config
 
+
+# ============================================================================
+# Step 1.3: Deploy EKS Infrastructure
+# ============================================================================
+
+NODE_TYPE="m5.large"
+
+if eksctl get cluster --name $EKS_CLUSTER_NAME --region $EKS_REGION &> /dev/null; then
+  echo "Cluster $EKS_CLUSTER_NAME already exists."
+else
+  eksctl create cluster \
+    --name $EKS_CLUSTER_NAME \
+    --region $EKS_REGION \
+    --node-type $NODE_TYPE \
+    --nodes 2 \
+    --nodes-min 2 \
+    --nodes-max 2 \
+    --managed \
+    --with-oidc
+fi
+
+eksctl create iamserviceaccount \
+  --cluster $EKS_CLUSTER_NAME \
+  --namespace kube-system \
+  --name ebs-csi-controller-sa \
+  --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy \
+  --override-existing-serviceaccounts \
+  --approve \
+  --region $EKS_REGION
+
+# Install EBS CSI driver addon
+eksctl create addon \
+    --name aws-ebs-csi-driver \
+    --cluster $EKS_CLUSTER_NAME \
+    --region $EKS_REGION \
+    --force
+    
+# Wait for EBS CSI driver to be ready
+echo "Waiting for EBS CSI driver to be ready..."
+sleep 5
+kubectl wait --for=condition=ready pod -l app=ebs-csi-controller -n kube-system --timeout=300s || echo "EBS CSI driver pods may still be starting"
+
+echo "Installing AWS Load Balancer Controller..."
+
+  # Check if already installed
+if helm list -n kube-system | grep -q aws-load-balancer-controller; then
+  echo "AWS Load Balancer Controller already installed. Skipping installation."
+else
+  # Get VPC ID for the cluster
+  VPC_ID=$(aws eks describe-cluster --name $EKS_CLUSTER_NAME --region $EKS_REGION --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+  echo "Using VPC ID: $VPC_ID"
+    
+  # Verify subnet tags for Load Balancer Controller
+  echo "Verifying subnet tags for Load Balancer Controller..."
+  PUBLIC_SUBNETS=$(aws ec2 describe-subnets \
+    --filters "Name=vpc-id,Values=$VPC_ID" "Name=map-public-ip-on-launch,Values=true" \
+    --query 'Subnets[].SubnetId' --output text --region $EKS_REGION)
+    
+  PRIVATE_SUBNETS=$(aws ec2 describe-subnets \
+    --filters "Name=vpc-id,Values=$VPC_ID" "Name=map-public-ip-on-launch,Values=false" \
+    --query 'Subnets[].SubnetId' --output text --region $EKS_REGION)
+
+  # Tag public subnets for internet-facing load balancers
+  if [ -n "$PUBLIC_SUBNETS" ]; then
+      echo "Tagging public subnets for internet-facing load balancers..."
+      for subnet in $PUBLIC_SUBNETS; do
+          aws ec2 create-tags --resources "$subnet" --tags Key=kubernetes.io/role/elb,Value=1 --region $EKS_REGION 2>/dev/null || true
+          echo "Tagged public subnet: $subnet"
+      done
+  fi
+
+  # Tag private subnets for internal load balancers
+  if [ -n "$PRIVATE_SUBNETS" ]; then
+      echo "Tagging private subnets for internal load balancers..."
+      for subnet in $PRIVATE_SUBNETS; do
+          aws ec2 create-tags --resources "$subnet" --tags Key=kubernetes.io/role/internal-elb,Value=1 --region $EKS_REGION 2>/dev/null || true
+          echo "Tagged private subnet: $subnet"
+      done
+  fi
+
+  # Download the official IAM policy (latest version)
+  echo "Downloading AWS Load Balancer Controller IAM policy (latest version)..."
+  curl -o /tmp/iam_policy.json https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
+
+  # Get account ID
+  ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+  # Check if policy exists and create/update as needed
+  if aws iam get-policy --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy &>/dev/null; then
+    echo "IAM policy already exists, updating to latest version..."
+    # Delete and recreate to ensure we have the latest version
+    aws iam delete-policy --policy-arn arn:aws:iam::$ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy 2>/dev/null || true
+    sleep 5  # Wait for deletion to propagate
+  fi
+
+  # Create IAM policy with latest permissions
+  echo "Creating IAM policy with latest permissions..."
+  aws iam create-policy \
+    --policy-name AWSLoadBalancerControllerIAMPolicy \
+    --policy-document file:///tmp/iam_policy.json 2>/dev/null || \
+    echo "IAM policy already exists or was just created"
+  # Wait a moment for policy to be available
+  sleep 5
+
+  # Create IAM service account with proper permissions using eksctl
+  echo "Creating IAM service account with proper permissions..."
+  eksctl create iamserviceaccount \
+    --cluster=$EKS_CLUSTER_NAME \
+    --namespace=kube-system \
+    --name=aws-load-balancer-controller \
+    --role-name "AmazonEKSLoadBalancerControllerRole-$EKS_CLUSTER_NAME" \
+    --attach-policy-arn=arn:aws:iam::$ACCOUNT_ID:policy/AWSLoadBalancerControllerIAMPolicy \
+    --approve \
+    --override-existing-serviceaccounts \
+    --region=$EKS_REGION
+
+  # Add EKS Helm repository
+  helm repo add eks https://aws.github.io/eks-charts
+  helm repo update eks
+
+  # Install Load Balancer Controller using the existing service account
+  helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+    -n kube-system \
+    --set clusterName=$EKS_CLUSTER_NAME \
+    --set serviceAccount.create=false \
+    --set serviceAccount.name=aws-load-balancer-controller \
+    --set region=$EKS_REGION \
+    --set vpcId=$VPC_ID
+
+  # Wait for Load Balancer Controller to be ready
+  echo "Waiting for Load Balancer Controller to be ready..."
+  sleep 5
+  kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=aws-load-balancer-controller -n kube-system --timeout=300s || echo "Load Balancer Controller pods may still be starting"
+
+  # Clean up temp file
+  rm -f /tmp/iam_policy.json
+
+  echo "AWS Load Balancer Controller installed"
+fi
+
+if kubectl get storageclass documentdb-storage &> /dev/null; then
+  echo "DocumentDB storage class already exists. Skipping creation."
+else
+    kubectl apply -f - <<EOF
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: documentdb-storage
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+provisioner: ebs.csi.aws.com
+parameters:
+  type: gp3
+  iops: "3000"
+  throughput: "125"
+  fsType: ext4
+  encrypted: "true"
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+EOF
+fi
+
+
+kubectl config delete-context "$EKS_CLUSTER_NAME" || true
+kubectl config delete-cluster "$EKS_CLUSTER_NAME" || true
+kubectl config delete-user "$EKS_CLUSTER_NAME" || true
+fullName=$(kubectl config current-context)
+clusterName="$EKS_CLUSTER_NAME.$EKS_REGION.eksctl.io"
+# Replace all occurrences of the generated name with EKS_CLUSTER_NAME in kubeconfig
+sed -i "s|$fullName|$EKS_CLUSTER_NAME|g" ~/.kube/config
+sed -i "s|$clusterName|$EKS_CLUSTER_NAME|g" ~/.kube/config
+
+
+# ============================================================================
+# Step 2: Collect Names
+# ============================================================================
+
+MEMBER_CLUSTER_NAMES=("$AKS_CLUSTER_NAME" "$GKE_CLUSTER_NAME" "$EKS_CLUSTER_NAME")
+
 echo "✅ Fleet infrastructure deployed successfully"
 echo "Fleet Name: $FLEET_NAME"
 echo "Fleet ID: $FLEET_ID"
 echo "Member Clusters:"
 echo "$AKS_CLUSTER_NAME"
 echo "$GKE_CLUSTER_NAME"
+echo "$EKS_CLUSTER_NAME"
 
 # ============================================================================
-# Step 1.4: Join member clusters to fleet
+# Step 3: Join member clusters to fleet
 # ============================================================================
 
 temp_dir=$(mktemp -d)
@@ -219,16 +397,18 @@ git clone https://github.com/kubefleet-dev/kubefleet.git
 git clone https://github.com/Azure/fleet-networking.git
 pushd $temp_dir/kubefleet
 chmod +x hack/membership/joinMC.sh
-hack/membership/joinMC.sh "v0.16.5" "$HUB_CONTEXT" "$GKE_CLUSTER_NAME"
+hack/membership/joinMC.sh "v0.16.5" "$HUB_CONTEXT" "$GKE_CLUSTER_NAME" "$EKS_CLUSTER_NAME"
 popd
 
 # TODO clean this up a bit
 echo "Waiting for $GKE_CLUSTER_NAME to join fleet..."
-kubectl --context $HUB_CONTEXT wait --for=jsonpath='{.status.resourceUsage.observationTime}' membercluster/$GKE_CLUSTER_NAME 
+kubectl --context $HUB_CONTEXT wait --for=jsonpath='{.status.resourceUsage.observationTime}' membercluster/$GKE_CLUSTER_NAME
+echo "Waiting for $EKS_CLUSTER_NAME to join fleet..."
+kubectl --context $HUB_CONTEXT wait --for=jsonpath='{.status.resourceUsage.observationTime}' membercluster/$EKS_CLUSTER_NAME
 
 pushd $temp_dir/fleet-networking
 chmod +x hack/membership/joinMC.sh 
-hack/membership/joinMC.sh "v0.16.5" "v0.3.24" $HUB_CONTEXT $GKE_CLUSTER_NAME
+hack/membership/joinMC.sh "v0.16.5" "v0.3.24" $HUB_CONTEXT $GKE_CLUSTER_NAME $EKS_CLUSTER_NAME
 popd
 
 # TODO fix this
@@ -237,7 +417,7 @@ popd
 popd
 
 # ============================================================================
-# Step 2: Install cert-manager on all member clusters
+# Step 4: Install cert-manager on all member clusters
 # ============================================================================
 
 helm repo add jetstack https://charts.jetstack.io 2>/dev/null || true
@@ -257,7 +437,7 @@ done
 echo "✅ cert-manager installed on all clusters"
 
 # ============================================================================
-# Step 3: Install Istio and setup mesh
+# Step 5: Install Istio and setup mesh
 # ============================================================================
 
 # Create an issuer in istio-system namespace on hub
@@ -338,7 +518,7 @@ done
 popd
 
 # ============================================================================
-# Step 4: Install DocumentDB Operator
+# Step 6: Install DocumentDB Operator
 # ============================================================================
 
 CHART_DIR="$(cd "$TEMPLATE_DIR/../.." && pwd)/documentdb-chart"

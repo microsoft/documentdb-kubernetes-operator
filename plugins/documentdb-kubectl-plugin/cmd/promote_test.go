@@ -67,6 +67,43 @@ func TestWaitForPromotion(t *testing.T) {
 	}
 }
 
+func TestPatchDocumentDB(t *testing.T) {
+	t.Parallel()
+
+	scheme := newDocumentScheme()
+	gvr := documentDBGVR()
+
+	namespace := defaultDocumentDBNamespace
+	docName := "sample"
+
+	doc := newDocument(docName, namespace, "cluster-a", "Ready")
+
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, documentListKinds(), doc.DeepCopy())
+
+	opts := &promoteOptions{
+		documentDBName: docName,
+		namespace:      namespace,
+		targetCluster:  "cluster-b",
+	}
+
+	if err := opts.patchDocumentDB(context.Background(), client); err != nil {
+		t.Fatalf("patchDocumentDB returned error: %v", err)
+	}
+
+	patched, err := client.Resource(gvr).Namespace(namespace).Get(context.Background(), docName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to fetch patched document: %v", err)
+	}
+
+	primary, _, err := unstructured.NestedString(patched.Object, "spec", "clusterReplication", "primary")
+	if err != nil {
+		t.Fatalf("failed to read patched primary: %v", err)
+	}
+	if primary != "cluster-b" {
+		t.Fatalf("expected primary cluster-b, got %q", primary)
+	}
+}
+
 func setDocumentState(ctx context.Context, client dynamic.Interface, gvr schema.GroupVersionResource, namespace, name, primary, phase string) error {
 	for {
 		obj, err := client.Resource(gvr).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})

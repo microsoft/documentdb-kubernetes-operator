@@ -97,7 +97,7 @@ func (o *promoteOptions) complete() error {
 func (o *promoteOptions) run(ctx context.Context, cmd *cobra.Command) error {
 	cmd.PrintErrln("Starting DocumentDB promotion workflow...")
 
-	hubConfig, hubContextName, err := loadConfig(o.hubContext)
+	hubConfig, hubContextName, err := loadConfigFunc(o.hubContext)
 	if err != nil {
 		return fmt.Errorf("failed to load hub kubeconfig: %w", err)
 	}
@@ -108,7 +108,7 @@ func (o *promoteOptions) run(ctx context.Context, cmd *cobra.Command) error {
 		hubContextName = "(current)"
 	}
 
-	dynHub, err := dynamic.NewForConfig(hubConfig)
+	dynHub, err := dynamicClientForConfig(hubConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create hub dynamic client: %w", err)
 	}
@@ -122,7 +122,7 @@ func (o *promoteOptions) run(ctx context.Context, cmd *cobra.Command) error {
 		return nil
 	}
 
-	targetConfig, targetContextName, err := loadConfig(o.targetContext)
+	targetConfig, targetContextName, err := loadConfigFunc(o.targetContext)
 	if err != nil {
 		return fmt.Errorf("failed to load target kubeconfig: %w", err)
 	}
@@ -130,7 +130,7 @@ func (o *promoteOptions) run(ctx context.Context, cmd *cobra.Command) error {
 		targetContextName = o.targetContext
 	}
 
-	dynTarget, err := dynamic.NewForConfig(targetConfig)
+	dynTarget, err := dynamicClientForConfig(targetConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create target dynamic client: %w", err)
 	}

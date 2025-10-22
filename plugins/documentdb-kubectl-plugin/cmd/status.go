@@ -13,7 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -78,7 +77,7 @@ func (o *statusOptions) complete() error {
 }
 
 func (o *statusOptions) run(ctx context.Context, cmd *cobra.Command) error {
-	mainConfig, contextName, err := loadConfig(o.kubeContext)
+	mainConfig, contextName, err := loadConfigFunc(o.kubeContext)
 	if err != nil {
 		return fmt.Errorf("failed to load kubeconfig: %w", err)
 	}
@@ -86,7 +85,7 @@ func (o *statusOptions) run(ctx context.Context, cmd *cobra.Command) error {
 		contextName = "(current)"
 	}
 
-	dynHub, err := dynamic.NewForConfig(mainConfig)
+	dynHub, err := dynamicClientForConfig(mainConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create hub dynamic client: %w", err)
 	}
@@ -135,7 +134,7 @@ func (o *statusOptions) run(ctx context.Context, cmd *cobra.Command) error {
 			ServiceIP: "-",
 		}
 
-		clusterConfig, clusterContextName, err := loadConfig(cluster)
+		clusterConfig, clusterContextName, err := loadConfigFunc(cluster)
 		if err != nil {
 			st.Err = fmt.Errorf("load kubeconfig: %w", err)
 			statuses = append(statuses, st)
@@ -186,7 +185,7 @@ func (o *statusOptions) run(ctx context.Context, cmd *cobra.Command) error {
 }
 
 func (o *statusOptions) populateClusterStatus(ctx context.Context, st *clusterStatus, config *rest.Config) error {
-	dynClient, err := dynamic.NewForConfig(config)
+	dynClient, err := dynamicClientForConfig(config)
 	if err != nil {
 		return fmt.Errorf("dynamic client: %w", err)
 	}
@@ -205,7 +204,7 @@ func (o *statusOptions) populateClusterStatus(ctx context.Context, st *clusterSt
 		st.Connection = conn
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
+	clientset, err := kubernetesClientForConfig(config)
 	if err != nil {
 		return fmt.Errorf("clientset: %w", err)
 	}

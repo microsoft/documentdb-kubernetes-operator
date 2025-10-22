@@ -30,7 +30,7 @@ Copy `bin/kubectl-documentdb` onto your `PATH` (renaming is not required). Verif
 Run `kubectl documentdb <command> --help` to review all flags. Key options include:
 
 - `--documentdb`: (required) name of the `DocumentDB` custom resource.
-- `--namespace/-n`: namespace containing the resource. Defaults to `documentdb-preview-ns` for `status` and `default` for `events`/`promote`.
+- `--namespace/-n`: namespace containing the resource. Defaults to `documentdb-preview-ns` for all commands.
 - `--context`: kubeconfig context to use for hub-level operations (defaults to the current context).
 - `--show-connections`: include connection strings in `status` output.
 - `--follow/-f`: follow mode for `events` (enabled by default).

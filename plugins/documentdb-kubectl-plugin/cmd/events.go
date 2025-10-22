@@ -11,7 +11,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/client-go/kubernetes"
 )
 
 type eventsOptions struct {
@@ -60,7 +59,7 @@ func (o *eventsOptions) complete() error {
 }
 
 func (o *eventsOptions) run(ctx context.Context, cmd *cobra.Command) error {
-	config, contextName, err := loadConfig(o.kubeContext)
+	config, contextName, err := loadConfigFunc(o.kubeContext)
 	if err != nil {
 		return fmt.Errorf("failed to load kubeconfig: %w", err)
 	}
@@ -68,7 +67,7 @@ func (o *eventsOptions) run(ctx context.Context, cmd *cobra.Command) error {
 		contextName = "(current)"
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
+	clientset, err := kubernetesClientForConfig(config)
 	if err != nil {
 		return fmt.Errorf("failed to create kubernetes clientset: %w", err)
 	}

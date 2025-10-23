@@ -22,7 +22,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Resource group
 RESOURCE_GROUP="${RESOURCE_GROUP:-german-aks-fleet-rg}"
 
+AKS_CLUSTER_NAME="${AKS_CLUSTER_NAME:-aks-documentdb-cluster}"
 GKE_CLUSTER_NAME="${GKE_CLUSTER_NAME:-gke-documentdb-cluster}"
+EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-eks-documentdb-cluster}"
 
 # Azure DNS configuration
 AZURE_DNS_ZONE_NAME="${AZURE_DNS_ZONE_NAME:-${RESOURCE_GROUP}}"
@@ -44,18 +46,9 @@ fi
 # Export for envsubst
 export DOCUMENTDB_PASSWORD
 
-# Dynamically get member clusters from Azure
-echo "Discovering member clusters in resource group: $RESOURCE_GROUP..."
-MEMBER_CLUSTERS=$(az aks list -g "$RESOURCE_GROUP" -o json | jq -r '.[] | select(.name|startswith("member-")) | .name' | sort)
-
-if [ -z "$MEMBER_CLUSTERS" ]; then
-  echo "Error: No member clusters found in resource group $RESOURCE_GROUP"
-  exit 1
-fi
 
 # Convert to array and add GCP
-CLUSTER_ARRAY=($MEMBER_CLUSTERS)
-CLUSTER_ARRAY+=("$GKE_CLUSTER_NAME")
+CLUSTER_ARRAY=("$GKE_CLUSTER_NAME" "$AKS_CLUSTER_NAME" "$EKS_CLUSTER_NAME")
 echo "Found ${#CLUSTER_ARRAY[@]} member clusters:"
 for cluster in "${CLUSTER_ARRAY[@]}"; do
   echo "  - $cluster"
@@ -66,14 +59,16 @@ echo ""
 echo "Selected primary cluster: $PRIMARY_CLUSTER"
 
 # Build the cluster list YAML with proper indentation
-CLUSTER_LIST=""
-for cluster in "${CLUSTER_ARRAY[@]}"; do
-  if [ -z "$CLUSTER_LIST" ]; then
-    CLUSTER_LIST="      - ${cluster}"
-  else
-    CLUSTER_LIST="${CLUSTER_LIST}"$'\n'"      - ${cluster}"
-  fi
-done
+CLUSTER_LIST=$(cat <<EOF
+      - name: ${AKS_CLUSTER_NAME}
+        environment: aks
+      - name: ${GKE_CLUSTER_NAME}
+        environment: gke
+      - name: ${EKS_CLUSTER_NAME}
+        environment: eks
+        storageClassOverride: documentdb-storage
+EOF
+)
 
 # Step 1: Create cluster identification ConfigMaps on each member cluster
 echo ""
@@ -144,7 +139,7 @@ if [ -n "$EXISTING_RESOURCES" ]; then
   echo "⚠️  Warning: The following resources already exist: $EXISTING_RESOURCES"
   echo ""
   echo "Options:"
-  echo "1. Delete existing resources and redeploy (data will be lost)"
+  echo "1. Delete existing resources and redeploy ()"
   echo "2. Update existing deployment (preserve data)"
   echo "3. Cancel"
   echo ""

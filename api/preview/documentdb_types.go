@@ -86,9 +86,20 @@ type ClusterReplication struct {
 	// Primary is the name of the primary cluster for replication.
 	Primary string `json:"primary"`
 	// ClusterList is the list of clusters participating in replication.
-	ClusterList []string `json:"clusterList"`
+	ClusterList []MemberCluster `json:"clusterList"`
 	// Whether or not to have replicas on the primary cluster.
 	HighAvailability bool `json:"highAvailability,omitempty"`
+}
+
+type MemberCluster struct {
+	// Name is the name of the member cluster.
+	Name string `json:"name"`
+	// EnvironmentOverride is the cloud environment of the member cluster.
+	// Will default to the global setting
+	// +kubebuilder:validation:Enum=eks;aks;gke
+	EnvironmentOverride string `json:"environment,omitempty"`
+	// StorageClassOverride specifies the storage class for DocumentDB persistent volumes in this member cluster.
+	StorageClassOverride string `json:"storageClass,omitempty"`
 }
 
 type ExposeViaService struct {

@@ -15,7 +15,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, documentdb_image string, serviceAccountName string, log logr.Logger) *cnpgv1.Cluster {
+func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, documentdb_image, serviceAccountName, storageClass string, log logr.Logger) *cnpgv1.Cluster {
 	sidecarPluginName := documentdb.Spec.SidecarInjectorPluginName
 	if sidecarPluginName == "" {
 		sidecarPluginName = util.DEFAULT_SIDECAR_INJECTOR_PLUGIN
@@ -31,9 +31,9 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, docu
 	}
 
 	// Configure storage class - use specified storage class or nil for default
-	var storageClass *string
-	if documentdb.Spec.Resource.Storage.StorageClass != "" {
-		storageClass = &documentdb.Spec.Resource.Storage.StorageClass
+	var storageClassPointer *string
+	if storageClass != "" {
+		storageClassPointer = &storageClass
 	}
 
 	return &cnpgv1.Cluster{
@@ -56,7 +56,7 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, docu
 				Instances: documentdb.Spec.InstancesPerNode,
 				ImageName: documentdb_image,
 				StorageConfiguration: cnpgv1.StorageConfiguration{
-					StorageClass: storageClass, // Use configured storage class or default
+					StorageClass: storageClassPointer, // Use configured storage class or default
 					Size:         documentdb.Spec.Resource.Storage.PvcSize,
 				},
 				InheritedMetadata: getInheritedMetadataLabels(documentdb.Name),

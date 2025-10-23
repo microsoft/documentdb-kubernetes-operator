@@ -6,7 +6,10 @@ param hubClusterName string = 'aks-fleet-hub'
 @description('Location for the Fleet Hub')
 param hubRegion string = 'eastus2'
 
-@description('Locations for member clusters')
+@description('Name for member cluster')
+param memberName string = 'aks-fleet-member'
+
+@description('Location for member cluster')
 param memberRegion string = 'eastus2'
 
 @description('Kubernetes version. Leave empty to use the region default GA version.')
@@ -36,7 +39,7 @@ resource fleet 'Microsoft.ContainerService/fleets@2025-03-01' = {
 
 // Member AKS Cluster (using default Azure CNI without custom VNets)
 resource memberCluster 'Microsoft.ContainerService/managedClusters@2023-10-01' = {
-  name: 'member-${memberRegion}-${uniqueString(resourceGroup().id, memberRegion)}'
+  name: memberName
   location: memberRegion
   identity: {
     type: 'SystemAssigned'

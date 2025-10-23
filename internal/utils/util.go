@@ -75,7 +75,7 @@ func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, replicatio
 
 	// Add environment-specific annotations for LoadBalancer services
 	if serviceType == corev1.ServiceTypeLoadBalancer {
-		service.ObjectMeta.Annotations = getEnvironmentSpecificAnnotations(documentdb.Spec.Environment)
+		service.ObjectMeta.Annotations = getEnvironmentSpecificAnnotations(replicationContext.Environment)
 	}
 
 	return service

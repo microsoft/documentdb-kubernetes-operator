@@ -314,9 +314,9 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 		}
 	} else if primaryChanged && desired.Spec.ReplicaCluster.Primary == current.Spec.ReplicaCluster.Self {
 		// Replica => primary
-		// Look for the token
+		// Look for the token if this is a managed failover
 		oldPrimaryAvailable := slices.Contains(
-			documentdb.Spec.ClusterReplication.ClusterList,
+			replicationContext.Others,
 			current.Spec.ReplicaCluster.Primary)
 
 		replicaClusterConfig := desired.Spec.ReplicaCluster

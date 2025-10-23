@@ -225,7 +225,7 @@ gke_deploy() {
   kubectl config delete-user "$GKE_CLUSTER_NAME" || true
   gcloud container clusters get-credentials "$GKE_CLUSTER_NAME" \
       --location="$ZONE"
-  fullName=$(kubectl config current-context)
+  fullName="gke_${PROJECT_ID}_${ZONE}_${GKE_CLUSTER_NAME}"
   # Replace all occurrences of the generated name with GKE_CLUSTER_NAME in kubeconfig
   sed -i "s|$fullName|$GKE_CLUSTER_NAME|g" ~/.kube/config
 }
@@ -398,8 +398,8 @@ EOF
   kubectl config delete-context "$EKS_CLUSTER_NAME" || true
   kubectl config delete-cluster "$EKS_CLUSTER_NAME" || true
   kubectl config delete-user "$EKS_CLUSTER_NAME" || true
-  fullName=$(kubectl config current-context)
   clusterName="$EKS_CLUSTER_NAME.$EKS_REGION.eksctl.io"
+  fullName=documentdb-admin@$clusterName
   # Replace all occurrences of the generated name with EKS_CLUSTER_NAME in kubeconfig
   sed -i "s|$fullName|$EKS_CLUSTER_NAME|g" ~/.kube/config
   sed -i "s|$clusterName|$EKS_CLUSTER_NAME|g" ~/.kube/config
@@ -410,11 +410,11 @@ EOF
 # Step 2: Collect Names
 # ============================================================================
 check_prerequisites
-aks_fleet_deploy > /dev/null 2>&1 &
+aks_fleet_deploy &
 aks_pid=$!
-gke_deploy > /dev/null 2>&1 &
+gke_deploy &
 gke_pid=$!
-eks_deploy > /dev/null 2>&1 &
+eks_deploy &
 wait $aks_pid
 wait $gke_pid
 

@@ -106,7 +106,7 @@ func (impl Implementation) reconcileMetadata(
 	// Debug: Check if our plugin is found in the cluster's plugin list
 	for i, plugin := range cluster.Spec.Plugins {
 		log.Printf("Plugin[%d]: Name=%s, Enabled=%t, Parameters=%v",
-			i, plugin.Name, plugin.Enabled, plugin.Parameters)
+			i, plugin.Name, *plugin.Enabled, plugin.Parameters)
 	}
 
 	configuration, valErrs := config.FromParameters(helper)

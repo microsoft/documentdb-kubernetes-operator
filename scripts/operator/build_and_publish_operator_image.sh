@@ -1,5 +1,6 @@
 #!/bin/bash
-REPOSITORY=ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-k8s-operator
+#REPOSITORY=ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-k8s-operator
+REPOSITORY=${REPOSITORY:-localhost:5001/documentdb-k8s-operator}
 TAG=preview
 make build
 docker build -t ${REPOSITORY}:${TAG} .

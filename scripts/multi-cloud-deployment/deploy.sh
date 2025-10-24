@@ -414,7 +414,7 @@ aks_fleet_deploy &
 aks_pid=$!
 gke_deploy &
 gke_pid=$!
-eks_deploy &
+eks_deploy
 wait $aks_pid
 wait $gke_pid
 

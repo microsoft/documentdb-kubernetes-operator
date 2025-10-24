@@ -66,7 +66,7 @@ CLUSTER_LIST=$(cat <<EOF
         environment: gke
       - name: ${EKS_CLUSTER_NAME}
         environment: eks
-        storageClassOverride: documentdb-storage
+        storageClass: documentdb-storage
 EOF
 )
 
@@ -316,6 +316,10 @@ if [ "$ENABLE_AZURE_DNS" = "true" ]; then
     EXTERNAL_IP=""
     for attempt in {1..12}; do  # Try for 2 minutes
       EXTERNAL_IP=$(kubectl --context "$cluster" get svc "$SERVICE_NAME" -n documentdb-preview-ns -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+      if [ -n "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "<pending>" ]; then
+        break
+      fi
+      EXTERNAL_IP=$(kubectl --context "$cluster" get svc "$SERVICE_NAME" -n documentdb-preview-ns -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
       if [ -n "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "<pending>" ]; then
         break
       fi

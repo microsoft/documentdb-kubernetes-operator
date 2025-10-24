@@ -69,14 +69,13 @@ spec:
                         name:
                           description: Name is the name of the member cluster.
                           type: string
-                        storageClassOverride:
+                        storageClass:
                           description: StorageClassOverride specifies the storage
                             class for DocumentDB persistent volumes in this member
                             cluster.
                           type: string
                       required:
                       - name
-                      - storageClassOverride
                       type: object
                     type: array
                   crossCloudNetworkingStrategy:

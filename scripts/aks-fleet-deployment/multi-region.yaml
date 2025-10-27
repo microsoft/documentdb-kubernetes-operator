@@ -29,7 +29,8 @@ spec:
   documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   gatewayImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   resource:
-    pvcSize: 10Gi
+    storage:
+      pvcSize: 10Gi
   clusterReplication:
     highAvailability: true
     enableFleetForCrossCloud: true 

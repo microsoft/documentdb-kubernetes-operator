@@ -137,6 +137,35 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default > dist/install.yaml
 
+PLUGIN_NAME ?= kubectl-documentdb
+PLUGIN_DIST_DIR ?= dist/$(PLUGIN_NAME)
+PLUGIN_PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
+
+##@ kubectl Plugin
+
+.PHONY: build-kubectl-plugin
+build-kubectl-plugin: ## Build the kubectl-documentdb plugin for the host platform.
+	mkdir -p bin
+	cd plugins/documentdb-kubectl-plugin && go build -o $(CURDIR)/bin/$(PLUGIN_NAME) .
+
+.PHONY: package-kubectl-plugin
+package-kubectl-plugin: ## Build cross-platform archives for the kubectl-documentdb plugin.
+	rm -rf $(PLUGIN_DIST_DIR)
+	mkdir -p $(PLUGIN_DIST_DIR)
+	@set -e; for platform in $(PLUGIN_PLATFORMS); do \
+		os=$${platform%/*}; \
+		arch=$${platform#*/}; \
+		ext=""; \
+		if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
+		tmpdir=$$(mktemp -d); \
+		echo "Building $(PLUGIN_NAME) for $$os/$$arch"; \
+		( cd plugins/documentdb-kubectl-plugin && GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -o $$tmpdir/$(PLUGIN_NAME)$$ext . ); \
+		cp LICENSE $$tmpdir/; \
+		printf "kubectl-documentdb plugin bundle\n\nInstall: place $(PLUGIN_NAME)%s on your PATH (for example ~/.local/bin) and ensure it is executable.\nUsage: run 'kubectl documentdb --help'.\nDocumentation: https://github.com/microsoft/documentdb-kubernetes-operator/blob/main/docs/kubectl-plugin.md\n" "$$ext" > $$tmpdir/README.txt; \
+		tar -C $$tmpdir -czf $(PLUGIN_DIST_DIR)/$(PLUGIN_NAME)-$$os-$$arch.tar.gz $(PLUGIN_NAME)$$ext LICENSE README.txt; \
+		rm -rf $$tmpdir; \
+	done
+
 ##@ Deployment
 
 ifndef ignore-not-found

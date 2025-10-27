@@ -6,6 +6,8 @@ theme:
 nav:
   - Version 1.0:
       - Get Started: v1/index.md
+  - Tools:
+      - Kubectl Plugin: kubectl-plugin.md
 
 plugins:
   - search

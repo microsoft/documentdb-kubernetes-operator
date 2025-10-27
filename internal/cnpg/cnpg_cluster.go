@@ -9,6 +9,7 @@ import (
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
 	util "github.com/microsoft/documentdb-operator/internal/utils"
@@ -60,15 +61,18 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, docu
 					Size:         documentdb.Spec.Resource.Storage.PvcSize,
 				},
 				InheritedMetadata: getInheritedMetadataLabels(documentdb.Name),
-				Plugins: []cnpgv1.PluginConfiguration{
-					{
-						Name: sidecarPluginName,
-						Parameters: map[string]string{
-							"gatewayImage":               gatewayImage,
-							"documentDbCredentialSecret": credentialSecretName,
-						},
-					},
-				},
+				Plugins: func() []cnpgv1.PluginConfiguration {
+					params := map[string]string{"gatewayImage": gatewayImage}
+					// If TLS is ready, surface secret name to plugin so it can mount certs.
+					if documentdb.Status.TLS != nil && documentdb.Status.TLS.Ready && documentdb.Status.TLS.SecretName != "" {
+						params["gatewayTLSSecret"] = documentdb.Status.TLS.SecretName
+					}
+					return []cnpgv1.PluginConfiguration{{
+						Name:       sidecarPluginName,
+						Enabled:    pointer.Bool(true),
+						Parameters: params,
+					}}
+				}(),
 				PostgresUID: 105,
 				PostgresGID: 108,
 				PostgresConfiguration: cnpgv1.PostgresConfiguration{

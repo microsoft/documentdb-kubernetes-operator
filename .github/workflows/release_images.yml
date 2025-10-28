@@ -45,6 +45,14 @@ jobs:
       image_tag: ${{ inputs.image_tag }}
     secrets: inherit
 
+  test-backup-and-restore:
+    name: Test Backup and Restore
+    if: ${{ inputs.run_tests == true }}
+    uses: ./.github/workflows/test-backup-and-restore.yml
+    with:
+      image_tag: ${{ inputs.image_tag }}
+    secrets: inherit
+
   copy-and-push-manifest:
     name: Release Images
     runs-on: ubuntu-latest

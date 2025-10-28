@@ -213,18 +213,23 @@ jobs:
         SLEEP_INTERVAL=20
         ITER=0
         while [ $ITER -lt $MAX_RETRIES ]; do
-          # kubectl get backups will return the list of backups
           # check if there is at least two backups with phase completed
           backup_status=$(kubectl -n $DB_NS get backups -o jsonpath='{.items[?(@.status.phase=="completed")].metadata.name}' | wc -w)
           if [ "$backup_status" -ge 2 ]; then
             echo "Backup completed successfully."
             exit 0
           else
-            echo "Current backup status: $backup_status. Retrying in $SLEEP_INTERVAL seconds..."
+            echo "Current backup status: $backup_status."
+            kubectl -n $DB_NS get backups
+            kubectl -n $DB_NS get backups.postgresql.cnpg.io
+
+            echo "Retrying in $SLEEP_INTERVAL seconds..."
             sleep $SLEEP_INTERVAL
           fi
           ((++ITER))
         done
+        echo "Backup did not complete within expected time."
+        exit 1
 
     - name: Restore from backup
       shell: bash
@@ -247,6 +252,7 @@ jobs:
           resource:
             storage:
               pvcSize: 5Gi
+              storageClass: csi-hostpath-sc
           exposeViaService:
             serviceType: ClusterIP
           bootstrap:

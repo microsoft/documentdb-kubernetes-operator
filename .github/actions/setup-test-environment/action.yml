@@ -562,6 +562,12 @@ runs:
         
         echo "✓ DocumentDB credentials secret created successfully"
 
+    - name: Deply CSI driver
+      shell: bash
+      run: |
+        chmod +x ./scripts/test-scripts/deploy-csi-driver.sh
+        ./scripts/test-scripts/deploy-csi-driver.sh
+
     - name: Deploy DocumentDB cluster
       shell: bash
       run: |
@@ -583,6 +589,7 @@ runs:
           resource:
             storage:
               pvcSize: 5Gi
+              storageClass: csi-hostpath-sc
           exposeViaService:
             serviceType: ClusterIP
         EOF

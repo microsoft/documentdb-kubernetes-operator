@@ -8,6 +8,7 @@ GKE_CLUSTER_NAME="${GKE_CLUSTER_NAME:-gke-documentdb-cluster}"
 
 MEMBER_CLUSTERS=$(kubectl --context "$HUB_CONTEXT" get documentdb $DOCUMENTDB_NAME -n $DOCUMENTDB_NAMESPACE -o json | jq -r ".spec.clusterReplication.clusterList[].name")
 PRIMARY_CLUSTER=$(kubectl --context "$HUB_CONTEXT" get documentdb $DOCUMENTDB_NAME -n $DOCUMENTDB_NAMESPACE -o json | jq -r ".spec.clusterReplication.primary")
+TARGET_CLUSTER=$1
 
 # Convert to array
 CLUSTER_ARRAY=($MEMBER_CLUSTERS)
@@ -16,10 +17,11 @@ for cluster in "${CLUSTER_ARRAY[@]}"; do
   echo "  - $cluster"
   if [ "$cluster" == "$PRIMARY_CLUSTER" ]; then
     echo "    (current primary)"
-  else 
-    TARGET_CLUSTER="$cluster"
+  elif [ "$cluster" == "$TARGET_CLUSTER" ]; then
+    echo "    (target primary)"
   fi
 done
+
 
 dnsName=$(az network dns zone list --resource-group $RESOURCE_GROUP --query="[0].name" -o tsv)
 
@@ -45,5 +47,9 @@ az network dns record-set srv add-record \
   --target "$TARGET_CLUSTER.$dnsName"
 
 echo "Initiating failover to $TARGET_CLUSTER..."
-kubectl --context "$HUB_CONTEXT" patch documentdb "$DOCUMENTDB_NAME" -n "$DOCUMENTDB_NAMESPACE" \
-    --type='merge' -p="{\"spec\":{\"clusterReplication\":{\"primary\":\"$TARGET_CLUSTER\"}}}"
+echo "kubectl documentdb promote \\"
+echo "  --documentdb documentdb-preview \\"
+echo "  --namespace documentdb-preview-ns \\"
+echo "  --hub-context $HUB_CONTEXT \\"
+echo "  --target-cluster $TARGET_CLUSTER \\"
+echo "  --cluster-context $TARGET_CLUSTER"

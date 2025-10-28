@@ -48,7 +48,7 @@ export DOCUMENTDB_PASSWORD
 
 
 # Convert to array and add GCP
-CLUSTER_ARRAY=("$GKE_CLUSTER_NAME" "$AKS_CLUSTER_NAME" "$EKS_CLUSTER_NAME")
+CLUSTER_ARRAY=("$EKS_CLUSTER_NAME" "$AKS_CLUSTER_NAME" "$GKE_CLUSTER_NAME")
 echo "Found ${#CLUSTER_ARRAY[@]} member clusters:"
 for cluster in "${CLUSTER_ARRAY[@]}"; do
   echo "  - $cluster"
@@ -319,8 +319,8 @@ if [ "$ENABLE_AZURE_DNS" = "true" ]; then
       if [ -n "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "<pending>" ]; then
         break
       fi
-      EXTERNAL_IP=$(kubectl --context "$cluster" get svc "$SERVICE_NAME" -n documentdb-preview-ns -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-      if [ -n "$EXTERNAL_IP" ] && [ "$EXTERNAL_IP" != "<pending>" ]; then
+      EXTERNAL_HOSTNAME=$(kubectl --context "$cluster" get svc "$SERVICE_NAME" -n documentdb-preview-ns -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+      if [ -n "$EXTERNAL_HOSTNAME" ] && [ "$EXTERNAL_HOSTNAME" != "<pending>" ]; then
         break
       fi
       echo "  Waiting for external IP for $cluster (service: $SERVICE_NAME, attempt $attempt/12)..."
@@ -347,7 +347,32 @@ if [ "$ENABLE_AZURE_DNS" = "true" ]; then
         --record-set-name "$cluster" \
         --zone-name "$fullName" \
         --resource-group "$RESOURCE_GROUP" \
-        --ipv4-address "$EXTERNAL_IP"
+        --ipv4-address "$EXTERNAL_IP" \
+        --ttl 5
+
+      echo "  ✓ Created DNS record $cluster"
+    elif [ -n "$EXTERNAL_HOSTNAME" ] && [ "$EXTERNAL_HOSTNAME" != "<pending>" ]; then
+      echo "  External hostname for $cluster: $EXTERNAL_HOSTNAME"
+
+      # TODO Delete existing DNS record if it exists
+      az network dns record-set cname delete \
+        --name "$cluster" \
+        --zone-name "$fullName" \
+        --resource-group "$RESOURCE_GROUP" \
+        --yes
+      
+      # Create DNS record
+      az network dns record-set cname create \
+        --name "$cluster" \
+        --zone-name "$fullName" \
+        --resource-group "$RESOURCE_GROUP" \
+        --ttl 5
+      az network dns record-set cname set-record \
+        --record-set-name "$cluster" \
+        --zone-name "$fullName" \
+        --resource-group "$RESOURCE_GROUP" \
+        --cname "$EXTERNAL_HOSTNAME" \
+        --ttl 5
 
       echo "  ✓ Created DNS record $cluster"
     else

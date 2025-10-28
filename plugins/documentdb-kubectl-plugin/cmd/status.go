@@ -101,11 +101,11 @@ func (o *statusOptions) run(ctx context.Context, cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("failed to read spec.clusterReplication.primary: %w", err)
 	}
-	clusterNames, found, err := unstructured.NestedStringSlice(document.Object, "spec", "clusterReplication", "clusterList")
+	clusterListRaw, found, err := unstructured.NestedSlice(document.Object, "spec", "clusterReplication", "clusterList")
 	if err != nil {
 		return fmt.Errorf("failed to read spec.clusterReplication.clusterList: %w", err)
 	}
-	if !found || len(clusterNames) == 0 {
+	if !found || len(clusterListRaw) == 0 {
 		return errors.New("DocumentDB spec.clusterReplication.clusterList is empty")
 	}
 
@@ -120,8 +120,9 @@ func (o *statusOptions) run(ctx context.Context, cmd *cobra.Command) error {
 	}
 	fmt.Fprintln(cmd.OutOrStdout())
 
-	statuses := make([]clusterStatus, 0, len(clusterNames))
-	for _, cluster := range clusterNames {
+	statuses := make([]clusterStatus, 0, len(clusterListRaw))
+	for _, clusterObj := range clusterListRaw {
+		cluster := clusterObj.(map[string]interface{})["name"].(string)
 		role := "Replica"
 		if cluster == primaryCluster {
 			role = "Primary"

@@ -45,4 +45,13 @@ const (
 	JSON_PATCH_OP_REPLACE = "replace"
 	JSON_PATCH_OP_ADD     = "add"
 	JSON_PATCH_OP_REMOVE  = "remove"
+
+	// SQL job resource requirements and container security context
+	SQL_JOB_REQUESTS_MEMORY  = "32Mi"
+	SQL_JOB_REQUESTS_CPU     = "10m"
+	SQL_JOB_LIMITS_MEMORY    = "64Mi"
+	SQL_JOB_LIMITS_CPU       = "50m"
+	SQL_JOB_LINUX_UID        = 1000
+	SQL_JOB_RUN_AS_NON_ROOT  = true
+	SQL_JOB_ALLOW_PRIVILEGED = false
 )

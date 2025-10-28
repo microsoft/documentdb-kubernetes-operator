@@ -196,6 +196,15 @@ jobs:
           schedule: "*/1 * * * *"
         EOF
 
+        # check if the ScheduledBackup is created
+        schedule_status=$(kubectl -n $DB_NS get scheduledbackups $DB_NAME-backup -o jsonpath='{.metadata.name}')
+        if [ "$schedule_status" == "$DB_NAME-backup" ]; then
+          echo "ScheduledBackup created successfully."
+        else
+          echo "Failed to create ScheduledBackup."
+          exit 1
+        fi
+
     - name: Wait for backup to complete
       shell: bash
       run: |

@@ -229,6 +229,10 @@ jobs:
           ((++ITER))
         done
         echo "Backup did not complete within expected time."
+        
+        operator_name=$(kubectl get pods -A | grep -E 'documentdb-operator-' | grep -v 'documentdb-operator-cloudnative-pg-' | awk '{print $2}')
+        kubectl -n $OPERATOR_NS logs $operator_name
+        
         exit 1
 
     - name: Restore from backup

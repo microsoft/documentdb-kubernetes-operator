@@ -8,12 +8,11 @@ import (
 	"time"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	ctrl "sigs.k8s.io/controller-runtime"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -28,15 +27,15 @@ var _ = Describe("Backup Controller", func() {
 	)
 
 	var (
-		ctx    context.Context
-		scheme *runtime.Scheme
-		logger logr.Logger
+		ctx      context.Context
+		scheme   *runtime.Scheme
+		recorder record.EventRecorder
 	)
 
 	BeforeEach(func() {
 		ctx = context.Background()
 		scheme = runtime.NewScheme()
-		logger = ctrl.Log.WithName("test")
+		recorder = record.NewFakeRecorder(10)
 		// register both preview and CNPG types used by the controller
 		Expect(dbpreview.AddToScheme(scheme)).To(Succeed())
 		Expect(cnpgv1.AddToScheme(scheme)).To(Succeed())
@@ -50,8 +49,9 @@ var _ = Describe("Backup Controller", func() {
 				Build()
 
 			reconciler := &BackupReconciler{
-				Client: fakeClient,
-				Scheme: scheme,
+				Client:   fakeClient,
+				Scheme:   scheme,
+				Recorder: recorder,
 			}
 
 			// input dbpreview Backup
@@ -66,7 +66,7 @@ var _ = Describe("Backup Controller", func() {
 			}
 
 			// Call under test
-			res, err := reconciler.createCNPGBackup(ctx, backup, logger)
+			res, err := reconciler.createCNPGBackup(ctx, backup, nil)
 			Expect(err).ToNot(HaveOccurred())
 			// controller uses a 5s requeue
 			Expect(res.RequeueAfter).To(Equal(5 * time.Second))
@@ -115,8 +115,9 @@ var _ = Describe("Backup Controller", func() {
 				Build()
 
 			reconciler := &BackupReconciler{
-				Client: fakeClient,
-				Scheme: scheme,
+				Client:   fakeClient,
+				Scheme:   scheme,
+				Recorder: recorder,
 			}
 
 			now := time.Now().UTC()
@@ -132,7 +133,7 @@ var _ = Describe("Backup Controller", func() {
 				},
 			}
 
-			res, err := reconciler.updateBackupStatus(ctx, backup, cnpgBackup, nil, logger)
+			res, err := reconciler.updateBackupStatus(ctx, backup, cnpgBackup, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(res.RequeueAfter).NotTo(Equal(0))
 
@@ -168,8 +169,9 @@ var _ = Describe("Backup Controller", func() {
 				Build()
 
 			reconciler := &BackupReconciler{
-				Client: fakeClient,
-				Scheme: scheme,
+				Client:   fakeClient,
+				Scheme:   scheme,
+				Recorder: recorder,
 			}
 
 			startTime := time.Now().UTC().Add(-10 * time.Minute)
@@ -187,7 +189,7 @@ var _ = Describe("Backup Controller", func() {
 				},
 			}
 
-			res, err := reconciler.updateBackupStatus(ctx, backup, cnpgBackup, nil, logger)
+			res, err := reconciler.updateBackupStatus(ctx, backup, cnpgBackup, nil)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(res.RequeueAfter).NotTo(Equal(0))
 
@@ -238,7 +240,7 @@ var _ = Describe("Backup Controller", func() {
 				},
 			}
 
-			res, err := reconciler.updateBackupStatus(ctx, backup, cnpgBackup, nil, logger)
+			res, err := reconciler.updateBackupStatus(ctx, backup, cnpgBackup, nil)
 			Expect(err).ToNot(HaveOccurred())
 			// Still in progress, requeue
 			Expect(res.RequeueAfter).To(Equal(10 * time.Second))

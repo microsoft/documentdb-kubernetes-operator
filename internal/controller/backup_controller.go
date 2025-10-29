@@ -9,11 +9,11 @@ import (
 	"time"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	"github.com/go-logr/logr"
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v8/apis/volumesnapshot/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -24,12 +24,13 @@ import (
 // BackupReconciler reconciles a Backup object
 type BackupReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 // Reconcile handles the reconciliation loop for Backup resources.
 func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx, "namespace", req.NamespacedName.Namespace, "backupName", req.NamespacedName.Name)
+	logger := log.FromContext(ctx)
 
 	// Fetch the Backup resource
 	backup := &dbpreview.Backup{}
@@ -44,12 +45,17 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// Delete the Backup resource if it has expired
 	if backup.Status.IsExpired() {
-		logger.Info("Backup has expired, deleting it")
+		r.Recorder.Event(backup, "Normal", "BackupExpired", "Backup has expired and will be deleted")
 		if err := r.Delete(ctx, backup); err != nil {
-			logger.Error(err, "Failed to delete expired Backup")
+			r.Recorder.Event(backup, "Warning", "BackupDeleteFailed", "Failed to delete expired Backup: "+err.Error())
 			return ctrl.Result{}, err
 		}
-		logger.Info("Successfully deleted expired Backup")
+		r.Recorder.Event(backup, "Normal", "BackupDeleted", "Expired Backup has been deleted")
+		return ctrl.Result{}, nil
+	}
+
+	// No further action needed for completed backups
+	if backup.Status.IsDone() {
 		return ctrl.Result{}, nil
 	}
 
@@ -60,18 +66,12 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		Namespace: backup.Namespace,
 	}
 	if err := r.Get(ctx, clusterKey, cluster); err != nil {
-		logger.Error(err, "Failed to get cluster for Backup", "clusterName", backup.Spec.Cluster.Name)
-		return ctrl.Result{}, err
+		return r.SetBackupPhaseFailed(ctx, backup, "Failed to get associated DocumentDB cluster: "+err.Error(), nil)
 	}
 
 	// Ensure VolumeSnapshotClass exists
 	if err := r.ensureVolumeSnapshotClass(ctx, cluster.Spec.Environment); err != nil {
-		backup.Status.Error = "Failed to ensure VolumeSnapshotClass: " + err.Error()
-		backup.Status.Phase = cnpgv1.BackupPhaseFailed
-		if updateErr := r.Status().Update(ctx, backup); updateErr != nil {
-			return ctrl.Result{}, updateErr
-		}
-		return ctrl.Result{}, err
+		return r.SetBackupPhaseFailed(ctx, backup, "Failed to ensure VolumeSnapshotClass: "+err.Error(), cluster.Spec.Backup)
 	}
 
 	// Get or create the CNPG Backup
@@ -82,15 +82,14 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 	if err := r.Get(ctx, cnpgBackupKey, cnpgBackup); err != nil {
 		if apierrors.IsNotFound(err) {
-			logger.Info("Creating new CNPG Backup for DocumentDB Backup")
-			return r.createCNPGBackup(ctx, backup, logger)
+			return r.createCNPGBackup(ctx, backup, cluster.Spec.Backup)
 		}
 		logger.Error(err, "Failed to get CNPG Backup")
 		return ctrl.Result{}, err
 	}
 
 	// Update status based on CNPG Backup status
-	return r.updateBackupStatus(ctx, backup, cnpgBackup, cluster.Spec.Backup, logger)
+	return r.updateBackupStatus(ctx, backup, cnpgBackup, cluster.Spec.Backup)
 }
 
 // ensureVolumeSnapshotClass creates a VolumeSnapshotClass based on the cloud environment
@@ -110,7 +109,7 @@ func (r *BackupReconciler) ensureVolumeSnapshotClass(ctx context.Context, enviro
 		}
 	}
 
-	logger.Info("No default VolumeSnapshotClass found, will create one")
+	r.Recorder.Event(nil, "Normal", "VolumeSnapshotClass", "No default VolumeSnapshotClass found, creating one")
 	vsc := buildVolumeSnapshotClass(environment)
 	if vsc == nil {
 		err := fmt.Errorf("Please create a default VolumeSnapshotClass before creating backups")
@@ -123,7 +122,7 @@ func (r *BackupReconciler) ensureVolumeSnapshotClass(ctx context.Context, enviro
 		return err
 	}
 
-	logger.Info("Successfully created VolumeSnapshotClass", "name", vsc.Name, "driver", vsc.Driver)
+	r.Recorder.Event(nil, "Normal", "VolumeSnapshotClass", "Successfully created VolumeSnapshotClass "+vsc.Name)
 	return nil
 }
 
@@ -156,30 +155,30 @@ func buildVolumeSnapshotClass(environment string) *snapshotv1.VolumeSnapshotClas
 }
 
 // createCNPGBackup creates a new CNPG Backup resource
-func (r *BackupReconciler) createCNPGBackup(ctx context.Context, backup *dbpreview.Backup, logger logr.Logger) (ctrl.Result, error) {
+func (r *BackupReconciler) createCNPGBackup(ctx context.Context, backup *dbpreview.Backup, backupConfiguration *dbpreview.BackupConfiguration) (ctrl.Result, error) {
 	cnpgBackup, err := backup.CreateCNPGBackup(r.Scheme)
 	if err != nil {
-		logger.Error(err, "Failed to build CNPG Backup")
-		return ctrl.Result{}, err
+		return r.SetBackupPhaseFailed(ctx, backup, "Failed to initialize backup: "+err.Error(), backupConfiguration)
 	}
 
 	if err := r.Create(ctx, cnpgBackup); err != nil {
-		logger.Error(err, "Failed to create CNPG Backup")
-		return ctrl.Result{}, err
+		return r.SetBackupPhaseFailed(ctx, backup, "Failed to initialize backup: "+err.Error(), backupConfiguration)
 	}
-	logger.Info("Successfully created CNPG Backup", "name", cnpgBackup.Name)
+
+	r.Recorder.Event(backup, "Normal", "BackupInitialized", "Successfully initialized backup")
 
 	// Requeue to check status
 	return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 }
 
 // updateBackupStatus updates the Backup status based on CNPG Backup status
-func (r *BackupReconciler) updateBackupStatus(ctx context.Context, backup *dbpreview.Backup, cnpgBackup *cnpgv1.Backup, backupConfiguration *dbpreview.BackupConfiguration, logger logr.Logger) (ctrl.Result, error) {
+func (r *BackupReconciler) updateBackupStatus(ctx context.Context, backup *dbpreview.Backup, cnpgBackup *cnpgv1.Backup, backupConfiguration *dbpreview.BackupConfiguration) (ctrl.Result, error) {
 	original := backup.DeepCopy()
 	needsUpdate := backup.UpdateStatus(cnpgBackup, backupConfiguration)
 
 	if needsUpdate {
 		if err := r.Status().Patch(ctx, backup, client.MergeFrom(original)); err != nil {
+			logger := log.FromContext(ctx)
 			logger.Error(err, "Failed to patch Backup status")
 			return ctrl.Result{}, err
 		}
@@ -195,6 +194,23 @@ func (r *BackupReconciler) updateBackupStatus(ctx context.Context, backup *dbpre
 
 	// Backup is still in progress, requeue to check status again
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+}
+
+func (r *BackupReconciler) SetBackupPhaseFailed(ctx context.Context, backup *dbpreview.Backup, errMessage string, backupConfiguration *dbpreview.BackupConfiguration) (ctrl.Result, error) {
+	original := backup.DeepCopy()
+
+	backup.Status.Phase = cnpgv1.BackupPhaseFailed
+	backup.Status.Error = errMessage
+	backup.Status.ExpiredAt = backup.CalculateExpirationTime(backupConfiguration)
+
+	if err := r.Status().Patch(ctx, backup, client.MergeFrom(original)); err != nil {
+		logger := log.FromContext(ctx)
+		logger.Error(err, "Failed to patch Backup status")
+		return ctrl.Result{}, err
+	}
+
+	r.Recorder.Event(backup, "Warning", "BackupFailed", errMessage)
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

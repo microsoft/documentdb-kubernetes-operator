@@ -273,6 +273,12 @@ runs:
         
         echo "✓ Cluster resource check completed for ${{ inputs.architecture }}"
 
+    - name: Deply CSI driver
+      shell: bash
+      run: |
+        chmod +x ./scripts/test-scripts/deploy-csi-driver.sh
+        ./scripts/test-scripts/deploy-csi-driver.sh
+  
     - name: Install cert-manager
       shell: bash
       run: |
@@ -561,12 +567,6 @@ runs:
         EOF
         
         echo "✓ DocumentDB credentials secret created successfully"
-
-    - name: Deply CSI driver
-      shell: bash
-      run: |
-        chmod +x ./scripts/test-scripts/deploy-csi-driver.sh
-        ./scripts/test-scripts/deploy-csi-driver.sh
 
     - name: Deploy DocumentDB cluster
       shell: bash

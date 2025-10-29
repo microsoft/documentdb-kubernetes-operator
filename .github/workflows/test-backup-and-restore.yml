@@ -269,8 +269,8 @@ jobs:
       uses: ./.github/actions/setup-port-forwarding
       with:
         namespace: ${{ env.DB_NS }}
-        cluster-name: ${{ env.DB_NAME }}
-        port: ${{ env.DB_RESTORE_NAME }}
+        cluster-name: ${{ env.DB_RESTORE_NAME }}
+        port: ${{ env.DB_PORT }}
         architecture: ${{ matrix.architecture }}
         test-type: 'comprehensive'
 

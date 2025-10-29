@@ -33,7 +33,7 @@ spec:
       pvcSize: 10Gi
   clusterReplication:
     highAvailability: true
-    crossCloudNetworkingStrategy: KubeFleet
+    crossCloudNetworkingStrategy: AzureFleet
     primary: {{PRIMARY_CLUSTER}}
     clusterList:
 {{CLUSTER_LIST}}

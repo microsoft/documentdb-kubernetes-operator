@@ -81,7 +81,7 @@ type StorageConfiguration struct {
 }
 
 type ClusterReplication struct {
-	// CrossCloudNetworking determines whether to use KubeFleet mechanics for the replication
+	// CrossCloudNetworking determines which type of networking mechanics for the replication
 	CrossCloudNetworkingStrategy string `json:"crossCloudNetworkingStrategy,omitempty"`
 	// Primary is the name of the primary cluster for replication.
 	Primary string `json:"primary"`

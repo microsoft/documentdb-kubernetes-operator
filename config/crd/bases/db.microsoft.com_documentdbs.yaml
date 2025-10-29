@@ -79,7 +79,7 @@ spec:
                       type: object
                     type: array
                   crossCloudNetworkingStrategy:
-                    description: CrossCloudNetworking determines whether to use KubeFleet
+                    description: CrossCloudNetworking determines which type of networking
                       mechanics for the replication
                     type: string
                   highAvailability:

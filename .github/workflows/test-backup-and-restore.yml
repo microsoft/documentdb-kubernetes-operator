@@ -146,11 +146,9 @@ jobs:
         architecture: ${{ matrix.architecture }}
         test-type: 'comprehensive'
 
-    - name: Execute comprehensive mongosh tests
+    - name: Insert test data using mongosh
       run: |
-        echo "Running comprehensive mongosh validation tests on ${{ matrix.architecture }}..."
-        
-        # Insert some documents 
+        echo "Inserting test data into DocumentDB cluster..."
         if mongosh 127.0.0.1:$DB_PORT \
           -u $DB_USERNAME \
           -p $DB_PASSWORD \
@@ -158,9 +156,96 @@ jobs:
           --tls \
           --tlsAllowInvalidCertificates \
           --eval "for (let i = 1; i <= 100; i++) { db.testCollection.insertOne({ index: i, message: 'This is document ' + i }); }" ; then
-          echo "✓ Comprehensive mongosh tests completed successfully on ${{ matrix.architecture }}"
+          echo "✓ Test data insertion completed successfully on ${{ matrix.architecture }}"
         else
-          echo "❌ Comprehensive mongosh tests failed on ${{ matrix.architecture }}"
+          echo "❌ Test data insertion failed on ${{ matrix.architecture }}"
+          exit 1
+        fi
+
+        echo "Verifying inserted test data..."
+        count=$(mongosh --quiet -u $DB_USERNAME -p $DB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates --eval "db.testCollection.countDocuments({})")
+        if [[ "$count" -eq 100 ]]; then
+          echo "✓ Test data verification completed successfully on ${{ matrix.architecture }}"
+        else
+          echo "❌ Test data verification failed on ${{ matrix.architecture }}"
+          exit 1
+        fi
+
+    - name: Create ScheduledBackup to trigger backups
+      shell: bash
+      run: |
+        cat <<EOF | kubectl apply -f -
+        apiVersion: db.microsoft.com/preview
+        kind: ScheduledBackup
+        metadata:
+          name: $DB_NAME-backup
+          namespace: $DB_NS
+        spec:
+          cluster:
+            name: $DB_NAME
+          # every one minute
+          schedule: "*/1 * * * *"
+        EOF
+
+        schedule_status=$(kubectl -n $DB_NS get scheduledbackups $DB_NAME-backup -o jsonpath='{.metadata.name}')
+        if [ "$schedule_status" == "$DB_NAME-backup" ]; then
+          echo "✓ ScheduledBackup created successfully."
+        else
+          echo "❌ Failed to create ScheduledBackup."
+          exit 1
+        fi
+
+    - name: Wait for backup to complete
+      shell: bash
+      run: |
+        echo "Waiting for backup to complete..."
+        MAX_RETRIES=15
+        SLEEP_INTERVAL=20
+        ITER=0
+        while [ $ITER -lt $MAX_RETRIES ]; do
+          # check if there is at least two backups with phase completed
+          backup_status=$(kubectl -n $DB_NS get backups -o jsonpath='{.items[?(@.status.phase=="completed")].metadata.name}' | wc -w)
+          if [ "$backup_status" -ge 2 ]; then
+            echo "✓ Backup completed successfully."
+            exit 0
+          else
+            echo "Current backup status: $backup_status."
+            kubectl -n $DB_NS get backups
+
+            echo "Retrying in $SLEEP_INTERVAL seconds..."
+            sleep $SLEEP_INTERVAL
+          fi
+          ((++ITER))
+        done
+        echo "❌ Backup did not complete within expected time."
+        
+        echo "Fetching operator logs for debugging..."
+        operator_name=$(kubectl get pods -A | grep -E 'documentdb-operator-' | grep -v 'documentdb-operator-cloudnative-pg-' | awk '{print $2}')
+        kubectl -n $OPERATOR_NS logs $operator_name | grep 'Backup' || echo "No Backup related logs found."
+        
+        exit 1
+
+    - name: Delete test data before restore
+      run: |
+        echo "Deleting test data from DocumentDB cluster before restore..."
+        if mongosh 127.0.0.1:$DB_PORT \
+          -u $DB_USERNAME \
+          -p $DB_PASSWORD \
+          --authenticationMechanism SCRAM-SHA-256 \
+          --tls \
+          --tlsAllowInvalidCertificates \
+          --eval "db.testCollection.deleteMany({});" ; then
+          echo "✓ Test data deletion completed successfully on ${{ matrix.architecture }}"
+        else
+          echo "❌ Test data deletion failed on ${{ matrix.architecture }}"
+          exit 1
+        fi
+
+        count=$(mongosh --quiet -u $DB_USERNAME -p $DB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates --eval "db.testCollection.countDocuments({})"
+        if [[ "$count" -eq 0 ]]; then
+          echo "✓ Test data deletion verified successfully on ${{ matrix.architecture }}"
+        else
+          echo "❌ Test data deletion verification failed on ${{ matrix.architecture }}"
           exit 1
         fi
 
@@ -179,61 +264,6 @@ jobs:
         
         # Clean up output log
         rm -f /tmp/pf_output.log
-
-    - name: Create ScheduledBackup
-      shell: bash
-      run: |
-        cat <<EOF | kubectl apply -f -
-        apiVersion: db.microsoft.com/preview
-        kind: ScheduledBackup
-        metadata:
-          name: $DB_NAME-backup
-          namespace: $DB_NS
-        spec:
-          cluster:
-            name: $DB_NAME
-          # every one minute
-          schedule: "*/1 * * * *"
-        EOF
-
-        # check if the ScheduledBackup is created
-        schedule_status=$(kubectl -n $DB_NS get scheduledbackups $DB_NAME-backup -o jsonpath='{.metadata.name}')
-        if [ "$schedule_status" == "$DB_NAME-backup" ]; then
-          echo "ScheduledBackup created successfully."
-        else
-          echo "Failed to create ScheduledBackup."
-          exit 1
-        fi
-
-    - name: Wait for backup to complete
-      shell: bash
-      run: |
-        echo "Waiting for backup to complete..."
-        MAX_RETRIES=15
-        SLEEP_INTERVAL=20
-        ITER=0
-        while [ $ITER -lt $MAX_RETRIES ]; do
-          # check if there is at least two backups with phase completed
-          backup_status=$(kubectl -n $DB_NS get backups -o jsonpath='{.items[?(@.status.phase=="completed")].metadata.name}' | wc -w)
-          if [ "$backup_status" -ge 2 ]; then
-            echo "Backup completed successfully."
-            exit 0
-          else
-            echo "Current backup status: $backup_status."
-            kubectl -n $DB_NS get backups
-            kubectl -n $DB_NS get backups.postgresql.cnpg.io
-
-            echo "Retrying in $SLEEP_INTERVAL seconds..."
-            sleep $SLEEP_INTERVAL
-          fi
-          ((++ITER))
-        done
-        echo "Backup did not complete within expected time."
-        
-        operator_name=$(kubectl get pods -A | grep -E 'documentdb-operator-' | grep -v 'documentdb-operator-cloudnative-pg-' | awk '{print $2}')
-        kubectl -n $OPERATOR_NS logs $operator_name
-        
-        exit 1
 
     - name: Restore from backup
       shell: bash
@@ -300,3 +330,30 @@ jobs:
         
         # Clean up output log
         rm -f /tmp/pf_output.log
+    
+    - name: Test if expired backups are cleaned up
+      shell: bash
+      run: |
+        echo "Verifying expired backups are cleaned up..."
+        # pick up one backup name
+        backup_name=$(kubectl -n $DB_NS get backups -o jsonpath='{.items[0].metadata.name}')
+        # set expiration time to past
+        kubectl -n $DB_NS patch backup $backup_name --type='json' --type=merge --p='{"status":{"expiredAt":"2000-01-01T00:00:00Z"}}' --subresource=status
+        # wait for cleanup
+        MAX_RETRIES=10
+        SLEEP_INTERVAL=15
+        ITER=0
+        while [ $ITER -lt $MAX_RETRIES ]; do
+          backup_status=$(kubectl -n $DB_NS get backup $backup_name --ignore-not-found)
+          if [ -z "$backup_status" ]; then
+            echo "✓ Expired backup cleaned up successfully."
+            exit 0
+          else
+            echo "Backup $backup_name still exists. Retrying in $SLEEP_INTERVAL seconds..."
+            kubectl -n $DB_NS get backup $backup_name
+            sleep $SLEEP_INTERVAL
+          fi
+          ((++ITER))
+        done
+        echo "❌ Expired backup was not cleaned up within expected time."
+        exit 1  

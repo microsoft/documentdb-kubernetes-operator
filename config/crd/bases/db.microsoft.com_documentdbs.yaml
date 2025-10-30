@@ -48,6 +48,37 @@ spec:
           spec:
             description: DocumentDBSpec defines the desired state of DocumentDB.
             properties:
+              backup:
+                description: Backup configures backup settings for DocumentDB.
+                properties:
+                  retentionDays:
+                    default: 30
+                    description: |-
+                      RetentionDays specifies how many days backups should be retained.
+                      If not specified, the default retention period is 30 days.
+                    maximum: 365
+                    minimum: 1
+                    type: integer
+                type: object
+              bootstrap:
+                description: Bootstrap configures the initialization of the DocumentDB
+                  cluster.
+                properties:
+                  recovery:
+                    description: Recovery configures recovery from a backup.
+                    properties:
+                      backup:
+                        description: Backup specifies the source backup to restore
+                          from.
+                        properties:
+                          name:
+                            description: Name of the referent.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    type: object
+                type: object
               clusterReplication:
                 description: ClusterReplication configures cross-cluster replication
                   for DocumentDB.

@@ -334,8 +334,8 @@ spec:
   clusterReplication:
     primary: azure-cluster-name
     clusterList:
-      - azure-cluster-name
-      - on-prem-cluster-name
+      - name: azure-cluster-name
+      - name: on-prem-cluster-name
   exposeViaService:
     serviceType: ClusterIP
 
@@ -410,7 +410,7 @@ kubectl config use-context hub
 kubectl patch documentdb documentdb-preview -n documentdb-preview-ns \
   --type='json' -p='[
   {"op": "replace", "path": "/spec/clusterReplication/primary", "value":"on-prem-cluster-name"},
-  {"op": "replace", "path": "/spec/clusterReplication/clusterList", "value":["on-prem-cluster-name"]}
+  {"op": "replace", "path": "/spec/clusterReplication/clusterList", "value":[{"name": "on-prem-cluster-name"}]}
   ]'
 ```
 

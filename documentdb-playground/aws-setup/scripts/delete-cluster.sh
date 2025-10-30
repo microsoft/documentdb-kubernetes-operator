@@ -13,6 +13,7 @@ REGION="us-west-2"
 DELETE_CLUSTER="${DELETE_CLUSTER:-true}"
 DELETE_OPERATOR="${DELETE_OPERATOR:-true}"
 DELETE_INSTANCE="${DELETE_INSTANCE:-true}"
+SKIP_CONFIRMATION="false"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -37,6 +38,10 @@ while [[ $# -gt 0 ]]; do
             REGION="$2"
             shift 2
             ;;
+        -y|--yes)
+            SKIP_CONFIRMATION="true"
+            shift
+            ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
@@ -45,12 +50,14 @@ while [[ $# -gt 0 ]]; do
             echo "  --instance-and-operator Delete instances and operator (keep cluster)"
             echo "  --cluster-name NAME   EKS cluster name (default: documentdb-cluster)"
             echo "  --region REGION       AWS region (default: us-west-2)"
+            echo "  -y, --yes            Skip confirmation prompt"
             echo "  -h, --help           Show this help message"
             echo ""
             echo "Examples:"
             echo "  $0                                    # Delete everything (default)"
             echo "  $0 --instance-only                    # Delete only DocumentDB instances"
             echo "  $0 --instance-and-operator            # Delete instances and operator, keep cluster"
+            echo "  $0 --yes                              # Delete everything without confirmation"
             exit 0
             ;;
         *)
@@ -86,6 +93,11 @@ error() {
 
 # Confirmation prompt
 confirm_deletion() {
+    if [ "$SKIP_CONFIRMATION" == "true" ]; then
+        log "Skipping confirmation (--yes flag provided)"
+        return 0
+    fi
+    
     echo ""
     echo "======================================="
     echo "    DELETION WARNING"

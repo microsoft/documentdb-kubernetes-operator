@@ -10,7 +10,7 @@ from [`cnpg-i-machinery`](https://github.com/cloudnative-pg/cnpg-i-machinery) fo
 
 ## Running the plugin
 
-**To Build:** `go build -o bin/cnpg-i-sidecar-injector main.go`
+**To Build:** `make build`
 
 To see the plugin in execution, you need to have a Kubernetes cluster running
 (we'll use [Kind](https://kind.sigs.k8s.io)) and the

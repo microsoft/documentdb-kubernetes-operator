@@ -14,11 +14,12 @@ import (
 	pgTime "github.com/cloudnative-pg/machinery/pkg/postgres/time"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -277,7 +278,7 @@ func Promote(ctx context.Context, cli client.Client,
 	}
 
 	// Check if the Pod exist
-	var pod v1.Pod
+	var pod corev1.Pod
 	err = cli.Get(ctx, client.ObjectKey{Namespace: namespace, Name: serverName}, &pod)
 	if err != nil {
 		return fmt.Errorf("new primary node %s not found in namespace %s: %w", serverName, namespace, err)
@@ -310,10 +311,10 @@ func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdb
 			Namespace: namespace,
 		},
 		Spec: batchv1.JobSpec{
-			Template: v1.PodTemplateSpec{
-				Spec: v1.PodSpec{
-					RestartPolicy: v1.RestartPolicyNever,
-					Containers: []v1.Container{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers: []corev1.Container{
 						{
 							Name:  "sql-executor",
 							Image: documentdb.Spec.DocumentDBImage,
@@ -323,6 +324,21 @@ func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdb
 								"-U", "postgres",
 								"-d", "postgres",
 								"-c", sqlCommand,
+							},
+							Resources: corev1.ResourceRequirements{
+								Requests: corev1.ResourceList{
+									"cpu":    resource.MustParse(util.SQL_JOB_REQUESTS_CPU),
+									"memory": resource.MustParse(util.SQL_JOB_REQUESTS_MEMORY),
+								},
+								Limits: corev1.ResourceList{
+									"cpu":    resource.MustParse(util.SQL_JOB_LIMITS_CPU),
+									"memory": resource.MustParse(util.SQL_JOB_LIMITS_MEMORY),
+								},
+							},
+							SecurityContext: &corev1.SecurityContext{
+								RunAsUser:                ptr.To(int64(util.SQL_JOB_LINUX_UID)),
+								RunAsNonRoot:             ptr.To(util.SQL_JOB_RUN_AS_NON_ROOT),
+								AllowPrivilegeEscalation: ptr.To(util.SQL_JOB_ALLOW_PRIVILEGED),
 							},
 						},
 					},

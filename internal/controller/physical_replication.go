@@ -33,7 +33,7 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 ) error {
 	isPrimary := documentdb.Spec.ClusterReplication.Primary == replicationContext.Self
 
-	if replicationContext.IsKubeFleetNetworking() {
+	if replicationContext.IsAzureFleetNetworking() {
 		err := r.CreateServiceImportAndExport(ctx, replicationContext, documentdb)
 		if err != nil {
 			return err
@@ -96,7 +96,7 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 		Self:    replicationContext.Self,
 	}
 
-	if replicationContext.IsKubeFleetNetworking() {
+	if replicationContext.IsAzureFleetNetworking() {
 		// need to create services for each of the other clusters
 		cnpgCluster.Spec.Managed = &cnpgv1.ManagedConfiguration{
 			Services: &cnpgv1.ManagedServices{
@@ -127,7 +127,7 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 			},
 		},
 	}
-	for clusterName, serviceName := range replicationContext.GenerateExternalClusterServices(documentdb.Namespace, replicationContext.IsKubeFleetNetworking()) {
+	for clusterName, serviceName := range replicationContext.GenerateExternalClusterServices(documentdb.Namespace, replicationContext.IsAzureFleetNetworking()) {
 		cnpgCluster.Spec.ExternalClusters = append(cnpgCluster.Spec.ExternalClusters, cnpgv1.ExternalCluster{
 			Name: clusterName,
 			ConnectionParameters: map[string]string{
@@ -401,7 +401,7 @@ func (r *DocumentDBReconciler) ReadToken(ctx context.Context, namespace string, 
 	tokenServiceName := "promotion-token"
 
 	// If we are not using cross-cloud networking, we only need to read the token from the configmap
-	if !replicationContext.IsKubeFleetNetworking() && !replicationContext.IsIstioNetworking() {
+	if !replicationContext.IsAzureFleetNetworking() && !replicationContext.IsIstioNetworking() {
 		configMap := &corev1.ConfigMap{}
 		err := r.Get(ctx, types.NamespacedName{Name: tokenServiceName, Namespace: namespace}, configMap)
 		if err != nil {
@@ -467,7 +467,7 @@ func (r *DocumentDBReconciler) ReadToken(ctx context.Context, namespace string, 
 		return string(token[:]), nil, -1
 	}
 
-	// This is the KubeFleet case
+	// This is the AzureFleet case
 	foundMCS := &fleetv1alpha1.MultiClusterService{}
 	err := r.Get(ctx, types.NamespacedName{Name: tokenServiceName, Namespace: namespace}, foundMCS)
 	if err != nil && errors.IsNotFound(err) {
@@ -557,7 +557,7 @@ func (r *DocumentDBReconciler) CreateTokenService(ctx context.Context, token str
 	}
 
 	// When not using cross-cloud networking, just transfer with the configmap
-	if !replicationContext.IsKubeFleetNetworking() && !replicationContext.IsIstioNetworking() {
+	if !replicationContext.IsAzureFleetNetworking() && !replicationContext.IsIstioNetworking() {
 		return nil
 	}
 
@@ -632,7 +632,7 @@ func (r *DocumentDBReconciler) CreateTokenService(ctx context.Context, token str
 	}
 
 	// Create ServiceExport only for fleet networking
-	if replicationContext.IsKubeFleetNetworking() {
+	if replicationContext.IsAzureFleetNetworking() {
 		serviceExport := &fleetv1alpha1.ServiceExport{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      tokenServiceName,

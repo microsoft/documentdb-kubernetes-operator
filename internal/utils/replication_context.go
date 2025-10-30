@@ -28,9 +28,9 @@ type ReplicationContext struct {
 type crossCloudNetworkingStrategy string
 
 const (
-	None      crossCloudNetworkingStrategy = "None"
-	KubeFleet crossCloudNetworkingStrategy = "KubeFleet"
-	Istio     crossCloudNetworkingStrategy = "Istio"
+	None       crossCloudNetworkingStrategy = "None"
+	AzureFleet crossCloudNetworkingStrategy = "AzureFleet"
+	Istio      crossCloudNetworkingStrategy = "Istio"
 )
 
 type replicationState int32
@@ -236,8 +236,8 @@ func GetSelfName(ctx context.Context, client client.Client) (string, error) {
 	return self, nil
 }
 
-func (r *ReplicationContext) IsKubeFleetNetworking() bool {
-	return r.CrossCloudNetworkingStrategy == KubeFleet
+func (r *ReplicationContext) IsAzureFleetNetworking() bool {
+	return r.CrossCloudNetworkingStrategy == AzureFleet
 }
 
 func (r *ReplicationContext) IsIstioNetworking() bool {

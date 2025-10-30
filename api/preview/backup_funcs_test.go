@@ -36,11 +36,6 @@ var _ = Describe("Backup", func() {
 			}
 
 			cnpg, err := backup.CreateCNPGBackup(scheme)
-			// print out error
-			if err != nil {
-				Fail(err.Error())
-			}
-
 			Expect(err).To(BeNil())
 			Expect(cnpg).ToNot(BeNil())
 

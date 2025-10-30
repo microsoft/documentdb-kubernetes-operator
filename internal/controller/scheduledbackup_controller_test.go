@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -26,13 +27,15 @@ var _ = Describe("ScheduledBackup Controller", func() {
 	)
 
 	var (
-		ctx    context.Context
-		scheme *runtime.Scheme
+		ctx      context.Context
+		scheme   *runtime.Scheme
+		recorder record.EventRecorder
 	)
 
 	BeforeEach(func() {
 		ctx = context.Background()
 		scheme = runtime.NewScheme()
+		recorder = record.NewFakeRecorder(10)
 		Expect(dbpreview.AddToScheme(scheme)).To(Succeed())
 	})
 
@@ -63,8 +66,9 @@ var _ = Describe("ScheduledBackup Controller", func() {
 			Build()
 
 		reconciler := &ScheduledBackupReconciler{
-			Client: fakeClient,
-			Scheme: scheme,
+			Client:   fakeClient,
+			Scheme:   scheme,
+			Recorder: recorder,
 		}
 
 		result, err := reconciler.Reconcile(ctx, reconcile.Request{

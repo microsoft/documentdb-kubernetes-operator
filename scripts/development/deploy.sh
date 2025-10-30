@@ -11,6 +11,7 @@ TAG=${TAG:-"0.1.1"}
 SKIP_KIND_SETUP=${SKIP_KIND_SETUP:-"false"}
 SKIP_CERT_MANAGER=${SKIP_CERT_MANAGER:-"false"}
 DEPLOY_CLUSTER=${DEPLOY_CLUSTER:-"false"}
+DEPLOY=${DEPLOY:-"false"}
 DEPLOYMENT_METHOD=${DEPLOYMENT_METHOD:-"helm"}  # "helm" or "kustomize"
 
 echo "=== DocumentDB Kubernetes Operator Deployment Script ==="
@@ -19,6 +20,7 @@ echo "Operator Image: ${OPERATOR_IMAGE}:${TAG}"
 echo "Plugin Image: ${PLUGIN_IMAGE}:${TAG}"
 echo "Deployment Method: ${DEPLOYMENT_METHOD}"
 echo "Deploy DocumentDB Cluster: ${DEPLOY_CLUSTER}"
+echo "Deploy DocumentDB Operator: ${DEPLOY}"
 echo ""
 
 # Function to setup Kind cluster with registry
@@ -246,6 +248,20 @@ deploy_with_helm() {
     
     # Make sure the script is executable
     chmod +x scripts/operator/install_operator.sh
+
+    if helm status documentdb-operator -n documentdb-operator >/dev/null 2>&1; then
+        echo "Existing DocumentDB operator release detected; uninstalling before redeploying..."
+        if [ ! -f "scripts/operator/uninstall_operator.sh" ]; then
+            echo "Error: scripts/operator/uninstall_operator.sh not found"
+            exit 1
+        fi
+        chmod +x scripts/operator/uninstall_operator.sh
+        if ! ./scripts/operator/uninstall_operator.sh; then
+            echo "Error: Failed to uninstall existing DocumentDB operator release"
+            exit 1
+        fi
+        echo "Previous DocumentDB operator release uninstalled"
+    fi
     
     # Set environment variables for the Helm deployment
     export VERSION="1"
@@ -319,7 +335,7 @@ deploy_to_cluster() {
     # Show deployment status
     echo ""
     echo "Checking deployment status..."
-documentdb-operator    kubectl get pods -n  || echo "No pods found in documentdb-operator namespace yet"
+    kubectl get pods -n documentdb-operator || echo "No pods found in documentdb-operator namespace yet"
     
     # Show cert-manager status
     echo ""
@@ -370,7 +386,7 @@ show_helpful_commands() {
         echo "Connect to DocumentDB using mongosh client:"
         echo "  kubectl exec -it deployment/mongosh-client -n documentdb-preview-ns -- sh"
         echo "  # Then inside the container:"
-        echo "  mongosh \"mongodb://\$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.username}' | base64 -d):\$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.password}' | base64 -d)@documentdb-preview-rw:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0\""
+        echo "  mongosh \"mongodb://\$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.username}' | base64 -d):\$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.password}' | base64 -d)@documentdb-service-documentdb-preview:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0\""
         echo ""
         echo "Port forward for external access:"
         echo "  kubectl port-forward pod/documentdb-preview-1 10260:10260 -n documentdb-preview-ns"

@@ -163,7 +163,7 @@ jobs:
         fi
 
         echo "Verifying inserted test data..."
-        count=$(mongosh --quiet -u $DB_USERNAME -p $DB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates --eval "db.testCollection.countDocuments({})")
+        count=$(mongosh 127.0.0.1:$DB_PORT --quiet --eval "db.testCollection.countDocuments({})" -u $DB_USERNAME -p $DB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates)
         if [[ "$count" -eq 100 ]]; then
           echo "✓ Test data verification completed successfully on ${{ matrix.architecture }}"
         else
@@ -241,7 +241,7 @@ jobs:
           exit 1
         fi
 
-        count=$(mongosh --quiet -u $DB_USERNAME -p $DB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates --eval "db.testCollection.countDocuments({})"
+        count=$(mongosh 127.0.0.1:$DB_PORT --quiet --eval "db.testCollection.countDocuments({})" -u $DB_USERNAME -p $DB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates)
         if [[ "$count" -eq 0 ]]; then
           echo "✓ Test data deletion verified successfully on ${{ matrix.architecture }}"
         else
@@ -307,7 +307,7 @@ jobs:
     - name: Validate restored data
       run: |
         # Validate that the restored cluster has the expected data
-        count=$(mongosh --quiet --eval "db.testCollection.countDocuments({})" 127.0.0.1:$DB_PORT -u $DB_USERNAME -p $DB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates)
+        count=$(mongosh 127.0.0.1:$DB_PORT --quiet --eval "db.testCollection.countDocuments({})" -u $DB_USERNAME -p $DB_PASSWORD --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates)
         if [ "$count" -eq 100 ]; then
           echo "✓ Data validation completed successfully on ${{ matrix.architecture }}"
         else

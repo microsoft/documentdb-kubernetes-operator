@@ -338,7 +338,7 @@ jobs:
         # pick up one backup name
         backup_name=$(kubectl -n $DB_NS get backups -o jsonpath='{.items[0].metadata.name}')
         # set expiration time to past
-        kubectl -n $DB_NS patch backup $backup_name --type='json' --type=merge --p='{"status":{"expiredAt":"2000-01-01T00:00:00Z"}}' --subresource=status
+        kubectl -n $DB_NS patch backup $backup_name --type='json' --type=merge -p='{"status":{"expiredAt":"2000-01-01T00:00:00Z"}}' --subresource=status
         # wait for cleanup
         MAX_RETRIES=10
         SLEEP_INTERVAL=15

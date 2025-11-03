@@ -8,7 +8,7 @@ if [ $# -eq 0 ]; then
 fi
 
 VERSION=$1
-CHART_FILE="../documentdb-helm-chart/Chart.yaml"
+CHART_FILE="../../documentdb-helm-chart/Chart.yaml"
 
 echo "🔄 Updating Chart.yaml to version $VERSION"
 
@@ -21,7 +21,7 @@ grep -E "^(version|appVersion):" $CHART_FILE
 
 echo ""
 echo "🎯 Next steps:"
-echo "   helm package ../documentdb-helm-chart"
+echo "   helm package ../../documentdb-helm-chart"
 echo "   git add $CHART_FILE"
 echo "   git commit -m 'Bump version to $VERSION'"
 echo "   git tag v$VERSION"

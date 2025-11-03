@@ -59,7 +59,7 @@ jobs:
           --build-arg ARCH=${{ matrix.base_arch }} \
           --tag ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/operator:${{ env.IMAGE_TAG }}-${{ matrix.arch }} \
           --load \
-          -f operator/Dockerfile operator/
+          -f operator/src/Dockerfile operator/src/
         
         echo "✓ Operator Docker image built successfully for ${{ matrix.arch }}"
 

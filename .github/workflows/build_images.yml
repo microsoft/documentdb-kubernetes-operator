@@ -30,8 +30,8 @@ jobs:
         arch: [amd64, arm64]
         image:
           - name: operator
-            dockerfile: Dockerfile
-            context: .
+            dockerfile: operator/src/Dockerfile
+            context: operator/src/
           - name: sidecar
             dockerfile: operator/cnpg-plugins/sidecar-injector/Dockerfile
             context: operator/cnpg-plugins/sidecar-injector/

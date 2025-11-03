@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# filepath: /Users/geeichbe/Projects/documentdb-kubernetes-operator/scripts/aks-fleet-deployment/deploy-multi-region.sh
+# filepath: /operator/src/scripts/aks-fleet-deployment/deploy-multi-region.sh
 set -euo pipefail
 
 # Deploy multi-region DocumentDB using Fleet with Traffic Manager

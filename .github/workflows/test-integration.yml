@@ -127,8 +127,8 @@ jobs:
     - name: Test connection with mongosh
       run: |
         echo "Testing connection with mongosh on ${{ matrix.architecture }} architecture..."
-        chmod +x operator/scripts/test-scripts/test-mongodb-connection.sh
-        ./operator/scripts/test-scripts/test-mongodb-connection.sh \
+        chmod +x operator/src/scripts/test-scripts/test-mongodb-connection.sh
+        ./operator/src/scripts/test-scripts/test-mongodb-connection.sh \
           --architecture "${{ matrix.architecture }}" \
           --namespace "${{ env.DB_NS }}" \
           --cluster-name "${{ env.DB_NAME }}" \
@@ -141,8 +141,8 @@ jobs:
     - name: Test with Python PyMongo client
       run: |
         echo "Testing with Python PyMongo client on ${{ matrix.architecture }} architecture..."
-        chmod +x operator/scripts/test-scripts/test-python-pymongo.sh
-        ./operator/scripts/test-scripts/test-python-pymongo.sh \
+        chmod +x operator/src/scripts/test-scripts/test-python-pymongo.sh
+        ./operator/src/scripts/test-scripts/test-python-pymongo.sh \
           --architecture "${{ matrix.architecture }}" \
           --namespace "${{ env.DB_NS }}" \
           --cluster-name "${{ env.DB_NAME }}" \

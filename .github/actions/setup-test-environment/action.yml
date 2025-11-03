@@ -276,8 +276,8 @@ runs:
     - name: Deploy CSI driver
       shell: bash
       run: |
-        chmod +x ./scripts/test-scripts/deploy-csi-driver.sh
-        ./scripts/test-scripts/deploy-csi-driver.sh
+        chmod +x ./operator/src/scripts/test-scripts/deploy-csi-driver.sh
+        ./operator/src/scripts/test-scripts/deploy-csi-driver.sh
   
     - name: Install cert-manager
       shell: bash

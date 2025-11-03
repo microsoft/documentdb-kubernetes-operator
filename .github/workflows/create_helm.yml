@@ -9,7 +9,7 @@ on:
         default: '0.0.1'
 
 env:
-  CHART_NAME: documentdb-chart
+  CHART_NAME: operator/documentdb-helm-chart
   CHART_VERSION: ${{ github.event.inputs.chart_version || '0.0.1' }}
   GHCR_REPO: ghcr.io/${{ github.repository_owner }}
 
@@ -29,7 +29,7 @@ jobs:
 
       - name: Package Helm chart
         run: |
-          helm dependency update documentdb-chart
+          helm dependency update operator/documentdb-helm-chart
           helm package $CHART_NAME --version $CHART_VERSION
 
       - name: Log in to GHCR

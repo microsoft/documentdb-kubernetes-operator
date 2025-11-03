@@ -9,14 +9,14 @@ This document contains detailed command examples and scripts for DocumentDB oper
 **Pre-upgrade validation:**
 ```bash
 # Pre-upgrade validation (Database Admin)
-helm upgrade documentdb-operator ./documentdb-chart \
+helm upgrade documentdb-operator ./operator/documentdb-helm-chart \
   --namespace documentdb-system \
   --version v2.0.0 \
   --dry-run \
   --debug
 
 # Infrastructure upgrade execution (Database Admin)
-helm upgrade documentdb-operator ./documentdb-chart \
+helm upgrade documentdb-operator ./operator/documentdb-helm-chart \
   --namespace documentdb-system \
   --version v2.0.0 \
   --wait \
@@ -198,7 +198,7 @@ kubectl get documentdb -A -o jsonpath='{.items[?(@.apiVersion=="db.microsoft.com
 **Phase 1: Database Admin Infrastructure Upgrade**
 ```bash
 # Infrastructure upgrade: operator v1 → v2
-helm upgrade documentdb-operator ./documentdb-chart --version v2.0.0
+helm upgrade documentdb-operator ./operator/documentdb-helm-chart --version v2.0.0
 
 # Verify multi-version support
 kubectl get crd documentdbs.db.microsoft.com -o jsonpath='{.spec.versions[*].name}'
@@ -231,7 +231,7 @@ kubectl get documentdb my-cluster -o jsonpath='{.apiVersion}'
 **Phase 1: Database Admin Infrastructure Upgrade**
 ```bash
 # Infrastructure upgrade: operator v2 → v3
-helm upgrade documentdb-operator ./documentdb-chart --version v3.0.0
+helm upgrade documentdb-operator ./operator/documentdb-helm-chart --version v3.0.0
 
 # Check API version support with deprecation warnings
 kubectl get crd documentdbs.db.microsoft.com -o jsonpath='{.spec.versions[*].name}'
@@ -292,7 +292,7 @@ done
 **Phase 1: Database Admin Infrastructure Upgrade**
 ```bash
 # Infrastructure upgrade: operator v3 → v4 (removes v1 API support)
-helm upgrade documentdb-operator ./documentdb-chart --version v4.0.0
+helm upgrade documentdb-operator ./operator/documentdb-helm-chart --version v4.0.0
 
 # Verify API support (v1 no longer supported)
 kubectl get crd documentdbs.db.microsoft.com -o jsonpath='{.spec.versions[*].name}'
@@ -387,7 +387,7 @@ migrate_and_test "legacy-cluster" "v2"
 
 **Infrastructure upgrade validation:**
 ```bash
-helm upgrade documentdb-operator ./documentdb-chart \
+helm upgrade documentdb-operator ./operator/documentdb-helm-chart \
   --namespace documentdb-system \
   --version v1.3.0 \
   --dry-run \
@@ -396,7 +396,7 @@ helm upgrade documentdb-operator ./documentdb-chart \
 
 **Infrastructure upgrade execution:**
 ```bash
-helm upgrade documentdb-operator ./documentdb-chart \
+helm upgrade documentdb-operator ./operator/documentdb-helm-chart \
   --namespace documentdb-system \
   --version v1.3.0 \
   --wait \

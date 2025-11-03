@@ -151,16 +151,18 @@ done
 
 echo "Port-forward is ready, running Python tests..."
 
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Run the existing Python test script and validate it completes successfully
-cd scripts/test-scripts
 echo "Running existing Python test script on $ARCHITECTURE..."
-if python3 mongo-python-data-pusher.py; then
+echo "Using Python script: $SCRIPT_DIR/mongo-python-data-pusher.py"
+if python3 "$SCRIPT_DIR/mongo-python-data-pusher.py"; then
     echo "✓ Existing Python test script completed successfully on $ARCHITECTURE"
 else
     echo "❌ Existing Python test script failed on $ARCHITECTURE"
     exit 1
 fi
-cd - > /dev/null
 
 # Create and run comprehensive additional Python tests
 cat > additional_test.py << EOF

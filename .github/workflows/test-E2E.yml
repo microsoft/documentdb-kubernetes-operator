@@ -177,7 +177,7 @@ jobs:
           --authenticationMechanism SCRAM-SHA-256 \
           --tls \
           --tlsAllowInvalidCertificates \
-          --file scripts/test-scripts/comprehensive_mongosh_tests.js; then
+          --file operator/src/scripts/test-scripts/comprehensive_mongosh_tests.js; then
           echo "✓ Comprehensive mongosh tests completed successfully on ${{ matrix.architecture }}"
         else
           echo "❌ Comprehensive mongosh tests failed on ${{ matrix.architecture }}"
@@ -220,7 +220,7 @@ jobs:
           --authenticationMechanism SCRAM-SHA-256 \
           --tls \
           --tlsAllowInvalidCertificates \
-          --file scripts/test-scripts/performance_test.js; then
+          --file operator/src/scripts/test-scripts/performance_test.js; then
           echo "✓ Performance tests completed successfully on ${{ matrix.architecture }}"
         else
           echo "❌ Performance tests failed on ${{ matrix.architecture }}"

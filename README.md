@@ -64,7 +64,7 @@ For convenient access from within the Kubernetes cluster, you can deploy a mongo
 Deploy the mongosh client:
 
 ```sh
-kubectl apply -f scripts/deployment-examples/mongosh-client.yaml
+kubectl apply -f operator/src/scripts/deployment-examples/mongosh-client.yaml
 ```
 
 Wait for the pod to be ready:
@@ -165,7 +165,7 @@ In addition to `mongosh`, you can also use the sample Python program (that uses 
 
 ```sh
 git clone https://github.com/microsoft/documentdb-kubernetes-operator
-cd documentdb-kubernetes-operator/scripts/test-scripts
+cd documentdb-kubernetes-operator/operator/src/scripts/test-scripts
 
 pip3 install pymongo
 
@@ -251,7 +251,8 @@ documentdb-service-documentdb-preview   LoadBalancer   10.0.228.243   52.149.56.
 git clone https://github.com/microsoft/documentdb-kubernetes-operator.git
 cd documentdb-kubernetes-operator
 
-# Build the operator
+# Build the operator (from the operator/src directory)
+cd operator/src
 make build
 
 # Run tests

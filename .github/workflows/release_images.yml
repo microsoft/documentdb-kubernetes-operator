@@ -76,7 +76,7 @@ jobs:
       id-token: write
       packages: write
     env:
-      CHART_NAME: documentdb-chart
+      CHART_NAME: operator/documentdb-helm-chart
       GHCR_REPO: ghcr.io/${{ github.repository_owner }}
     steps:
       - name: Checkout code
@@ -89,9 +89,9 @@ jobs:
         if: ${{ github.event.inputs.target_tag != 'preview' }}
         run: |
           echo "Updating values.yaml with target tag: ${{ github.event.inputs.target_tag }}"
-          sed -i 's/tag: preview/tag: ${{ github.event.inputs.target_tag }}/g' documentdb-chart/values.yaml
+          sed -i 's/tag: preview/tag: ${{ github.event.inputs.target_tag }}/g' operator/documentdb-helm-chart/values.yaml
           echo "Updated values.yaml content:"
-          cat documentdb-chart/values.yaml
+          cat operator/documentdb-helm-chart/values.yaml
 
       - name: Set chart version
         run: |
@@ -104,7 +104,7 @@ jobs:
 
       - name: Package Helm chart
         run: |
-          helm dependency update documentdb-chart
+          helm dependency update operator/documentdb-helm-chart
           helm package $CHART_NAME --version $CHART_VERSION
 
       - name: Log in to GHCR

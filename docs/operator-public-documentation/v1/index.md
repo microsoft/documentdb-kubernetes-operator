@@ -306,7 +306,7 @@ In addition to `mongosh`, you can also use the sample Python program (that uses 
 
 ```sh
 git clone https://github.com/microsoft/documentdb-kubernetes-operator
-cd documentdb-kubernetes-operator/scripts/test-scripts
+cd documentdb-kubernetes-operator/operator/src/scripts/test-scripts
 
 pip3 install pymongo
 

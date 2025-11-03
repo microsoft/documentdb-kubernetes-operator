@@ -10,7 +10,7 @@ set -euo pipefail
 
 RESOURCE_GROUP="${RESOURCE_GROUP:-german-aks-fleet-rg}"
 HUB_CONTEXT=${HUB_CONTEXT:-hub}
-CHART_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/documentdb-chart"
+CHART_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../" && pwd)/documentdb-helm-chart"
 VERSION="${VERSION:-200}"
 VALUES_FILE="${VALUES_FILE:-}"
 

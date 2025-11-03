@@ -130,7 +130,7 @@ image:
 ### **Development:**
 ```bash
 # Use component tags for testing
-helm upgrade documentdb-operator ./developer-tooling/documentdb-helm-chart \
+helm upgrade documentdb-operator ./operator/documentdb-helm-chart \
   --set image.documentdbk8soperator.tag=preview \
   --set image.sidecarinjector.tag=dev-branch
 ```
@@ -138,18 +138,18 @@ helm upgrade documentdb-operator ./developer-tooling/documentdb-helm-chart \
 ### **Staging:**
 ```bash
 # Use global version for consistency
-helm upgrade documentdb-operator ./developer-tooling/documentdb-helm-chart \
+helm upgrade documentdb-operator ./operator/documentdb-helm-chart \
   --set documentDbVersion=0.1.1
 ```
 
 ### **Production:**
 ```bash
 # Default versions from Chart.yaml
-helm upgrade documentdb-operator ./developer-tooling/documentdb-helm-chart
+helm upgrade documentdb-operator ./operator/documentdb-helm-chart
 ```
 
 **Adding Version Constraint:**
 ```bash
-helm upgrade documentdb-operator ./developer-tooling/documentdb-helm-chart \
+helm upgrade documentdb-operator ./operator/documentdb-helm-chart \
   --set documentDbVersion=0.1.2
 ```

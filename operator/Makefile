@@ -47,7 +47,7 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
-	cp -f config/crd/bases/*.yaml ../developer-tooling/documentdb-helm-chart/crds/
+	cp -f config/crd/bases/*.yaml documentdb-helm-chart/crds/
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -146,7 +146,7 @@ PLUGIN_PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/am
 .PHONY: build-kubectl-plugin
 build-kubectl-plugin: ## Build the kubectl-documentdb plugin for the host platform.
 	mkdir -p bin
-	cd ../developer-tooling/documentdb-kubectl-plugin && go build -o $(CURDIR)/bin/$(PLUGIN_NAME) .
+	cd ../documentdb-kubectl-plugin && go build -o $(CURDIR)/bin/$(PLUGIN_NAME) .
 
 .PHONY: package-kubectl-plugin
 package-kubectl-plugin: ## Build cross-platform archives for the kubectl-documentdb plugin.
@@ -159,7 +159,7 @@ package-kubectl-plugin: ## Build cross-platform archives for the kubectl-documen
 		if [ "$$os" = "windows" ]; then ext=".exe"; fi; \
 		tmpdir=$$(mktemp -d); \
 		echo "Building $(PLUGIN_NAME) for $$os/$$arch"; \
-		( cd ../developer-tooling/documentdb-kubectl-plugin && GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -o $$tmpdir/$(PLUGIN_NAME)$$ext . ); \
+		( cd ../documentdb-kubectl-plugin && GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -o $$tmpdir/$(PLUGIN_NAME)$$ext . ); \
 		cp LICENSE $$tmpdir/; \
 		printf "kubectl-documentdb plugin bundle\n\nInstall: place $(PLUGIN_NAME)%s on your PATH (for example ~/.local/bin) and ensure it is executable.\nUsage: run 'kubectl documentdb --help'.\nDocumentation: https://github.com/microsoft/documentdb-kubernetes-operator/blob/main/docs/kubectl-plugin.md\n" "$$ext" > $$tmpdir/README.txt; \
 		tar -C $$tmpdir -czf $(PLUGIN_DIST_DIR)/$(PLUGIN_NAME)-$$os-$$arch.tar.gz $(PLUGIN_NAME)$$ext LICENSE README.txt; \

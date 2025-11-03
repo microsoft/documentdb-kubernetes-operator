@@ -280,7 +280,7 @@ az aks get-credentials --resource-group german-aks-fleet-rg \
 
 If the operator crashes with "exec format error":
 1. Check the image architecture matches your nodes (amd64)
-2. Review `documentdb-chart/values.yaml` for correct image settings
+2. Review `developer-tooling/documentdb-helm-chart/values.yaml` for correct image settings
 3. Ensure `forceArch: amd64` is set in values.yaml
 
 ### Fleet Resource Propagation

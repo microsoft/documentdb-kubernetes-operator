@@ -223,7 +223,7 @@ build_push_plugin() {
     echo "Building plugin Docker image..."
     
     # Change to plugin directory and build
-    cd plugins/sidecar-injector
+    cd cnpg-plugins/sidecar-injector
     
     IMG="${PLUGIN_IMAGE}:${TAG}" make docker-build
     
@@ -416,8 +416,8 @@ show_helpful_commands() {
 # Main execution
 main() {
     # Check if we're in the right directory
-    if [ ! -f "Makefile" ] || [ ! -d "plugins/sidecar-injector" ]; then
-        echo "Error: This script must be run from the root of the documentdb-kubernetes-operator repository"
+    if [ ! -f "Makefile" ] || [ ! -d "cnpg-plugins/sidecar-injector" ]; then
+        echo "Error: This script must be run from the operator directory of the documentdb-kubernetes-operator repository"
         exit 1
     fi
     

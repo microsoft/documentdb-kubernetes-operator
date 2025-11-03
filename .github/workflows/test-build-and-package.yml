@@ -26,7 +26,7 @@ permissions:
 
 env:
   IMAGE_TAG: ${{ inputs.image_tag_prefix }}-${{ github.run_id }}
-  CHART_NAME: documentdb-chart
+  CHART_NAME: developer-tooling/documentdb-helm-chart
   CHART_VERSION: ${{ inputs.chart_version_prefix }}-${{ github.run_id }}
 
 jobs:
@@ -59,7 +59,7 @@ jobs:
           --build-arg ARCH=${{ matrix.base_arch }} \
           --tag ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/operator:${{ env.IMAGE_TAG }}-${{ matrix.arch }} \
           --load \
-          -f Dockerfile .
+          -f operator/Dockerfile operator/
         
         echo "✓ Operator Docker image built successfully for ${{ matrix.arch }}"
 
@@ -105,7 +105,7 @@ jobs:
           --build-arg ARCH=${{ matrix.base_arch }} \
           --tag ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/sidecar:${{ env.IMAGE_TAG }}-${{ matrix.arch }} \
           --load \
-          -f plugins/sidecar-injector/Dockerfile plugins/sidecar-injector/
+          -f operator/cnpg-plugins/sidecar-injector/Dockerfile operator/cnpg-plugins/sidecar-injector/
         
         echo "✓ Sidecar Docker image built successfully for ${{ matrix.arch }}"
 
@@ -231,7 +231,7 @@ jobs:
     - name: Update Helm chart with platform-specific image references
       run: |
         # Create platform-specific chart directory
-        cp -r documentdb-chart documentdb-chart-${{ matrix.arch }}
+        cp -r developer-tooling/documentdb-helm-chart documentdb-chart-${{ matrix.arch }}
         
         # Update the operator image tag and repository in values.yaml for this platform
         sed -i '/documentdbk8soperator:/,/tag:/ s|tag:.*|tag: \"${{ env.IMAGE_TAG }}-${{ matrix.arch }}\"|' documentdb-chart-${{ matrix.arch }}/values.yaml

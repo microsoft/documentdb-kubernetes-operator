@@ -33,8 +33,8 @@ jobs:
             dockerfile: Dockerfile
             context: .
           - name: sidecar
-            dockerfile: plugins/sidecar-injector/Dockerfile
-            context: plugins/sidecar-injector/
+            dockerfile: operator/cnpg-plugins/sidecar-injector/Dockerfile
+            context: operator/cnpg-plugins/sidecar-injector/
           - name: documentdb
             dockerfile: .github/dockerfiles/Dockerfile_docdb
             context: .

@@ -58,4 +58,4 @@ The plugin never modifies kubeconfig files; it only reads them through `client-g
 
 ## Contributing
 
-The plugin is a standalone Go module located in `plugins/documentdb-kubectl-plugin`. Use the Makefile targets above to rebuild after code changes. Unit tests for the plugin should live alongside the command implementations under `plugins/documentdb-kubectl-plugin/cmd`.
+The plugin is a standalone Go module located in `developer-tooling/documentdb-kubectl-plugin`. Use the Makefile targets above to rebuild after code changes. Unit tests for the plugin should live alongside the command implementations under `developer-tooling/documentdb-kubectl-plugin/cmd`.

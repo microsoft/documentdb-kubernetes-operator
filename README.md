@@ -26,6 +26,8 @@ For comprehensive documentation, installation guides, configuration options, and
 ### Quick Links
 
 - [Installation Guide](https://microsoft.github.io/documentdb-kubernetes-operator/v1/#quickstart)
+- [Advanced Configuration](docs/operator-public-documentation/v1/advanced-configuration/README.md)
+  - [TLS Configuration](documentdb-playground/tls/README.md) - Automated TLS setup with simple commands
 
 ## 🔗 Connecting to DocumentDB
 

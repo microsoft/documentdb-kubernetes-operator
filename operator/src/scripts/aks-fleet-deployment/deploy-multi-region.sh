@@ -80,9 +80,11 @@ echo "Selected primary cluster: $PRIMARY_CLUSTER"
 CLUSTER_LIST=""
 for cluster in "${CLUSTER_ARRAY[@]}"; do
   if [ -z "$CLUSTER_LIST" ]; then
-    CLUSTER_LIST="      - ${cluster}"
+    CLUSTER_LIST="      - name: ${cluster}"
+    CLUSTER_LIST="${CLUSTER_LIST}"$'\n'"        environment: aks"
   else
-    CLUSTER_LIST="${CLUSTER_LIST}"$'\n'"      - ${cluster}"
+    CLUSTER_LIST="${CLUSTER_LIST}"$'\n'"      - name: ${cluster}"
+    CLUSTER_LIST="${CLUSTER_LIST}"$'\n'"        environment: aks"
   fi
 done
 

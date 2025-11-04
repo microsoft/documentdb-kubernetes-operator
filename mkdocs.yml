@@ -1,13 +1,16 @@
 site_name: DocumentDB-Kubernetes-Operator
 repo_url: https://github.com/microsoft/documentdb-kubernetes-operator
+docs_dir: docs
 theme:
   name: readthedocs
 
 nav:
-  - Version 1.0:
-      - Get Started: v1/index.md
+  - Home: operator-public-documentation/index.md
+  - Version 1:
+      - Get Started: operator-public-documentation/v1/index.md
+      - Advanced Configuration: operator-public-documentation/v1/advanced-configuration/README.md
   - Tools:
-      - Kubectl Plugin: kubectl-plugin.md
+      - Kubectl Plugin: ../documentdb-kubectl-plugin/kubectl-plugin.md
 
 plugins:
   - search

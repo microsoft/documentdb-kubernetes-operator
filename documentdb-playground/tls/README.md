@@ -470,15 +470,15 @@ kubectl get svc -n documentdb-preview-ns
 
 ## Additional Resources
 
-- [Complete End-to-End Validation Guide](../../docs/gateway-tls-validation.md)
-- [Provided Mode Detailed Setup](../../docs/provided-mode-test.md)
-- [DocumentDB Operator Documentation](https://microsoft.github.io/documentdb-kubernetes-operator)
-- [cert-manager Documentation](https://cert-manager.io/docs/)
-- [Azure Key Vault CSI Driver](https://azure.github.io/secrets-store-csi-driver-provider-azure/)
+- [E2E Testing Guide](E2E-TESTING.md) - Comprehensive automated and manual testing procedures
+- [Advanced Configuration](../../docs/operator-public-documentation/v1/advanced-configuration/README.md) - Production configurations and best practices
+- [DocumentDB Operator Documentation](https://microsoft.github.io/documentdb-kubernetes-operator) - Complete operator documentation
+- [cert-manager Documentation](https://cert-manager.io/docs/) - Certificate management
+- [Azure Key Vault CSI Driver](https://azure.github.io/secrets-store-csi-driver-provider-azure/) - Azure secrets integration
 
 ## Support
 
 For issues or questions:
 - Create an [issue](https://github.com/microsoft/documentdb-kubernetes-operator/issues)
 - Check [documentation](https://microsoft.github.io/documentdb-kubernetes-operator)
-- Review [troubleshooting guide](../../docs/gateway-tls-validation.md#troubleshooting)
+- Review [E2E Testing Guide](E2E-TESTING.md#troubleshooting) for troubleshooting

@@ -1142,10 +1142,10 @@ SUBSCRIPTION_ID="$AZURE_SUBSCRIPTION_ID"
 
 ## Additional Resources
 
-- [Main README](../README.md)
-- [Gateway TLS Validation](../../docs/gateway-tls-validation.md)
-- [Provided Mode Setup](../../docs/provided-mode-test.md)
-- [Advanced Configuration](../../docs/operator-public-documentation/v1/advanced-configuration/README.md)
+- [TLS Setup Guide](README.md) - Main TLS configuration documentation
+- [Advanced Configuration](../../docs/operator-public-documentation/v1/advanced-configuration/README.md) - Production configurations
+- [Project Documentation](../../docs/operator-public-documentation/index.md) - Full operator documentation
+- [GitHub Repository](https://github.com/microsoft/documentdb-kubernetes-operator) - Source code and issues
 
 ---
 

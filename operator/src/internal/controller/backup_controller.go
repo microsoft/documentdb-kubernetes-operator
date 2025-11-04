@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
+	util "github.com/microsoft/documentdb-operator/internal/utils"
 )
 
 // BackupReconciler reconciles a Backup object
@@ -82,7 +83,18 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 	if err := r.Get(ctx, cnpgBackupKey, cnpgBackup); err != nil {
 		if apierrors.IsNotFound(err) {
-			return r.createCNPGBackup(ctx, backup, cluster.Spec.Backup)
+
+			// Skip backup if the cluster is not primary
+			replicationContext, err := util.GetReplicationContext(ctx, r.Client, *cluster)
+			if err != nil {
+				logger.Error(err, "Failed to determine replication context")
+				return ctrl.Result{}, err
+			}
+			if !replicationContext.IsPrimary() {
+				return r.SetBackupPhaseSkipped(ctx, backup, "Backups can only be created from the primary cluster", cluster.Spec.Backup)
+			}
+
+			return r.createCNPGBackup(ctx, backup, cluster)
 		}
 		logger.Error(err, "Failed to get CNPG Backup")
 		return ctrl.Result{}, err
@@ -155,14 +167,19 @@ func buildVolumeSnapshotClass(environment string) *snapshotv1.VolumeSnapshotClas
 }
 
 // createCNPGBackup creates a new CNPG Backup resource
-func (r *BackupReconciler) createCNPGBackup(ctx context.Context, backup *dbpreview.Backup, backupConfiguration *dbpreview.BackupConfiguration) (ctrl.Result, error) {
-	cnpgBackup, err := backup.CreateCNPGBackup(r.Scheme)
+func (r *BackupReconciler) createCNPGBackup(ctx context.Context, backup *dbpreview.Backup, cluster *dbpreview.DocumentDB) (ctrl.Result, error) {
+	cnpgClusterName := cluster.Name
+	if cluster.Spec.ClusterReplication != nil && cluster.Spec.ClusterReplication.Primary != "" {
+		cnpgClusterName = cluster.Spec.ClusterReplication.Primary
+	}
+
+	cnpgBackup, err := backup.CreateCNPGBackup(r.Scheme, cnpgClusterName)
 	if err != nil {
-		return r.SetBackupPhaseFailed(ctx, backup, "Failed to initialize backup: "+err.Error(), backupConfiguration)
+		return r.SetBackupPhaseFailed(ctx, backup, "Failed to initialize backup: "+err.Error(), cluster.Spec.Backup)
 	}
 
 	if err := r.Create(ctx, cnpgBackup); err != nil {
-		return r.SetBackupPhaseFailed(ctx, backup, "Failed to initialize backup: "+err.Error(), backupConfiguration)
+		return r.SetBackupPhaseFailed(ctx, backup, "Failed to initialize backup: "+err.Error(), cluster.Spec.Backup)
 	}
 
 	r.Recorder.Event(backup, "Normal", "BackupInitialized", "Successfully initialized backup")
@@ -210,6 +227,23 @@ func (r *BackupReconciler) SetBackupPhaseFailed(ctx context.Context, backup *dbp
 	}
 
 	r.Recorder.Event(backup, "Warning", "BackupFailed", errMessage)
+	return ctrl.Result{}, nil
+}
+
+func (r *BackupReconciler) SetBackupPhaseSkipped(ctx context.Context, backup *dbpreview.Backup, errMessage string, backupConfiguration *dbpreview.BackupConfiguration) (ctrl.Result, error) {
+	original := backup.DeepCopy()
+
+	backup.Status.Phase = dbpreview.BackupPhaseSkipped
+	backup.Status.Error = errMessage
+	backup.Status.ExpiredAt = backup.CalculateExpirationTime(backupConfiguration)
+
+	if err := r.Status().Patch(ctx, backup, client.MergeFrom(original)); err != nil {
+		logger := log.FromContext(ctx)
+		logger.Error(err, "Failed to patch Backup status")
+		return ctrl.Result{}, err
+	}
+
+	r.Recorder.Event(backup, "Warning", "BackupSkipped", errMessage)
 	return ctrl.Result{}, nil
 }
 

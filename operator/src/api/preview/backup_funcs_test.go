@@ -35,7 +35,7 @@ var _ = Describe("Backup", func() {
 				},
 			}
 
-			cnpg, err := backup.CreateCNPGBackup(scheme)
+			cnpg, err := backup.CreateCNPGBackup(scheme, "my-cluster-x")
 			Expect(err).To(BeNil())
 			Expect(cnpg).ToNot(BeNil())
 
@@ -43,7 +43,7 @@ var _ = Describe("Backup", func() {
 			Expect(cnpg.Name).To(Equal("my-backup"))
 			Expect(cnpg.Namespace).To(Equal("my-ns"))
 			Expect(cnpg.Spec.Method).To(Equal(cnpgv1.BackupMethodVolumeSnapshot))
-			Expect(cnpg.Spec.Cluster.Name).To(Equal("my-cluster"))
+			Expect(cnpg.Spec.Cluster.Name).To(Equal("my-cluster-x"))
 
 			// owner reference set by SetControllerReference
 			Expect(len(cnpg.OwnerReferences)).To(BeNumerically(">", 0))
@@ -221,6 +221,13 @@ var _ = Describe("Backup", func() {
 		It("returns true when phase is Failed", func() {
 			status := &BackupStatus{
 				Phase: cnpgv1.BackupPhaseFailed,
+			}
+			Expect(status.IsDone()).To(BeTrue())
+		})
+
+		It("returns true when phase is Skipped", func() {
+			status := &BackupStatus{
+				Phase: BackupPhaseSkipped,
 			}
 			Expect(status.IsDone()).To(BeTrue())
 		})

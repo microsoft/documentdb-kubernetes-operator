@@ -65,8 +65,17 @@ var _ = Describe("Backup Controller", func() {
 				},
 			}
 
+			// Create the associated DocumentDB cluster
+			cluster := &dbpreview.DocumentDB{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      clusterName,
+					Namespace: backupNamespace,
+				},
+			}
+			Expect(fakeClient.Create(ctx, cluster)).To(Succeed())
+
 			// Call under test
-			res, err := reconciler.createCNPGBackup(ctx, backup, nil)
+			res, err := reconciler.createCNPGBackup(ctx, backup, cluster)
 			Expect(err).ToNot(HaveOccurred())
 			// controller uses a 5s requeue
 			Expect(res.RequeueAfter).To(Equal(5 * time.Second))

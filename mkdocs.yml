@@ -11,7 +11,7 @@ nav:
       - Backup and Restore: preview/backup-and-restore.md
       - FAQ: preview/faq.md
   - Tools:
-      - Kubectl Plugin: ../../documentdb-kubectl-plugin/kubectl-plugin.md
+      - Kubectl Plugin: preview/kubectl-plugin.md
 
 plugins:
   - search

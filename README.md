@@ -13,29 +13,17 @@ The DocumentDB Kubernetes Operator extends Kubernetes with Custom Resource Defin
 - **MongoDB Compatibility**: MongoDB API–compatible for seamless integration
 - **Cloud Native**: Built on CloudNative-PG for robust PostgreSQL foundation
 - **Helm Chart Support**: Easy installation and configuration via Helm
-- **Production Ready**: Designed for enterprise-grade deployments
-
-## ⚡ Quick Start
-
-To get started with the DocumentDB Kubernetes Operator, follow our comprehensive [Quick Start Guide](https://microsoft.github.io/documentdb-kubernetes-operator/preview/)
+- **Enterprise Grade**: Multi-cloud support and high availability
 
 ## 📚 Documentation
 
-For comprehensive documentation, installation guides, configuration options, and examples, visit our [GitHub Pages documentation](https://microsoft.github.io/documentdb-kubernetes-operator).
+For installation guides, configuration options, and examples, visit our [documentation](https://documentdb.github.io/documentdb-kubernetes-operator).
 
-### Quick Links
-
-- [Installation Guide](https://microsoft.github.io/documentdb-kubernetes-operator/preview/#quickstart)
-
-## 🔗 Connecting to DocumentDB
-
-For comprehensive connection guides including connection strings, port forwarding, LoadBalancer services, Python examples, and working with data, see our detailed [Connection Guide](https://microsoft.github.io/documentdb-kubernetes-operator/preview/#connect-to-the-documentdb-cluster).
-
-### Development Setup
+## Development Setup
 
 ```bash
 # Clone the repository
-git clone https://github.com/microsoft/documentdb-kubernetes-operator.git
+git clone https://github.com/documentdb/documentdb-kubernetes-operator.git
 cd documentdb-kubernetes-operator
 
 # Build the operator (from the operator/src directory)
@@ -59,5 +47,5 @@ For security concerns, please review our [Security Policy](SECURITY.md).
 
 ## 💬 Support
 
-- Create an [issue](https://github.com/microsoft/documentdb-kubernetes-operator/issues) for bug reports and feature requests
-- Check our [documentation](https://microsoft.github.io/documentdb-kubernetes-operator) for common questions
+- Create an [issue](https://github.com/documentdb/documentdb-kubernetes-operator/issues) for bug reports and feature requests
+- Check our [documentation](https://documentdb.github.io/documentdb-kubernetes-operator) for common questions

@@ -4,10 +4,10 @@ theme:
   name: readthedocs
 
 nav:
-  - Version 1.0:
-      - Get Started: v1/index.md
+  - Preview:
+      - Get Started: operator-public-documentation/preview/index.md
   - Tools:
-      - Kubectl Plugin: kubectl-plugin.md
+      - Kubectl Plugin: ../documentdb-kubectl-plugin/kubectl-plugin.md
 
 plugins:
   - search

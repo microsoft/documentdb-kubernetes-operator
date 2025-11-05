@@ -162,15 +162,16 @@ check_prerequisites() {
 
 # Create resource group
 create_resource_group() {
-    log "Creating resource group: $RESOURCE_GROUP in location: $LOCATION"
+    log "Ensuring resource group exists: $RESOURCE_GROUP in location: $LOCATION"
     
     # Check if resource group already exists
     if az group show --name $RESOURCE_GROUP &> /dev/null; then
-        warn "Resource group $RESOURCE_GROUP already exists. Skipping creation."
+        success "Resource group $RESOURCE_GROUP already exists."
         return 0
     fi
     
     # Create resource group
+    log "Creating resource group: $RESOURCE_GROUP"
     az group create --name $RESOURCE_GROUP --location "$LOCATION"
     
     if [ $? -eq 0 ]; then
@@ -184,7 +185,7 @@ create_resource_group() {
 create_cluster() {
     log "Creating AKS cluster: $CLUSTER_NAME"
     
-    # Check if cluster already exists
+    # Check if cluster already exists (resource group is guaranteed to exist by now)
     if az aks show --resource-group $RESOURCE_GROUP --name $CLUSTER_NAME &> /dev/null; then
         warn "Cluster $CLUSTER_NAME already exists. Skipping cluster creation."
     else
@@ -610,15 +611,17 @@ main() {
 
 # Helper function to set up cluster infrastructure
 setup_cluster_infrastructure() {
-    # Check if cluster already exists
-    CLUSTER_EXISTS=$(az aks show --resource-group $RESOURCE_GROUP --name $CLUSTER_NAME --query "name" -o tsv 2>/dev/null)
+    # Step 1: Ensure resource group exists first
+    create_resource_group
+    
+    # Step 2: Check if cluster already exists (now we know RG exists)
+    CLUSTER_EXISTS=$(az aks show --resource-group $RESOURCE_GROUP --name $CLUSTER_NAME --query "name" -o tsv 2>/dev/null || echo "")
     
     if [ "$CLUSTER_EXISTS" == "$CLUSTER_NAME" ]; then
         log "✅ Cluster $CLUSTER_NAME already exists, skipping infrastructure setup"
         setup_kubeconfig
     else
         log "Creating new cluster and infrastructure..."
-        create_resource_group
         create_cluster
         install_azure_csi_drivers
         configure_load_balancer

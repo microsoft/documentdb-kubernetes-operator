@@ -15,9 +15,6 @@ The DocumentDB Kubernetes Operator extends Kubernetes with Custom Resource Defin
 - **Helm Chart Support**: Easy installation and configuration via Helm
 - **Enterprise Grade**: Multi-cloud support and high availability
 
-## Quick Start
-
-
 ## 📚 Documentation
 
 For installation guides, configuration options, and examples, visit our [documentation](https://documentdb.github.io/documentdb-kubernetes-operator).

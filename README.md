@@ -17,11 +17,11 @@ The DocumentDB Kubernetes Operator extends Kubernetes with Custom Resource Defin
 
 ## 📚 Documentation
 
-For installation guides, configuration options, and examples, visit our [documentation](https://documentdb.github.io/documentdb-kubernetes-operator).
+For installation guides, configuration options, and examples, visit our [documentation](https://documentdb.io/documentdb-kubernetes-operator/preview/).
 
 ## 🚀 Quick Start
 
-Ready to get started? Check out our [Quick Start Guide](https://documentdb.github.io/documentdb-kubernetes-operator#quickstart) for step-by-step instructions to deploy your first DocumentDB cluster in minutes.
+Ready to get started? Check out our [Quick Start Guide](https://documentdb.io/documentdb-kubernetes-operator/preview/#quickstart) for step-by-step instructions to deploy your first DocumentDB cluster in minutes.
 
 ## Development Setup
 
@@ -52,4 +52,4 @@ For security concerns, please review our [Security Policy](SECURITY.md).
 ## 💬 Support
 
 - Create an [issue](https://github.com/documentdb/documentdb-kubernetes-operator/issues) for bug reports and feature requests
-- Check our [documentation](https://documentdb.github.io/documentdb-kubernetes-operator) for common questions
+- Check our [documentation](https://documentdb.io/documentdb-kubernetes-operator/preview/) for common questions

@@ -5,9 +5,8 @@ theme:
   name: readthedocs
 
 nav:
-  - Home: operator-public-documentation/index.md
-  - Version 1:
-      - Get Started: operator-public-documentation/v1/index.md
+  - Preview:
+      - Get Started: operator-public-documentation/preview/index.md
       - Advanced Configuration: operator-public-documentation/v1/advanced-configuration/README.md
   - Tools:
       - Kubectl Plugin: ../documentdb-kubectl-plugin/kubectl-plugin.md

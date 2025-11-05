@@ -88,8 +88,14 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, docu
 						"host replication all all trust",
 					},
 				},
-				Bootstrap: getBootstrapConfiguration(),
+				Bootstrap: getBootstrapConfiguration(documentdb, log),
 				LogLevel:  cmp.Or(documentdb.Spec.LogLevel, "info"),
+				Backup: &cnpgv1.BackupConfiguration{
+					VolumeSnapshot: &cnpgv1.VolumeSnapshotConfiguration{
+						SnapshotOwnerReference: "backup", // Set owner reference to 'backup' so that snapshots are deleted when Backup resource is deleted
+					},
+					Target: cnpgv1.BackupTarget("primary"),
+				},
 			}
 			spec.MaxStopDelay = getMaxStopDelayOrDefault(documentdb)
 			return spec
@@ -106,7 +112,19 @@ func getInheritedMetadataLabels(appName string) *cnpgv1.EmbeddedObjectMetadata {
 	}
 }
 
-func getBootstrapConfiguration() *cnpgv1.BootstrapConfiguration {
+func getBootstrapConfiguration(documentdb *dbpreview.DocumentDB, log logr.Logger) *cnpgv1.BootstrapConfiguration {
+	if documentdb.Spec.Bootstrap != nil && documentdb.Spec.Bootstrap.Recovery != nil && documentdb.Spec.Bootstrap.Recovery.Backup.Name != "" {
+		backupName := documentdb.Spec.Bootstrap.Recovery.Backup.Name
+		log.Info("DocumentDB cluster will be bootstrapped from backup", "backupName", backupName)
+		return &cnpgv1.BootstrapConfiguration{
+			Recovery: &cnpgv1.BootstrapRecovery{
+				Backup: &cnpgv1.BackupSource{
+					LocalObjectReference: cnpgv1.LocalObjectReference{Name: backupName},
+				},
+			},
+		}
+	}
+
 	return &cnpgv1.BootstrapConfiguration{
 		InitDB: &cnpgv1.BootstrapInitDB{
 			PostInitSQL: []string{

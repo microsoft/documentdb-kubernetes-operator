@@ -40,3 +40,19 @@ rules:
   resources: ["certificates", "certificates/status", "certificates/finalizers", "issuers", "clusterissuers"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
+# Backup permissions
+- apiGroups: ["db.microsoft.com"]
+  resources: ["backups", "backups/status", "backups/finalizers"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# ScheduledBackup permissions
+- apiGroups: ["db.microsoft.com"]
+  resources: ["scheduledbackups", "scheduledbackups/status", "scheduledbackups/finalizers"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# CNPG Backup permissions
+- apiGroups: ["postgresql.cnpg.io"]
+  resources: ["backups", "backups/status"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+# VolumeSnapshotClass permissions
+- apiGroups: ["snapshot.storage.k8s.io"]
+  resources: ["volumesnapshotclasses"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

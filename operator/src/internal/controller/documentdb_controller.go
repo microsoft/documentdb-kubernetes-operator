@@ -74,6 +74,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	var documentDbServiceIp string
+
 	// Only create/manage the service if ExposeViaService is configured
 	if documentdb.Spec.ExposeViaService.ServiceType != "" {
 		serviceType := corev1.ServiceTypeClusterIP
@@ -143,11 +144,43 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Update DocumentDB status with CNPG Cluster status and connection string
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: desiredCnpgCluster.Name, Namespace: req.Namespace}, currentCnpgCluster); err == nil {
-		if currentCnpgCluster.Status.Phase != "" {
-			documentdb.Status.Status = currentCnpgCluster.Status.Phase
-			if documentDbServiceIp != "" {
-				documentdb.Status.ConnectionString = util.GenerateConnectionString(documentdb, documentDbServiceIp)
+		// Ensure plugin enabled and TLS secret parameter kept in sync once ready
+		if documentdb.Status.TLS != nil && documentdb.Status.TLS.Ready && documentdb.Status.TLS.SecretName != "" {
+			logger.Info("Syncing TLS secret into CNPG Cluster plugin parameters", "secret", documentdb.Status.TLS.SecretName)
+			updated := false
+			for i := range currentCnpgCluster.Spec.Plugins {
+				p := &currentCnpgCluster.Spec.Plugins[i]
+				if p.Name == desiredCnpgCluster.Spec.Plugins[0].Name { // target our sidecar plugin
+					if p.Enabled == nil || !*p.Enabled {
+						trueVal := true
+						p.Enabled = &trueVal
+						updated = true
+						logger.Info("Enabled sidecar plugin")
+					}
+					if p.Parameters == nil {
+						p.Parameters = map[string]string{}
+					}
+					currentVal := p.Parameters["gatewayTLSSecret"]
+					if currentVal != documentdb.Status.TLS.SecretName {
+						p.Parameters["gatewayTLSSecret"] = documentdb.Status.TLS.SecretName
+						updated = true
+						logger.Info("Updated gatewayTLSSecret parameter", "old", currentVal, "new", documentdb.Status.TLS.SecretName)
+					}
+				}
 			}
+			if updated {
+				if currentCnpgCluster.Annotations == nil {
+					currentCnpgCluster.Annotations = map[string]string{}
+				}
+				currentCnpgCluster.Annotations["db.microsoft.com/gateway-tls-rev"] = time.Now().Format(time.RFC3339Nano)
+				if err := r.Client.Update(ctx, currentCnpgCluster); err == nil {
+					logger.Info("Patched CNPG Cluster with TLS settings; requeueing for pod update")
+					return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+				} else {
+					logger.Error(err, "Failed to update CNPG Cluster with TLS settings")
+				}
+			}
+
 			if err := r.Status().Update(ctx, documentdb); err != nil {
 				logger.Error(err, "Failed to update DocumentDB status and connection string")
 			}
@@ -180,6 +213,14 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				logger.Error(err, "Failed to update DocumentDB status")
 				return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 			}
+		}
+		// Update status connection string
+		if documentDbServiceIp != "" {
+			trustTLS := documentdb.Status.TLS != nil && documentdb.Status.TLS.Ready
+			documentdb.Status.ConnectionString = util.GenerateConnectionString(documentdb, documentDbServiceIp, trustTLS)
+		}
+		if err := r.Status().Update(ctx, documentdb); err != nil {
+			logger.Error(err, "Failed to update DocumentDB status and connection string")
 		}
 	}
 

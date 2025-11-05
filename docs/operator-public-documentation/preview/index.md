@@ -1,123 +1,40 @@
-# DocumentDB Kubernetes Operator
+# DocumentDB Kubernetes Operator - Version 1
 
-The DocumentDB Kubernetes Operator is an open-source project to run and manage [DocumentDB](https://github.com/microsoft/documentdb) on Kubernetes. `DocumentDB` is the engine powering vCore-based Azure Cosmos DB for MongoDB. It is built on top of PostgreSQL and offers a native implementation of document-oriented NoSQL database, enabling CRUD operations on BSON data types.
+Welcome to the DocumentDB Kubernetes Operator documentation for version 1.
 
-As part of a DocumentDB cluster installation, the operator deploys and manages a set of PostgreSQL instance(s), the [DocumentDB Gateway](https://github.com/microsoft/documentdb/tree/main/pg_documentdb_gw), as well as other Kubernetes resources. While PostgreSQL is used as the underlying storage engine, the gateway ensures that you can connect to the DocumentDB cluster using MongoDB-compatible drivers, APIs, and tools.
+## Documentation Sections
 
-> **Note:** This project is under active development but not yet recommended for production use. We welcome your feedback and contributions!
+### [Advanced Configuration](advanced-configuration/README.md)
 
-## Quickstart
+Advanced configuration options for production deployments:
 
-This quickstart guide will walk you through the steps to install the operator, deploy a DocumentDB cluster, access it using `mongosh`, and perform basic operations.
+- **[TLS Configuration](advanced-configuration/README.md#tls-configuration)** - Comprehensive TLS setup with three modes (SelfSigned, Provided, CertManager)
+- **[High Availability](advanced-configuration/README.md#high-availability)** - Multi-instance and HA configurations
+- **[Storage Configuration](advanced-configuration/README.md#storage-configuration)** - Persistent storage and volume management
+- **[Resource Management](advanced-configuration/README.md#resource-management)** - CPU and memory optimization
+- **[Security](advanced-configuration/README.md#security)** - Network policies, RBAC, and secrets management
 
-### Prerequisites
+## Quick Links
 
-- [Helm](https://helm.sh/docs/intro/install/) installed.
-- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/) installed.
-- A local Kubernetes cluster such as [minikube](https://minikube.sigs.k8s.io/docs/start/), or [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) installed. You are free to use any other Kubernetes cluster, but that's not a requirement for this quickstart.
-- Install [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/) to connect to the DocumentDB cluster.
+### Getting Started
+- [Installation Guide](https://microsoft.github.io/documentdb-kubernetes-operator/v1/#quickstart)
+- [Quick Start](https://microsoft.github.io/documentdb-kubernetes-operator/v1/#quickstart)
 
-### Start a local Kubernetes cluster
+### TLS Setup
+- [TLS Setup Guide](../../../documentdb-playground/tls/README.md) - Complete TLS configuration guide
+- [E2E Testing](../../../documentdb-playground/tls/E2E-TESTING.md) - Comprehensive testing procedures
 
-If you are using `minikube`, use the following command:
+### Examples
+- [Sample Configurations](../../../operator/src/config/samples/)
+- [Deployment Examples](../../../operator/src/scripts/deployment-examples/)
 
-```sh
-minikube start
-```
+## Support
 
-If you are using `kind`, use the following command:
+- [GitHub Repository](https://github.com/microsoft/documentdb-kubernetes-operator)
+- [Issue Tracker](https://github.com/microsoft/documentdb-kubernetes-operator/issues)
+- [Discussions](https://github.com/microsoft/documentdb-kubernetes-operator/discussions)
 
-```sh
-kind create cluster
-```
-
-### Install `cert-manager`
-
-[cert-manager](https://cert-manager.io/docs/) is used to manage TLS certificates for the DocumentDB cluster.
-
-> If you already have `cert-manager` installed, you can skip this step.
-
-```sh
-helm repo add jetstack https://charts.jetstack.io
-helm repo update
-helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
-```
-
-Verify that `cert-manager` is installed correctly:
-
-```sh
-kubectl get pods -n cert-manager
-```
-
-Output:
-
-```text
-NAMESPACE           NAME                                            READY   STATUS    RESTARTS
-cert-manager        cert-manager-6794b8d569-d7lwd                   1/1     Running   0
-cert-manager        cert-manager-cainjector-7f69cd69f7-pd9bc        1/1     Running   0          
-cert-manager        cert-manager-webhook-6cc5dccc4b-7jmrh           1/1     Running   0          
-```
-
-### Install `documentdb-operator` using the Helm chart
-
-> The DocumentDB operator utilizes the [CloudNativePG operator](https://cloudnative-pg.io/docs/) behind the scenes, and installs it in the `cnpg-system` namespace. At this point, it is assumed that the CloudNativePG operator is **not** pre-installed in your cluster.
-
-Use the following command to install the DocumentDB operator:
-
-```sh
-helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-operator --namespace documentdb-operator --create-namespace
-```
-
-This will install the operator in the `documentdb-operator` namespace. Verify that it is running:
-
-```sh
-kubectl get deployment -n documentdb-operator
-```
-
-Output:
-
-```text
-NAME                  READY   UP-TO-DATE   AVAILABLE   AGE
-documentdb-operator   1/1     1            1           113s
-```
-
-You should also see the DocumentDB operator CRDs installed in the cluster:
-
-```sh
-kubectl get crd | grep documentdb
-```
-
-Output:
-
-```text
-documentdbs.db.microsoft.com
-```
-
-### Store DocumentDB credentials in K8s Secret
-
-Before deploying the DocumentDB cluster, create a Kubernetes secret to store the DocumentDB credentials. The sidecar injector plugin will automatically inject these credentials as environment variables into the DocumentDB gateway container.
-
-Create the secret with your desired username and password:
-
-```sh
-cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: documentdb-preview-ns
 ---
-# DocumentDB Credentials Secret
-# 
-# Login credentials:
-# Username: k8s_secret_user
-# Password: K8sSecret100
-#
-# Connect using mongosh (port-forward):
-# mongosh 127.0.0.1:10260 -u k8s_secret_user -p K8sSecret100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates
-#
-# Connect using connection string (port-forward):
-# mongosh "mongodb://k8s_secret_user:K8sSecret100@127.0.0.1:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0"
-#
 
 apiVersion: v1
 kind: Secret

@@ -36,6 +36,10 @@ rules:
 - apiGroups: ["postgresql.cnpg.io"]
   resources: ["clusters", "publications", "subscriptions", "clusters/status"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["cert-manager.io"]
+  resources: ["certificates", "certificates/status", "certificates/finalizers", "issuers", "clusterissuers"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
 # Backup permissions
 - apiGroups: ["db.microsoft.com"]
   resources: ["backups", "backups/status", "backups/finalizers"]

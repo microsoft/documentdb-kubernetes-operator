@@ -17,7 +17,10 @@ This setup automates the entire process, including:
 - DocumentDB operator deployment
 - TLS certificate provisioning and validation
 
-📖 **For comprehensive E2E testing instructions, see [E2E-TESTING.md](E2E-TESTING.md)**
+## Documentation
+
+- 📖 **[E2E-TESTING.md](E2E-TESTING.md)** - Comprehensive automated and manual E2E testing guide
+- 📘 **[MANUAL-PROVIDED-MODE-SETUP.md](MANUAL-PROVIDED-MODE-SETUP.md)** - Detailed step-by-step manual guide for Provided TLS mode with Azure Key Vault
 
 ## Quick Start
 

@@ -17,13 +17,13 @@ walReplica: false  # Set to true to deploy the WAL replica plugin
 
 image:
   documentdbk8soperator:
-    repository: ghcr.io/guanzhousongmicrosoft/documentdb-kubernetes-operator/operator
+    repository: ghcr.io/documentdb/documentdb-kubernetes-operator/operator
     pullPolicy: Always
   sidecarinjector:
-    repository: ghcr.io/guanzhousongmicrosoft/documentdb-kubernetes-operator/sidecar
+    repository: ghcr.io/documentdb/documentdb-kubernetes-operator/sidecar
     pullPolicy: Always
   walreplica:
-    repository: ghcr.io/microsoft/documentdb-kubernetes-operator/wal-replica
+    repository: ghcr.io/documentdb/documentdb-kubernetes-operator/wal-replica
     pullPolicy: Always
 cloudnative-pg:
   namespaceOverride: cnpg-system

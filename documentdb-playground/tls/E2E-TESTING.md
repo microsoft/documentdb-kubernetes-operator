@@ -1143,6 +1143,7 @@ SUBSCRIPTION_ID="$AZURE_SUBSCRIPTION_ID"
 ## Additional Resources
 
 - [TLS Setup Guide](README.md) - Main TLS configuration documentation
+- [Manual Provided Mode Setup](MANUAL-PROVIDED-MODE-SETUP.md) - Detailed step-by-step guide for Provided TLS with Azure Key Vault
 - [Advanced Configuration](../../docs/operator-public-documentation/v1/advanced-configuration/README.md) - Production configurations
 - [Project Documentation](../../docs/operator-public-documentation/index.md) - Full operator documentation
 - [GitHub Repository](https://github.com/microsoft/documentdb-kubernetes-operator) - Source code and issues

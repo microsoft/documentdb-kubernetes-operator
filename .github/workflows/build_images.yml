@@ -61,7 +61,7 @@ jobs:
     - name: Login to GHCR
       if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.skip_optional_images == 'true' && (matrix.image.name == 'documentdb' || matrix.image.name == 'gateway')) }}
       run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-    - name: Build and Push ${{ matrix.arch }} Image
+    - name: ${{ matrix.arch }} - Build and Push
       if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.skip_optional_images == 'true' && (matrix.image.name == 'documentdb' || matrix.image.name == 'gateway')) }}
       run: |
         TAG=${{ env.IMAGE_TAG }}-${{ matrix.arch }}

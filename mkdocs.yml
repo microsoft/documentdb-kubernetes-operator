@@ -1,5 +1,6 @@
 site_name: DocumentDB-Kubernetes-Operator
 repo_url: https://github.com/documentdb/documentdb-kubernetes-operator
+edit_uri: edit/main/docs/operator-public-documentation/
 docs_dir: docs/operator-public-documentation
 theme:
   name: readthedocs

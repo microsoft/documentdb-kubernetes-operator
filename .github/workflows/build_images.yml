@@ -30,7 +30,7 @@ env:
 
 jobs:
   build-and-push:
-    name: Build and Push Images
+    name: Build
     strategy:
       matrix:
         arch: [amd64, arm64]

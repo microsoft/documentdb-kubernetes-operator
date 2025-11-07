@@ -93,6 +93,10 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 			if !replicationContext.IsPrimary() {
 				return r.SetBackupPhaseSkipped(ctx, backup, "Backups can only be created from the primary cluster", cluster.Spec.Backup)
 			}
+			if !replicationContext.EndpointEnabled() {
+				logger.Info("Backup deferred: primary cluster endpoint not ready, waiting for promotion to complete")
+				return ctrl.Result{RequeueAfter: time.Minute * 1}, nil
+			}
 
 			return r.createCNPGBackup(ctx, backup, cluster)
 		}

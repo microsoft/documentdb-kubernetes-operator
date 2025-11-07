@@ -25,21 +25,7 @@ Ready to get started? Check out our [Quick Start Guide](https://documentdb.io/do
 
 ## Development Setup
 
-```bash
-# Clone the repository
-git clone https://github.com/documentdb/documentdb-kubernetes-operator.git
-cd documentdb-kubernetes-operator
-
-# Build the operator (from the operator/src directory)
-cd operator/src
-make build
-
-# Run tests
-make test
-
-# Deploy to your cluster
-make deploy
-```
+For information on setting up your development environment to contribute to this project, see our [Developer Guide](docs/developer-guides/development-environment.md).
 
 ## 📄 License
 

@@ -25,21 +25,17 @@ Ready to get started? Check out our [Quick Start Guide](https://documentdb.io/do
 
 ## Development Setup
 
-```bash
-# Clone the repository
-git clone https://github.com/documentdb/documentdb-kubernetes-operator.git
-cd documentdb-kubernetes-operator
+For information on setting up your development environment to contribute to this project, see our [Developer Guide](docs/developer-guides/development-environment.md).
 
-# Build the operator (from the operator/src directory)
-cd operator/src
-make build
+## 🌐 Cloud Platform Setup Guides
 
-# Run tests
-make test
+Deploy DocumentDB clusters across different cloud platforms and configurations:
 
-# Deploy to your cluster
-make deploy
-```
+- **Azure (AKS)**: [Comprehensive deployment automation scripts for Azure Kubernetes Service](documentdb-playground/aks-setup/README.md)
+- **AWS (EKS)**: [Simple automation scripts for deploying on Amazon Elastic Kubernetes Service](documentdb-playground/aws-setup/README.md)  
+- **Multi-Cloud**: [High availability setup across multiple cloud providers using KubeFleet](documentdb-playground/multi-clould-setup/multi-cloud-deployment-guide.md)
+- **TLS Configuration**: [Gateway TLS setup with multiple certificate modes (self-signed, provided, cert-manager)](documentdb-playground/tls/README.md)
+- **Operator Upgrades**: [Local development guide for testing operator control plane upgrades](documentdb-playground/operator-upgrade-guide/README.md)
 
 ## 📄 License
 

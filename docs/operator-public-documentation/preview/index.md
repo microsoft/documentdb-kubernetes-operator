@@ -65,7 +65,15 @@ cert-manager        cert-manager-webhook-6cc5dccc4b-7jmrh           1/1     Runn
 Use the following command to install the DocumentDB operator:
 
 ```sh
-helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-operator --namespace documentdb-operator --create-namespace
+# Add the Helm repository
+helm repo add documentdb https://documentdb.github.io/documentdb-kubernetes-operator
+helm repo update
+
+# Install the operator
+helm install documentdb-operator documentdb/documentdb-operator \
+  --namespace documentdb-operator \
+  --create-namespace \
+  --wait
 ```
 
 This will install the operator in the `documentdb-operator` namespace. Verify that it is running:
@@ -197,25 +205,17 @@ kubectl get DocumentDB -n documentdb-preview-ns
 Output:
 
 ```text
-NAME                 AGE
-documentdb-preview   28m
+NAME                 STATUS                     CONNECTION STRING
+documentdb-preview   Cluster in healthy state   mongodb://$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.username}' | base64 -d):$(kubectl get secret documentdb-credentials -n documentdb-preview-ns -o jsonpath='{.data.password}' | base64 -d)@10.0.29.01:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0
 ```
-
-To get the full connection string:
-
-```sh
-kubectl get documentdb documentdb-preview -n documentdb-preview-ns -o jsonpath='{.status.connectionString}'
-```
-
-This will show the connection string with the external IP automatically populated.
 
 ### Connect to the DocumentDB cluster
 
-The DocumentDB `Pod` has the Gateway container running as a sidecar. The connection method depends on your service type:
+Once you have deployed your DocumentDB cluster, you can connect using different methods depending on your service type. Choose the approach that best fits your deployment strategy:
 
-#### Option 1: ClusterIP Service (Default for local development)
+#### Option 1: ClusterIP Service (Default - for local development)
 
-For `ClusterIP` service type, use port forwarding to connect from your local machine:
+The default deployment uses `ClusterIP` service type. To connect from your local machine, use port forwarding:
 
 **Step 1:** Set up port forwarding (keep this terminal open):
 ```sh
@@ -225,32 +225,62 @@ kubectl port-forward pod/documentdb-preview-1 10260:10260 -n documentdb-preview-
 **Step 2:** In a **new terminal**, connect using [mongosh](https://www.mongodb.com/docs/mongodb-shell/install/):
 
 ```sh
-# Traditional format
+# Traditional format (via port-forward)
 mongosh 127.0.0.1:10260 -u k8s_secret_user -p K8sSecret100 --authenticationMechanism SCRAM-SHA-256 --tls --tlsAllowInvalidCertificates
 
-# Or connection string format
+# Or connection string format (via port-forward)
 mongosh "mongodb://k8s_secret_user:K8sSecret100@127.0.0.1:10260/?directConnection=true&authMechanism=SCRAM-SHA-256&tls=true&tlsAllowInvalidCertificates=true&replicaSet=rs0"
-
-# Or get the connection string from status and connect from inside the cluster
-kubectl get documentdb documentdb-preview -n documentdb-preview-ns -o jsonpath='{.status.connectionString}'
-mongosh "PASTE_CONNECTION_STRING_HERE"
 ```
-
-
 
 #### Option 2: LoadBalancer Service (For cloud deployments)
 
-If using `LoadBalancer` service type, get the connection string directly:
+If you prefer direct external access (recommended for cloud environments like Azure AKS), deploy with `LoadBalancer` service type:
 
+**Step 1:** Deploy DocumentDB with LoadBalancer service:
 ```sh
-# Get the connection string with loadbalancer IP automatically populated
+cat <<EOF | kubectl apply -f -
+apiVersion: db.microsoft.com/preview
+kind: DocumentDB
+metadata:
+  name: documentdb-preview
+  namespace: documentdb-preview-ns
+spec:
+  nodeCount: 1
+  instancesPerNode: 1
+  documentDbCredentialSecret: documentdb-credentials
+  resource:
+    storage:
+      pvcSize: 10Gi
+  exposeViaService:
+    serviceType: LoadBalancer
+EOF
+```
+
+**Step 2:** Wait for the external IP to be assigned:
+```sh
+kubectl get services -n documentdb-preview-ns -w
+```
+
+You should see something like:
+```text
+NAME                                    TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)           AGE
+documentdb-service-documentdb-preview   LoadBalancer   10.0.228.243   52.149.56.216   10260:30312/TCP   2m
+```
+
+**Step 3:** Connect directly using the external IP:
+```sh
+# Get the connection string with external IP automatically populated
 kubectl get documentdb documentdb-preview -n documentdb-preview-ns -o jsonpath='{.status.connectionString}'
 
-# Use the output directly with mongosh
+# Copy the output and use it directly with mongosh
 mongosh "PASTE_CONNECTION_STRING_HERE"
 ```
 
-Execute the following commands to create a database and a collection, and insert some documents:
+> **Note:** `LoadBalancer` service is supported in cloud environments (Azure AKS, AWS EKS, GCP GKE), as well as local development with [minikube](https://minikube.sigs.k8s.io/docs/handbook/accessing/) and [kind](https://kind.sigs.k8s.io/docs/user/loadbalancer).
+
+### Work with Data
+
+Once connected, execute the following commands to create a database and a collection, and insert some documents:
 
 ```sh
 use testdb
@@ -298,14 +328,14 @@ switched to db testdb
 ]
 ```
 
-### Other options: Try the sample Python app and `LoadBalancer` service
+### Other options: Try the sample Python app
 
 #### Connect to DocumentDB using a Python app
 
 In addition to `mongosh`, you can also use the sample Python program (that uses the PyMongo client) in the GitHub repository to execute operations on the DocumentDB instance. It inserts a sample document to a `movies` collection inside the `sample_mflix` database.
 
 ```sh
-git clone https://github.com/microsoft/documentdb-kubernetes-operator
+git clone https://github.com/documentdb/documentdb-kubernetes-operator
 cd documentdb-kubernetes-operator/operator/src/scripts/test-scripts
 
 pip3 install pymongo
@@ -358,34 +388,7 @@ switched to db sample_mflix
 ]
 ```
 
-#### Use a `LoadBalancer` service
-
-For the quickstart, you connected to DocumentDB using port forwarding. If you are using a Kubernetes cluster in the cloud (for example, [Azure Kubernetes Service](https://learn.microsoft.com/en-us/azure/aks/)), and want to use a `LoadBalancer` service instead, enable it in the `DocumentDB` spec as follows:
-
-```yaml
-exposeViaService:
-    serviceType: LoadBalancer
-```
-
-> `LoadBalancer` service is also supported in [minikube](https://minikube.sigs.k8s.io/docs/handbook/accessing/) and [kind](https://kind.sigs.k8s.io/docs/user/loadbalancer).
-
-List the `Service`s and verify:
-
-```sh
-kubectl get services -n documentdb-preview-ns
-```
-
-This will create a `LoadBalancer` service named `documentdb-service-documentdb-preview` for the DocumentDB cluster. You can then access the DocumentDB instance using the external IP of the service.
-
-```text
-NAME                                    TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)           AGE
-documentdb-preview-r                    ClusterIP      10.0.216.38    <none>          5432/TCP          26m
-documentdb-preview-ro                   ClusterIP      10.0.31.103    <none>          5432/TCP          26m
-documentdb-preview-rw                   ClusterIP      10.0.118.26    <none>          5432/TCP          26m
-documentdb-service-documentdb-preview   LoadBalancer   10.0.228.243   52.149.56.216   10260:30312/TCP   27m
-```
-
-> If you are using the Python program to connect to DocumentDB, make sure to update the script's `host` variable with the external IP of your `documentdb-service-documentdb-preview` LoadBalancer service. Additionally, ensure that you update the default `password` in the script or, preferably, use environment variables to securely manage sensitive information like passwords.
+> If you are using the Python program to connect to DocumentDB, make sure to update the script's `host` variable with the appropriate IP address based on your service type (127.0.0.1 for ClusterIP with port-forward, or the external IP for LoadBalancer service). Additionally, ensure that you update the default `password` in the script or, preferably, use environment variables to securely manage sensitive information like passwords.
 
 ## Configuration and Advanced Topics
 
@@ -398,13 +401,22 @@ The DocumentDB operator uses a sidecar injector plugin to automatically inject t
 - **Gateway Image Configuration**: Customize which DocumentDB Gateway container image is used
 - **Pod Labels and Annotations**: Add custom metadata to injected pods
 
-For detailed information on configuring the sidecar injector plugin, see: [Sidecar Injector Plugin Configuration](../sidecar-injector-plugin-configuration.md)
+For detailed information on configuring the sidecar injector plugin, see: [Sidecar Injector Plugin Configuration](../../developer-guides/sidecar-injector-plugin-configuration.md)
 
 
 ### Multi-Cloud Deployment
 
-The DocumentDB operator supports deployment across multiple cloud environments and Kubernetes distributions. For guidance on multi-cloud deployments, see: [Multi-Cloud Deployment Guide](../multi-cloud-deployment-guide.md)
+The DocumentDB operator supports deployment across multiple cloud environments and Kubernetes distributions. For guidance on multi-cloud deployments, see: [Multi-Cloud Deployment Guide](../../../documentdb-playground/multi-clould-setup/multi-cloud-deployment-guide.md)
 
+### TLS Setup
+
+For advanced TLS configuration and testing:
+
+- [TLS Setup Guide](../../../documentdb-playground/tls/README.md) - Complete TLS configuration guide
+- [E2E Testing](../../../documentdb-playground/tls/E2E-TESTING.md) - Comprehensive testing procedures
+
+
+## Clean Up
 ### Delete the DocumentDB cluster and other resources
 
 ```sh

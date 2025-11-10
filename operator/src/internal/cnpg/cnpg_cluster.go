@@ -9,6 +9,7 @@ import (
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
 	util "github.com/microsoft/documentdb-operator/internal/utils"
@@ -60,15 +61,18 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, docu
 					Size:         documentdb.Spec.Resource.Storage.PvcSize,
 				},
 				InheritedMetadata: getInheritedMetadataLabels(documentdb.Name),
-				Plugins: []cnpgv1.PluginConfiguration{
-					{
-						Name: sidecarPluginName,
-						Parameters: map[string]string{
-							"gatewayImage":               gatewayImage,
-							"documentDbCredentialSecret": credentialSecretName,
-						},
-					},
-				},
+				Plugins: func() []cnpgv1.PluginConfiguration {
+					params := map[string]string{"gatewayImage": gatewayImage}
+					// If TLS is ready, surface secret name to plugin so it can mount certs.
+					if documentdb.Status.TLS != nil && documentdb.Status.TLS.Ready && documentdb.Status.TLS.SecretName != "" {
+						params["gatewayTLSSecret"] = documentdb.Status.TLS.SecretName
+					}
+					return []cnpgv1.PluginConfiguration{{
+						Name:       sidecarPluginName,
+						Enabled:    pointer.Bool(true),
+						Parameters: params,
+					}}
+				}(),
 				PostgresUID: 105,
 				PostgresGID: 108,
 				PostgresConfiguration: cnpgv1.PostgresConfiguration{
@@ -84,8 +88,14 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, docu
 						"host replication all all trust",
 					},
 				},
-				Bootstrap: getBootstrapConfiguration(),
+				Bootstrap: getBootstrapConfiguration(documentdb, log),
 				LogLevel:  cmp.Or(documentdb.Spec.LogLevel, "info"),
+				Backup: &cnpgv1.BackupConfiguration{
+					VolumeSnapshot: &cnpgv1.VolumeSnapshotConfiguration{
+						SnapshotOwnerReference: "backup", // Set owner reference to 'backup' so that snapshots are deleted when Backup resource is deleted
+					},
+					Target: cnpgv1.BackupTarget("primary"),
+				},
 			}
 			spec.MaxStopDelay = getMaxStopDelayOrDefault(documentdb)
 			return spec
@@ -102,7 +112,19 @@ func getInheritedMetadataLabels(appName string) *cnpgv1.EmbeddedObjectMetadata {
 	}
 }
 
-func getBootstrapConfiguration() *cnpgv1.BootstrapConfiguration {
+func getBootstrapConfiguration(documentdb *dbpreview.DocumentDB, log logr.Logger) *cnpgv1.BootstrapConfiguration {
+	if documentdb.Spec.Bootstrap != nil && documentdb.Spec.Bootstrap.Recovery != nil && documentdb.Spec.Bootstrap.Recovery.Backup.Name != "" {
+		backupName := documentdb.Spec.Bootstrap.Recovery.Backup.Name
+		log.Info("DocumentDB cluster will be bootstrapped from backup", "backupName", backupName)
+		return &cnpgv1.BootstrapConfiguration{
+			Recovery: &cnpgv1.BootstrapRecovery{
+				Backup: &cnpgv1.BackupSource{
+					LocalObjectReference: cnpgv1.LocalObjectReference{Name: backupName},
+				},
+			},
+		}
+	}
+
 	return &cnpgv1.BootstrapConfiguration{
 		InitDB: &cnpgv1.BootstrapInitDB{
 			PostInitSQL: []string{

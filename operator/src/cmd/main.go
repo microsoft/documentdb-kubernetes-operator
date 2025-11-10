@@ -24,6 +24,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
 	"github.com/microsoft/documentdb-operator/internal/controller"
@@ -41,6 +42,7 @@ func init() {
 
 	utilruntime.Must(dbpreview.AddToScheme(scheme))
 	utilruntime.Must(cnpgv1.AddToScheme(scheme))
+	utilruntime.Must(cmapi.AddToScheme(scheme))
 	utilruntime.Must(fleetv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
@@ -193,6 +195,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controller.CertificateReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Certificate")
+		os.Exit(1)
+	}
+
 	if err = (&controller.DocumentDBReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -200,6 +210,25 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "DocumentDB")
 		os.Exit(1)
 	}
+
+	if err = (&controller.BackupReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("backup-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Backup")
+		os.Exit(1)
+	}
+
+	if err = (&controller.ScheduledBackupReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("scheduled-backup-controller"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ScheduledBackup")
+		os.Exit(1)
+	}
+
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {

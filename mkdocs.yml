@@ -1,13 +1,18 @@
 site_name: DocumentDB-Kubernetes-Operator
-repo_url: https://github.com/microsoft/documentdb-kubernetes-operator
+repo_url: https://github.com/documentdb/documentdb-kubernetes-operator
+edit_uri: edit/main/docs/operator-public-documentation/
+docs_dir: docs/operator-public-documentation
 theme:
   name: readthedocs
 
 nav:
-  - Version 1.0:
-      - Get Started: v1/index.md
+  - Preview:
+      - Get Started: preview/index.md
+      - Advanced Configuration: preview/advanced-configuration/README.md
+      - Backup and Restore: preview/backup-and-restore.md
+      - FAQ: preview/faq.md
   - Tools:
-      - Kubectl Plugin: kubectl-plugin.md
+      - Kubectl Plugin: preview/kubectl-plugin.md
 
 plugins:
   - search

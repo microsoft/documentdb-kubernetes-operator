@@ -6,4 +6,29 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: documentdb-sample
 spec:
-  # TODO(user): Add fields here
+  nodeCount: 1
+  instancesPerNode: 1
+  resource:
+    pvcSize: 1Gi
+  documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+  exposeViaService:
+    serviceType: ClusterIP
+  # Uncomment one TLS mode below
+  # tls:
+  #   gateway:
+  #     mode: SelfSigned
+  # tls:
+  #   gateway:
+  #     mode: Provided
+  #     provided:
+  #       secretName: my-existing-tls-secret
+  # tls:
+  #   gateway:
+  #     mode: CertManager
+  #     certManager:
+  #       issuerRef:
+  #         name: selfsigned
+  #         kind: ClusterIssuer
+  #       # dnsNames optional; service DNS names are auto-added
+  #       dnsNames:
+  #         - extra.example.local

@@ -48,6 +48,37 @@ spec:
           spec:
             description: DocumentDBSpec defines the desired state of DocumentDB.
             properties:
+              backup:
+                description: Backup configures backup settings for DocumentDB.
+                properties:
+                  retentionDays:
+                    default: 30
+                    description: |-
+                      RetentionDays specifies how many days backups should be retained.
+                      If not specified, the default retention period is 30 days.
+                    maximum: 365
+                    minimum: 1
+                    type: integer
+                type: object
+              bootstrap:
+                description: Bootstrap configures the initialization of the DocumentDB
+                  cluster.
+                properties:
+                  recovery:
+                    description: Recovery configures recovery from a backup.
+                    properties:
+                      backup:
+                        description: Backup specifies the source backup to restore
+                          from.
+                        properties:
+                          name:
+                            description: Name of the referent.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    type: object
+                type: object
               clusterReplication:
                 description: ClusterReplication configures cross-cluster replication
                   for DocumentDB.
@@ -192,6 +223,72 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
+              tls:
+                description: TLS configures certificate management for DocumentDB
+                  components.
+                properties:
+                  gateway:
+                    description: 'Gateway configures TLS for the gateway sidecar (Phase
+                      1: certificate provisioning only).'
+                    properties:
+                      certManager:
+                        description: CertManager config when Mode=CertManager.
+                        properties:
+                          dnsNames:
+                            description: DNSNames for the certificate SANs. If empty,
+                              operator will add Service DNS names.
+                            items:
+                              type: string
+                            type: array
+                          issuerRef:
+                            description: IssuerRef references a cert-manager Issuer
+                              or ClusterIssuer.
+                            properties:
+                              group:
+                                description: Group defaults to cert-manager.io
+                                type: string
+                              kind:
+                                description: Kind of issuer (Issuer or ClusterIssuer).
+                                  Defaults to Issuer.
+                                type: string
+                              name:
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          secretName:
+                            description: SecretName optional explicit name for the
+                              target secret. If empty a default is chosen.
+                            type: string
+                        required:
+                        - issuerRef
+                        type: object
+                      mode:
+                        description: Mode selects the TLS management strategy.
+                        enum:
+                        - Disabled
+                        - SelfSigned
+                        - CertManager
+                        - Provided
+                        type: string
+                      provided:
+                        description: Provided secret reference when Mode=Provided.
+                        properties:
+                          secretName:
+                            type: string
+                        required:
+                        - secretName
+                        type: object
+                    type: object
+                  globalEndpoints:
+                    description: GlobalEndpoints configures TLS for global endpoints
+                      (placeholder for future phases).
+                    type: object
+                  postgres:
+                    description: Postgres configures TLS for the Postgres server (placeholder
+                      for future phases).
+                    type: object
+                type: object
               walReplicaPluginName:
                 description: WalReplicaPluginName is the name of the wal replica plugin
                   to use.
@@ -214,6 +311,16 @@ spec:
                 type: string
               targetPrimary:
                 type: string
+              tls:
+                description: TLS reports gateway TLS provisioning status (Phase 1).
+                properties:
+                  message:
+                    type: string
+                  ready:
+                    type: boolean
+                  secretName:
+                    type: string
+                type: object
             type: object
         type: object
     served: true

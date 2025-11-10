@@ -6,6 +6,11 @@ on:
       manifest_tag:
         description: 'Tag for the Docker manifest'
         required: false
+      skip_optional_images:
+        type: boolean
+        description: 'Skip building documentdb and gateway images'
+        required: false
+        default: false
 
   push:
     branches:
@@ -53,8 +58,10 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     - name: Login to GHCR
+      if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.skip_optional_images == 'true' && (matrix.image.name == 'documentdb' || matrix.image.name == 'gateway')) }}
       run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
     - name: Build and Push ${{ matrix.arch }} Image
+      if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.skip_optional_images == 'true' && (matrix.image.name == 'documentdb' || matrix.image.name == 'gateway')) }}
       run: |
         TAG=${{ env.IMAGE_TAG }}-${{ matrix.arch }}
         docker build \

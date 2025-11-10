@@ -4,6 +4,7 @@
 package preview
 
 import (
+	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -62,8 +63,44 @@ type DocumentDBSpec struct {
 
 	Timeouts Timeouts `json:"timeouts,omitempty"`
 
+	// TLS configures certificate management for DocumentDB components.
+	TLS *TLSConfiguration `json:"tls,omitempty"`
+
 	// Overrides default log level for the DocumentDB cluster.
 	LogLevel string `json:"logLevel,omitempty"`
+
+	// Bootstrap configures the initialization of the DocumentDB cluster.
+	// +optional
+	Bootstrap *BootstrapConfiguration `json:"bootstrap,omitempty"`
+
+	// Backup configures backup settings for DocumentDB.
+	// +optional
+	Backup *BackupConfiguration `json:"backup,omitempty"`
+}
+
+// BootstrapConfiguration defines how to bootstrap a DocumentDB cluster.
+type BootstrapConfiguration struct {
+	// Recovery configures recovery from a backup.
+	// +optional
+	Recovery *RecoveryConfiguration `json:"recovery,omitempty"`
+}
+
+// RecoveryConfiguration defines backup recovery settings.
+type RecoveryConfiguration struct {
+	// Backup specifies the source backup to restore from.
+	// +optional
+	Backup cnpgv1.LocalObjectReference `json:"backup,omitempty"`
+}
+
+// BackupConfiguration defines backup settings for DocumentDB.
+type BackupConfiguration struct {
+	// RetentionDays specifies how many days backups should be retained.
+	// If not specified, the default retention period is 30 days.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=365
+	// +kubebuilder:default=30
+	// +optional
+	RetentionDays int `json:"retentionDays,omitempty"`
 }
 
 type Resource struct {
@@ -115,6 +152,60 @@ type Timeouts struct {
 	StopDelay int32 `json:"stopDelay,omitempty"`
 }
 
+// TLSConfiguration aggregates TLS settings across DocumentDB components.
+type TLSConfiguration struct {
+	// Gateway configures TLS for the gateway sidecar (Phase 1: certificate provisioning only).
+	Gateway *GatewayTLS `json:"gateway,omitempty"`
+
+	// Postgres configures TLS for the Postgres server (placeholder for future phases).
+	Postgres *PostgresTLS `json:"postgres,omitempty"`
+
+	// GlobalEndpoints configures TLS for global endpoints (placeholder for future phases).
+	GlobalEndpoints *GlobalEndpointsTLS `json:"globalEndpoints,omitempty"`
+}
+
+// GatewayTLS defines TLS configuration for the gateway sidecar (Phase 1: certificate provisioning only)
+type GatewayTLS struct {
+	// Mode selects the TLS management strategy.
+	// +kubebuilder:validation:Enum=Disabled;SelfSigned;CertManager;Provided
+	Mode string `json:"mode,omitempty"`
+
+	// CertManager config when Mode=CertManager.
+	CertManager *CertManagerTLS `json:"certManager,omitempty"`
+
+	// Provided secret reference when Mode=Provided.
+	Provided *ProvidedTLS `json:"provided,omitempty"`
+}
+
+// PostgresTLS acts as a placeholder for future Postgres TLS settings.
+type PostgresTLS struct{}
+
+// GlobalEndpointsTLS acts as a placeholder for future global endpoint TLS settings.
+type GlobalEndpointsTLS struct{}
+
+// CertManagerTLS holds parameters for cert-manager driven certificates.
+type CertManagerTLS struct {
+	IssuerRef IssuerRef `json:"issuerRef"`
+	// DNSNames for the certificate SANs. If empty, operator will add Service DNS names.
+	DNSNames []string `json:"dnsNames,omitempty"`
+	// SecretName optional explicit name for the target secret. If empty a default is chosen.
+	SecretName string `json:"secretName,omitempty"`
+}
+
+// ProvidedTLS references an existing secret that contains tls.crt/tls.key (and optional ca.crt).
+type ProvidedTLS struct {
+	SecretName string `json:"secretName"`
+}
+
+// IssuerRef references a cert-manager Issuer or ClusterIssuer.
+type IssuerRef struct {
+	Name string `json:"name"`
+	// Kind of issuer (Issuer or ClusterIssuer). Defaults to Issuer.
+	Kind string `json:"kind,omitempty"`
+	// Group defaults to cert-manager.io
+	Group string `json:"group,omitempty"`
+}
+
 // DocumentDBStatus defines the observed state of DocumentDB.
 type DocumentDBStatus struct {
 	// Status reflects the status field from the underlying CNPG Cluster.
@@ -122,6 +213,16 @@ type DocumentDBStatus struct {
 	ConnectionString string `json:"connectionString,omitempty"`
 	TargetPrimary    string `json:"targetPrimary,omitempty"`
 	LocalPrimary     string `json:"localPrimary,omitempty"`
+
+	// TLS reports gateway TLS provisioning status (Phase 1).
+	TLS *TLSStatus `json:"tls,omitempty"`
+}
+
+// TLSStatus captures readiness and secret information.
+type TLSStatus struct {
+	Ready      bool   `json:"ready,omitempty"`
+	SecretName string `json:"secretName,omitempty"`
+	Message    string `json:"message,omitempty"`
 }
 
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.status",description="CNPG Cluster Status"

@@ -55,9 +55,13 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, nil
 	}
 
-	// No further action needed for completed backups
-	if backup.Status.IsDone() {
-		return ctrl.Result{}, nil
+	// If the backup is already done and not expired, requeue to check expiration
+	if backup.Status.IsDone() && backup.Status.ExpiredAt != nil {
+		requeueAfter := time.Until(backup.Status.ExpiredAt.Time)
+		if requeueAfter < 0 {
+			requeueAfter = time.Minute
+		}
+		return ctrl.Result{RequeueAfter: requeueAfter}, nil
 	}
 
 	// Fetch the associated DocumentDB cluster
@@ -231,7 +235,11 @@ func (r *BackupReconciler) SetBackupPhaseFailed(ctx context.Context, backup *dbp
 	}
 
 	r.Recorder.Event(backup, "Warning", "BackupFailed", errMessage)
-	return ctrl.Result{}, nil
+	requeueAfter := time.Until(backup.Status.ExpiredAt.Time)
+	if requeueAfter < 0 {
+		requeueAfter = time.Minute
+	}
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
 func (r *BackupReconciler) SetBackupPhaseSkipped(ctx context.Context, backup *dbpreview.Backup, errMessage string, backupConfiguration *dbpreview.BackupConfiguration) (ctrl.Result, error) {
@@ -248,7 +256,11 @@ func (r *BackupReconciler) SetBackupPhaseSkipped(ctx context.Context, backup *db
 	}
 
 	r.Recorder.Event(backup, "Warning", "BackupSkipped", errMessage)
-	return ctrl.Result{}, nil
+	requeueAfter := time.Until(backup.Status.ExpiredAt.Time)
+	if requeueAfter < 0 {
+		requeueAfter = time.Minute
+	}
+	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -35,10 +35,9 @@ while time.time() < end_time:
         count += 1
         print(f"{str(write_result):<30} {count:<15}")
     except Exception as e:
-        failed = True
-        short_err = getattr(getattr(e, 'details', {}), 'get', lambda *_: None)('errmsg')
-        print(f"Error: {short_err or str(e)}")
-
+        if not first_error_seen:
+            #print("Promotion in progress")
+            first_error_seen = True
     
     time.sleep(1)  
 

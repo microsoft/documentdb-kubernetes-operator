@@ -31,7 +31,7 @@ possible and will be documented as they are tested.
 - Two kubernetes clusters that are network connected to each other. For example using
   - [Azure VPN Gatway](https://learn.microsoft.com/en-us/azure/vpn-gateway/vpn-gateway-about-vpngateways)
   - [Azure ExpressRoute](https://learn.microsoft.com/en-us/azure/expressroute/expressroute-introduction)
-- ENV variables `$AZURE_MEMBER` and `$ON_PREM_MEMBER` with the kubectl context names for your clusters 
+- ENV variables `$CLOUD_MEMBER` and `$ON_PREM_MEMBER` with the kubectl context names for your clusters 
   - (e.g. "azure-documentdb-cluster", "k3s-cluster-context")
 
 ## Architecture Overview
@@ -94,7 +94,7 @@ Run `kubectl get membercluster -A` again and see `True` under `JOINED` to confir
 
 ```bash
 # Install on primary
-kubectl config use-context $AZURE_MEMBER
+kubectl config use-context $CLOUD_MEMBER
 helm repo add jetstack https://charts.jetstack.io
 helm repo update
 helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --set installCRDs=true
@@ -251,7 +251,7 @@ kubectl apply -f ./documentdb-base.yaml
 After a few seconds, ensure that the operator is running on both of the clusters
 
 ```sh
-kubectl config use-context $AZURE_MEMBER
+kubectl config use-context $CLOUD_MEMBER
 kubectl get deployment -n documentdb-operator
 kubectl config use-context $ON_PREM_MEMBER
 kubectl get deployment -n documentdb-operator
@@ -274,21 +274,21 @@ Physical replication provides high availability and disaster recovery capabiliti
 ```bash
 kubectl config use-context $ON_PREM_MEMBER
 kubectl create configmap cluster-name -n kube-system --from-literal=name=on-prem-cluster-name
-kubectl config use-context $AZURE_MEMBER
-kubectl create configmap cluster-name -n kube-system --from-literal=name=azure-cluster-name
+kubectl config use-context $CLOUD_MEMBER
+kubectl create configmap cluster-name -n kube-system --from-literal=name=cloud-cluster-name
 ```
 
 OR
 
 ```bash
-cat <<EOF > azure-cluster-name.yaml
+cat <<EOF > cloud-cluster-name.yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cluster-name
   namespace: kube-system
 data:
-  name: "azure-cluster-name"
+  name: "cloud-cluster-name"
 EOF
 
 cat <<EOF > on-prem-name.yaml
@@ -301,7 +301,7 @@ data:
   name: "on-prem-cluster-name"
 EOF
 
-kubectl config use-context $AZURE_MEMBER
+kubectl config use-context $CLOUD_MEMBER
 kubectl apply -f ./primary-name.yaml
 kubectl config use-context $ON_PREM_MEMBER
 kubectl apply -f ./replica-name.yaml
@@ -332,10 +332,10 @@ spec:
     storage:
       pvcSize: 10Gi
   clusterReplication:
-    primary: azure-cluster-name
+    primary: cloud-cluster-name
     clusterList:
-      - azure-cluster-name
-      - on-prem-cluster-name
+      - name: cloud-cluster-name
+      - name: on-prem-cluster-name
   exposeViaService:
     serviceType: ClusterIP
 
@@ -364,7 +364,7 @@ kubectl apply -f ./documentdb-resource.yaml
 After a few seconds, ensure that the operator is running on both of the clusters
 
 ```sh
-kubectl config use-context $AZURE_MEMBER
+kubectl config use-context $CLOUD_MEMBER
 kubectl get pods -n documentdb-operator-ns
 kubectl config use-context $ON_PREM_MEMBER
 kubectl get pods -n documentdb-operator-ns
@@ -374,7 +374,7 @@ Output:
 
 ```text
 NAME                   READY   STATUS    RESTARTS   AGE
-azure-cluster-name-1   2/2     Running   0          3m33s
+cloud-cluster-name-1   2/2     Running   0          3m33s
 ```
 
 ## Testing and Verification
@@ -382,8 +382,8 @@ azure-cluster-name-1   2/2     Running   0          3m33s
 1. Test connection to DocumentDB:
 
 ```bash
-# Get the service IP from primary (azure)
-kubectl config use-context $AZURE_MEMBER
+# Get the service IP from primary (cloud)
+kubectl config use-context $CLOUD_MEMBER
 service_ip=$(kubectl get service documentdb-service-documentdb-preview -n documentdb-preview-ns -o jsonpath="{.status.loadBalancer.ingress[0].ip}")
 
 # Connect using mongosh
@@ -410,7 +410,7 @@ kubectl config use-context hub
 kubectl patch documentdb documentdb-preview -n documentdb-preview-ns \
   --type='json' -p='[
   {"op": "replace", "path": "/spec/clusterReplication/primary", "value":"on-prem-cluster-name"},
-  {"op": "replace", "path": "/spec/clusterReplication/clusterList", "value":["on-prem-cluster-name"]}
+  {"op": "replace", "path": "/spec/clusterReplication/clusterList", "value":[{"name": "on-prem-cluster-name"}]}
   ]'
 ```
 

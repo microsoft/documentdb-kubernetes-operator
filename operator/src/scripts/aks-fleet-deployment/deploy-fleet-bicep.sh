@@ -130,7 +130,7 @@ fi
 echo "Fetching kubeconfig contexts..."
 FIRST_CLUSTER=""
 set +e
-az fleet get-credentials --resource-group "$RESOURCE_GROUP" --name "$FLEET_NAME" --overwrite-existing >/dev/null 2>&1
+az fleet get-credentials --resource-group "$RESOURCE_GROUP" --name "$FLEET_NAME" --overwrite-existing 
 GET_CREDS_RC=$?
 set -e
 if [ $GET_CREDS_RC -ne 0 ]; then
@@ -144,7 +144,7 @@ fi
 while read -r cluster; do
   [ -z "$cluster" ] && continue
   set +e
-  az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$cluster" --admin --overwrite-existing >/dev/null 2>&1
+  az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$cluster" --overwrite-existing >/dev/null 2>&1
   rc=$?
   set -e
   if [ $rc -eq 0 ]; then

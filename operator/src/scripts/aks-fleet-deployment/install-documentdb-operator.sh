@@ -10,7 +10,7 @@ set -euo pipefail
 
 RESOURCE_GROUP="${RESOURCE_GROUP:-german-aks-fleet-rg}"
 HUB_CONTEXT=${HUB_CONTEXT:-hub}
-CHART_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../" && pwd)/documentdb-helm-chart"
+CHART_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../" && pwd)/documentdb-helm-chart"
 VERSION="${VERSION:-200}"
 VALUES_FILE="${VALUES_FILE:-}"
 
@@ -37,13 +37,16 @@ fi
 echo "Applying cert-manager CRDs on hub ($HUB_CONTEXT)..."
 run kubectl --context "$HUB_CONTEXT" apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.crds.yaml
 
-# Build/package chart if local tgz not present
+# Build/package chart
 CHART_PKG="./documentdb-operator-0.0.${VERSION}.tgz"
-if [ ! -f "$CHART_PKG" ]; then
-  echo "Packaging chart (helm dependency update && helm package)..."
-  run helm dependency update "$CHART_DIR"
-  run helm package "$CHART_DIR" --version 0.0."${VERSION}"
+if [ -f "$CHART_PKG" ]; then
+  echo "Found existing chart package $CHART_PKG"
+  rm -f "$CHART_PKG"
 fi
+echo "Packaging chart (helm dependency update && helm package)..."
+run helm dependency update "$CHART_DIR"
+run helm package "$CHART_DIR" --version 0.0."${VERSION}"
+
 
 # Install/upgrade operator using the packaged chart if available, otherwise fallback to OCI registry
 if [ -f "$CHART_PKG" ]; then

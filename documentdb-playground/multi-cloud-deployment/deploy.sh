@@ -569,7 +569,7 @@ kubectl --context "$EKS_CLUSTER_NAME" -n istio-system annotate service istio-eas
 # Step 6: Install DocumentDB Operator
 # ============================================================================
 
-CHART_DIR="$(cd "$TEMPLATE_DIR/../../.." && pwd)/documentdb-helm-chart"
+CHART_DIR="$(cd "$TEMPLATE_DIR/../../" && pwd)/operator/documentdb-helm-chart"
 CHART_PKG="$TEMPLATE_DIR/documentdb-operator-0.0.${VERSION}.tgz"
 
 # Apply cert-manager CRDs on hub

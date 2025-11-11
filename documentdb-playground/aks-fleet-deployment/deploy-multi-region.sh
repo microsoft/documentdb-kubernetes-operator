@@ -6,7 +6,7 @@ set -euo pipefail
 # Usage: ./deploy-multi-region.sh [password]
 #
 # Environment variables:
-#   RESOURCE_GROUP: Azure resource group (default: german-aks-fleet-rg)
+#   RESOURCE_GROUP: Azure resource group (default: documentdb-aks-fleet-rg)
 #   DOCUMENTDB_PASSWORD: Database password (will be generated if not provided)
 #   ENABLE_AZURE_DNS: Enable Azure DNS creation (default: true)
 #   AZURE_DNS_ZONE_NAME: Azure DNS zone name (default: same as resource group)
@@ -20,7 +20,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Resource group
-RESOURCE_GROUP="${RESOURCE_GROUP:-german-aks-fleet-rg}"
+RESOURCE_GROUP="${RESOURCE_GROUP:-documentdb-aks-fleet-rg}"
 
 # Azure DNS configuration
 AZURE_DNS_ZONE_NAME="${AZURE_DNS_ZONE_NAME:-${RESOURCE_GROUP}}"

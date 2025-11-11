@@ -33,7 +33,7 @@ Deploy DocumentDB clusters across different cloud platforms and configurations:
 
 - **Azure (AKS)**: [Comprehensive deployment automation scripts for Azure Kubernetes Service](documentdb-playground/aks-setup/README.md)
 - **AWS (EKS)**: [Simple automation scripts for deploying on Amazon Elastic Kubernetes Service](documentdb-playground/aws-setup/README.md)  
-- **Multi-Cloud**: [High availability setup across multiple cloud providers using KubeFleet and Istio](documentdb-playground/multi-clould-deployment/README.md)
+- **Multi-Cloud**: [High availability setup across multiple cloud providers using KubeFleet and Istio](documentdb-playground/multi-cloud-deployment/README.md)
 - **Azure Multi-Region (AKS + AzureFleet)**: [Deployment scripts for deploying multi-regionally in Azure](documentdb-playground/aks-fleet-deployment/README.md)
 - **TLS Configuration**: [Gateway TLS setup with multiple certificate modes (self-signed, provided, cert-manager)](documentdb-playground/tls/README.md)
 - **Operator Upgrades**: [Local development guide for testing operator control plane upgrades](documentdb-playground/operator-upgrade-guide/README.md)

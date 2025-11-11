@@ -4,18 +4,18 @@ This directory contains templates and scripts for deploying DocumentDB across mu
 
 ## Architecture
 
-- **Fleet Resource**: Deployed in East US 2 (management hub for resource propagation)
+- **Fleet Hub**: Deployed in East US 2 (for resource propagation)
 - **Multi-Cloud Clusters**: 
-  - **AKS**: Single member cluster in configurable region (default: eastus2)
+  - **AKS**: Single member cluster in eastus2
   - **GKE**: Cluster in us-central1-a
   - **EKS**: Cluster in us-west-2
 - **Network**: 
   - AKS: Uses default Azure CNI
   - GKE: Default GKE networking
-  - EKS: Default EKS networking with NLB for cross-cloud connectivity
+  - EKS: Default EKS networking with internet-facing NLB for cross-cloud connectivity
 - **Service Mesh**: Istio multi-cluster mesh for cross-cloud service discovery
 - **VM Size**: Standard_DS3_v2 for AKS, e2-standard-4 for GKE, m5.large for EKS (configurable)
-- **Node Count**: 1-2 nodes per cluster for cost optimization
+- **Node Count**: 1 nodes per cluster for cost optimization
 - **Kubernetes Version**: Uses region default GA version (configurable)
 - **DocumentDB**: Multi-cloud deployment with primary/replica architecture and Istio-based replication
 
@@ -41,7 +41,7 @@ This directory contains templates and scripts for deploying DocumentDB across mu
 
 ## Quick Start
 
-### Deploy Everything (One Command)
+### Deploy Infrastructure
 
 ```bash
 ./deploy.sh
@@ -52,7 +52,7 @@ This single script will:
    - Create Azure resource group
    - Deploy AKS Fleet resource
    - Deploy AKS member cluster
-   - Deploy GKE cluster (in parallel)
+   - Deploy GKE cluster 
    - Deploy EKS cluster with EBS CSI driver and AWS Load Balancer Controller
 2. **Configure Multi-Cloud Mesh**:
    - Join GKE and EKS clusters to the AKS Fleet
@@ -86,7 +86,7 @@ This will:
 - Select a primary cluster (defaults to EKS cluster)
 - Deploy DocumentDB with Istio-based cross-cloud replication
 - Create Azure DNS zone with records for each cluster (if enabled)
-- Create SRV record for MongoDB connection string
+- Create SRV record for primary connection string
 - Provide connection information and failover commands
 
 ## Configuration
@@ -124,7 +124,7 @@ export EKS_REGION="us-west-2"
 
 # DocumentDB Operator
 export VERSION="200"  # Operator version
-export VALUES_FILE="/path/to/custom/values.yaml"  # Optional Helm values
+export VALUES_FILE="/path/to/custom/values.yaml"  # Optional Operator images
 
 ./deploy.sh
 ```
@@ -143,6 +143,8 @@ The template uses placeholders replaced at runtime:
 - `{{DOCUMENTDB_PASSWORD}}`: The database password
 - `{{PRIMARY_CLUSTER}}`: The selected primary cluster
 - `{{CLUSTER_LIST}}`: YAML list of all clusters with their environments
+- `{{GATEWAY_IMAGE}}`: Image to be used for the documentdb gateway
+- `{{DOCUMENTDB_IMAGE}}`: Image to be used for the documentdb postgres backend
 
 ### Azure DNS Configuration
 
@@ -151,17 +153,6 @@ export ENABLE_AZURE_DNS="true"  # Enable/disable DNS creation
 export AZURE_DNS_ZONE_NAME="my-documentdb-zone"  # DNS zone name (default: resource group name)
 export AZURE_DNS_PARENT_ZONE_RESOURCE_ID="/subscriptions/.../dnszones/parent.zone"
 ```
-
-## Environment Variables
-
-The deployment scripts automatically set and export:
-- `FLEET_ID`: Full resource ID of the AKS fleet
-- `IDENTITY`: Your Azure AD user ID
-- `DOCUMENTDB_PASSWORD`: Database password (when deploying DocumentDB)
-- `RESOURCE_GROUP`: Resource group name (default: german-aks-fleet-rg)
-- `PROJECT_ID`: GCP project ID (default: sanguine-office-475117-s6)
-- `ZONE`: GCP zone (default: us-central1-a)
-- `EKS_REGION`: AWS region (default: us-west-2)
 
 ## kubectl Contexts
 
@@ -207,13 +198,64 @@ mongosh localhost:10260 -u default_user -p <password> \
 When `ENABLE_AZURE_DNS=true`, use the MongoDB SRV connection string:
 
 ```bash
-mongosh "mongodb+srv://default_user:<password>@_mongodb._tcp.<zone-name>.<parent-zone>/?tls=true&tlsAllowInvalidCertificates=true&authMechanism=SCRAM-SHA-256"
+mongosh "mongodb+srv://default_user:<password>@<zone-name>.<parent-zone>/?tls=true&tlsAllowInvalidCertificates=true&authMechanism=SCRAM-SHA-256"
 ```
 
 Example:
 ```bash
-mongosh "mongodb+srv://default_user:mypassword@_mongodb._tcp.german-aks-fleet-rg.multi-cloud.pgmongo-dev.cosmos.windows-int.net/?tls=true&tlsAllowInvalidCertificates=true&authMechanism=SCRAM-SHA-256"
+mongosh "mongodb+srv://default_user:mypassword@german-aks-fleet-rg.multi-cloud.pgmongo-dev.cosmos.windows-int.net/?tls=true&tlsAllowInvalidCertificates=true&authMechanism=SCRAM-SHA-256"
 ```
+
+### Observability and Telemetry
+
+The `telemetry` folder contains configuration files for setting up a comprehensive observability stack across your multi-cloud DocumentDB deployment:
+
+#### Components
+
+- **Prometheus**: Metrics collection and storage
+- **Grafana**: Visualization and dashboards
+- **OpenTelemetry Collector**: Unified telemetry collection (metrics, logs, traces)
+
+#### Deploy Telemetry Stack
+
+```bash
+cd telemetry
+./deploy-telemetry.sh
+```
+
+This script will:
+1. Deploy OpenTelemetry Collector on all clusters
+2. Install Prometheus on the azure-documentdb cluster
+2. Install Grafana on the azure-documentdb cluster
+4. Configure Prometheus to scrape DocumentDB metrics
+
+#### Access Grafana Dashboard
+
+```bash
+# Port-forward to Grafana
+kubectl --context hub port-forward -n monitoring svc/grafana 3000:80
+
+# Open browser to http://localhost:3000
+# Default credentials: admin/admin (change on first login)
+```
+
+From there you can import dashboard.json
+
+#### Configuration Files
+
+- **`deploy-telemetry.sh`**: Automated deployment script for the entire observability stack
+- **`prometheus-values.yaml`**: Prometheus Helm chart configuration
+- **`grafana-values.yaml`**: Grafana Helm chart configuration with dashboard provisioning
+- **`otel-collector.yaml`**: OpenTelemetry Collector configuration for metrics and logs
+- **`dashboard.json`**: Pre-built Grafana dashboard for DocumentDB monitoring
+
+#### Custom Configuration
+
+Edit the values files to customize:
+- Prometheus retention period and storage
+- Grafana plugins and data sources
+- OpenTelemetry Collector pipelines and exporters
+- Dashboard refresh intervals and panels
 
 ### Failover Operations
 
@@ -236,15 +278,6 @@ az fleet show --name <fleet-name> --resource-group $RESOURCE_GROUP
 
 # List fleet members (includes Azure members only, not cross-cloud)
 az fleet member list --fleet-name <fleet-name> --resource-group $RESOURCE_GROUP
-
-# Check all ClusterResourcePlacements
-kubectl --context hub get clusterresourceplacement
-
-# View base resources placement (CRDs, RBAC)
-kubectl --context hub describe clusterresourceplacement documentdb-base
-
-# View DocumentDB cluster placement
-kubectl --context hub describe clusterresourceplacement documentdb-crp
 
 # Check multi-cloud fleet membership (GKE and EKS)
 kubectl --context hub get membercluster
@@ -309,9 +342,6 @@ done
 ### Monitor Replication
 
 ```bash
-# Watch ClusterResourcePlacement status
-watch 'kubectl --context hub get clusterresourceplacement documentdb-crp -o wide'
-
 # Monitor all DocumentDB instances
 watch 'for c in azure-documentdb gcp-documentdb aws-documentdb; do \
   echo "=== $c ==="; \
@@ -396,9 +426,6 @@ az fleet get-credentials --resource-group $RESOURCE_GROUP --name <fleet-name>
 
 # If web authentication is blocked, use Azure CLI
 kubelogin convert-kubeconfig -l azurecli
-
-# Use admin credentials for member clusters
-az aks get-credentials --resource-group $RESOURCE_GROUP --name <cluster-name> --admin
 ```
 
 **Google GKE:**
@@ -418,29 +445,6 @@ aws eks update-kubeconfig --name <cluster-name> --region <region>
 
 # Verify IAM identity
 aws sts get-caller-identity
-```
-
-### Resource Propagation Issues
-
-```bash
-# Check ClusterResourcePlacement status
-kubectl --context hub get clusterresourceplacement documentdb-base -o yaml
-kubectl --context hub get clusterresourceplacement documentdb-crp -o yaml
-
-# Verify fleet members (Azure native)
-az fleet member list --fleet-name <fleet-name> --resource-group $RESOURCE_GROUP
-
-# Verify multi-cloud member clusters
-kubectl --context hub get membercluster
-kubectl --context hub describe membercluster <cluster-name>
-
-# Check if resources reached target clusters
-for cluster in azure-documentdb gcp-documentdb aws-documentdb; do
-  echo "=== $cluster ==="
-  kubectl --context $cluster get documentdb -n documentdb-preview-ns
-  kubectl --context $cluster get pods -n documentdb-preview-ns
-  echo
-done
 ```
 
 ### Istio Mesh Issues
@@ -512,9 +516,6 @@ curl -v http://documentdb-service-aws-documentdb.documentdb-preview-ns.svc.clust
 ### Debugging
 
 ```bash
-# Check operator logs on hub
-kubectl --context hub logs -n documentdb-operator deployment/documentdb-operator --tail=100
-
 # Check operator logs on member clusters
 for cluster in azure-documentdb gcp-documentdb aws-documentdb; do
   echo "=== $cluster ==="

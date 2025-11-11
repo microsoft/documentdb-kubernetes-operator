@@ -225,7 +225,7 @@ func (r *BackupReconciler) SetBackupPhaseFailed(ctx context.Context, backup *dbp
 	original := backup.DeepCopy()
 
 	backup.Status.Phase = cnpgv1.BackupPhaseFailed
-	backup.Status.Error = errMessage
+	backup.Status.Message = errMessage
 	backup.Status.ExpiredAt = backup.CalculateExpirationTime(backupConfiguration)
 
 	if err := r.Status().Patch(ctx, backup, client.MergeFrom(original)); err != nil {
@@ -242,11 +242,11 @@ func (r *BackupReconciler) SetBackupPhaseFailed(ctx context.Context, backup *dbp
 	return ctrl.Result{RequeueAfter: requeueAfter}, nil
 }
 
-func (r *BackupReconciler) SetBackupPhaseSkipped(ctx context.Context, backup *dbpreview.Backup, errMessage string, backupConfiguration *dbpreview.BackupConfiguration) (ctrl.Result, error) {
+func (r *BackupReconciler) SetBackupPhaseSkipped(ctx context.Context, backup *dbpreview.Backup, message string, backupConfiguration *dbpreview.BackupConfiguration) (ctrl.Result, error) {
 	original := backup.DeepCopy()
 
 	backup.Status.Phase = dbpreview.BackupPhaseSkipped
-	backup.Status.Error = errMessage
+	backup.Status.Message = message
 	backup.Status.ExpiredAt = backup.CalculateExpirationTime(backupConfiguration)
 
 	if err := r.Status().Patch(ctx, backup, client.MergeFrom(original)); err != nil {
@@ -255,7 +255,7 @@ func (r *BackupReconciler) SetBackupPhaseSkipped(ctx context.Context, backup *db
 		return ctrl.Result{}, err
 	}
 
-	r.Recorder.Event(backup, "Warning", "BackupSkipped", errMessage)
+	r.Recorder.Event(backup, "Warning", "BackupSkipped", message)
 	requeueAfter := time.Until(backup.Status.ExpiredAt.Time)
 	if requeueAfter < 0 {
 		requeueAfter = time.Minute

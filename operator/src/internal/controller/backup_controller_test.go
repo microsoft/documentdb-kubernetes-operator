@@ -206,7 +206,7 @@ var _ = Describe("Backup Controller", func() {
 			updated := &dbpreview.Backup{}
 			Expect(fakeClient.Get(ctx, client.ObjectKey{Name: backupName, Namespace: backupNamespace}, updated)).To(Succeed())
 			Expect(string(updated.Status.Phase)).To(Equal(string(cnpgv1.BackupPhaseFailed)))
-			Expect(updated.Status.Error).To(Equal("connection timeout"))
+			Expect(updated.Status.Message).To(Equal("connection timeout"))
 			Expect(updated.Status.StartedAt).ToNot(BeNil())
 			Expect(updated.Status.StoppedAt).ToNot(BeNil())
 			Expect(updated.Status.StartedAt.Time.Unix()).To(Equal(startTime.Unix()))

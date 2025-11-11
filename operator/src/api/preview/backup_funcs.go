@@ -52,8 +52,8 @@ func (backup *Backup) UpdateStatus(cnpgBackup *cnpgv1.Backup, backupConfiguratio
 		needsUpdate = true
 	}
 
-	if backup.Status.Error != cnpgBackup.Status.Error {
-		backup.Status.Error = cnpgBackup.Status.Error
+	if backup.Status.Message != cnpgBackup.Status.Error {
+		backup.Status.Message = cnpgBackup.Status.Error
 		needsUpdate = true
 	}
 

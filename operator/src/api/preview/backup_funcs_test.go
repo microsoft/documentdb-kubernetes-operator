@@ -79,7 +79,7 @@ var _ = Describe("Backup", func() {
 					Phase:     cnpgv1.BackupPhase(""),
 					StartedAt: nil,
 					StoppedAt: nil,
-					Error:     "",
+					Message:   "",
 				},
 			}
 
@@ -88,7 +88,7 @@ var _ = Describe("Backup", func() {
 			Expect(string(backup.Status.Phase)).To(Equal(cnpgv1.BackupPhaseCompleted))
 			Expect(backup.Status.StartedAt).To(Equal(&startedAt))
 			Expect(backup.Status.StoppedAt).To(Equal(&stoppedAt))
-			Expect(backup.Status.Error).To(Equal("none"))
+			Expect(backup.Status.Message).To(Equal("none"))
 			// ExpiredAt should be StoppedAt + 30 days (default)
 			Expect(backup.Status.ExpiredAt).ToNot(BeNil())
 			Expect(backup.Status.ExpiredAt.Time.Equal(stoppedAt.Time.Add(30 * 24 * time.Hour))).To(BeTrue())
@@ -114,7 +114,7 @@ var _ = Describe("Backup", func() {
 					Phase:     cnpgv1.BackupPhaseCompleted,
 					StartedAt: &startedAt,
 					StoppedAt: &stoppedAt,
-					Error:     "none",
+					Message:   "none",
 					ExpiredAt: &expiredAt,
 				},
 			}

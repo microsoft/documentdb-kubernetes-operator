@@ -35,9 +35,9 @@ spec:
       jsonPath: .status.expiredAt
       name: ExpiredAt
       type: string
-    - description: Backup error information
-      jsonPath: .status.error
-      name: Error
+    - description: Backup status message
+      jsonPath: .status.message
+      name: Message
       type: string
     name: preview
     schema:
@@ -88,13 +88,16 @@ spec:
           status:
             description: BackupStatus defines the observed state of Backup.
             properties:
-              error:
-                description: Error contains error information if the backup failed.
-                type: string
               expiredAt:
                 description: ExpiredAt is the time when the backup is considered expired
                   and can be deleted.
                 format: date-time
+                type: string
+              message:
+                description: |-
+                  Message contains additional information about the backup status.
+                  For failed backups, this contains the error message.
+                  For skipped backups, this explains why the backup was skipped.
                 type: string
               phase:
                 description: Phase represents the current phase of the backup operation.

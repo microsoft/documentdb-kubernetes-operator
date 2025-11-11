@@ -43,9 +43,11 @@ type BackupStatus struct {
 	// +optional
 	ExpiredAt *metav1.Time `json:"expiredAt,omitempty"`
 
-	// Error contains error information if the backup failed.
+	// Message contains additional information about the backup status.
+	// For failed backups, this contains the error message.
+	// For skipped backups, this explains why the backup was skipped.
 	// +optional
-	Error string `json:"error,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -55,7 +57,7 @@ type BackupStatus struct {
 // +kubebuilder:printcolumn:name="StartedAt",type=string,JSONPath=".status.startedAt",description="Backup start time"
 // +kubebuilder:printcolumn:name="StoppedAt",type=string,JSONPath=".status.stoppedAt",description="Backup completion time"
 // +kubebuilder:printcolumn:name="ExpiredAt",type=string,JSONPath=".status.expiredAt",description="Backup expiration time"
-// +kubebuilder:printcolumn:name="Error",type=string,JSONPath=".status.error",description="Backup error information"
+// +kubebuilder:printcolumn:name="Message",type=string,JSONPath=".status.message",description="Backup status message"
 type Backup struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

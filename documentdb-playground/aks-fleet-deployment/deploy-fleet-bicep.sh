@@ -3,7 +3,7 @@
 set -eu
 
 # Define variables (allow env overrides)
-RESOURCE_GROUP="${RESOURCE_GROUP:-german-aks-fleet-rg}"
+RESOURCE_GROUP="${RESOURCE_GROUP:-documentdb-aks-fleet-rg}"
 # Resource Group location (does not have to match cluster regions)
 RG_LOCATION="${RG_LOCATION:-eastus2}"
 # Hub region
@@ -130,7 +130,7 @@ fi
 echo "Fetching kubeconfig contexts..."
 FIRST_CLUSTER=""
 set +e
-az fleet get-credentials --resource-group "$RESOURCE_GROUP" --name "$FLEET_NAME" --overwrite-existing >/dev/null 2>&1
+az fleet get-credentials --resource-group "$RESOURCE_GROUP" --name "$FLEET_NAME" --overwrite-existing 
 GET_CREDS_RC=$?
 set -e
 if [ $GET_CREDS_RC -ne 0 ]; then
@@ -144,7 +144,7 @@ fi
 while read -r cluster; do
   [ -z "$cluster" ] && continue
   set +e
-  az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$cluster" --admin --overwrite-existing >/dev/null 2>&1
+  az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$cluster" --overwrite-existing >/dev/null 2>&1
   rc=$?
   set -e
   if [ $rc -eq 0 ]; then
@@ -224,12 +224,6 @@ echo "If you run into login problems refer to:"
 echo "https://learn.microsoft.com/en-us/azure/aks/kubelogin-authentication#azure-cli"
 echo "The default is web interactive/device login which might not be allowed by your administrator."
 echo "Try switching to Azure CLI in that case: kubelogin convert-kubeconfig -l azurecli"
-
-echo ""
-echo "To get credentials for member clusters with admin access:"
-echo "$MEMBER_CLUSTER_NAMES" | while read cluster; do
-  echo "az aks get-credentials --resource-group $RESOURCE_GROUP --name $cluster --admin"
-done
 
 echo ""
 echo "Run 'source ~/.bashrc' to load the aliases and environment variables in your current session"

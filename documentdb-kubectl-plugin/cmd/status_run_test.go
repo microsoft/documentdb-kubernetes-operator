@@ -42,7 +42,11 @@ func TestStatusRunRendersClusterTable(t *testing.T) {
 	docName := "documentdb-sample"
 
 	hubDoc := newDocument(docName, namespace, "cluster-a", "Ready")
-	if err := unstructured.SetNestedStringSlice(hubDoc.Object, []string{"cluster-a", "cluster-b"}, "spec", "clusterReplication", "clusterList"); err != nil {
+	clusterList := []interface{}{
+		map[string]interface{}{"name": "cluster-a"},
+		map[string]interface{}{"name": "cluster-b"},
+	}
+	if err := unstructured.SetNestedSlice(hubDoc.Object, clusterList, "spec", "clusterReplication", "clusterList"); err != nil {
 		t.Fatalf("failed to set clusterList: %v", err)
 	}
 	if err := unstructured.SetNestedField(hubDoc.Object, "PrimaryConn", "status", "connectionString"); err != nil {

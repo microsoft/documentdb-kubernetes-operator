@@ -33,8 +33,13 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 ) error {
 	isPrimary := documentdb.Spec.ClusterReplication.Primary == replicationContext.Self
 
-	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
+	if replicationContext.IsAzureFleetNetworking() {
 		err := r.CreateServiceImportAndExport(ctx, replicationContext, documentdb)
+		if err != nil {
+			return err
+		}
+	} else if replicationContext.IsIstioNetworking() {
+		err := r.CreateIstioRemoteServices(ctx, replicationContext, documentdb)
 		if err != nil {
 			return err
 		}
@@ -54,10 +59,14 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 		}
 	} else if documentdb.Spec.ClusterReplication.HighAvailability {
 		// If primary and HA we want a local standby and a slot for the WAL replica
-		cnpgCluster.Spec.Instances = 2
-		cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL =
-			append(cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL,
+		// TODO change to 2 when WAL replica is available
+		cnpgCluster.Spec.Instances = 3
+		// Restoring from backup won't have PostInitSQL configured
+		if cnpgCluster.Spec.Bootstrap != nil && cnpgCluster.Spec.Bootstrap.InitDB != nil && cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL != nil {
+			cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL = append(
+				cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL,
 				"select * from pg_create_physical_replication_slot('wal_replica');")
+		}
 		// Also need to configure quorum writes
 		cnpgCluster.Spec.PostgresConfiguration.Synchronous = &cnpgv1.SynchronousReplicaConfiguration{
 			Method:          cnpgv1.SynchronousReplicaConfigurationMethodAny,
@@ -90,7 +99,7 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 		Self:    replicationContext.Self,
 	}
 
-	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
+	if replicationContext.IsAzureFleetNetworking() {
 		// need to create services for each of the other clusters
 		cnpgCluster.Spec.Managed = &cnpgv1.ManagedConfiguration{
 			Services: &cnpgv1.ManagedServices{
@@ -121,7 +130,7 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 			},
 		},
 	}
-	for clusterName, serviceName := range replicationContext.GenerateExternalClusterServices(documentdb.Namespace, documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud) {
+	for clusterName, serviceName := range replicationContext.GenerateExternalClusterServices(documentdb.Namespace, replicationContext.IsAzureFleetNetworking()) {
 		cnpgCluster.Spec.ExternalClusters = append(cnpgCluster.Spec.ExternalClusters, cnpgv1.ExternalCluster{
 			Name: clusterName,
 			ConnectionParameters: map[string]string{
@@ -131,6 +140,58 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 				"user":   "postgres",
 			},
 		})
+	}
+
+	return nil
+}
+
+func (r *DocumentDBReconciler) CreateIstioRemoteServices(ctx context.Context, replicationContext *util.ReplicationContext, documentdb *dbpreview.DocumentDB) error {
+	// Create dummy -rw services for remote clusters so DNS resolution works
+	// These services have non-matching selectors, so they have no local endpoints
+	// Istio will automatically route traffic through the east-west gateway
+	for _, remoteCluster := range replicationContext.Others {
+		// Create the -rw (read-write/primary) service for each remote cluster
+		serviceNameRW := remoteCluster + "-rw"
+		foundServiceRW := &corev1.Service{}
+		err := r.Get(ctx, types.NamespacedName{Name: serviceNameRW, Namespace: documentdb.Namespace}, foundServiceRW)
+		if err != nil && errors.IsNotFound(err) {
+			log.Log.Info("Creating Istio dummy service for remote cluster", "service", serviceNameRW, "cluster", remoteCluster)
+
+			serviceRW := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      serviceNameRW,
+					Namespace: documentdb.Namespace,
+					Labels: map[string]string{
+						"cnpg.io/cluster": remoteCluster,
+						"replica_type":    "primary",
+					},
+				},
+				Spec: corev1.ServiceSpec{
+					Ports: []corev1.ServicePort{
+						{
+							Name:       "postgres",
+							Port:       5432,
+							Protocol:   corev1.ProtocolTCP,
+							TargetPort: intstr.FromInt(5432),
+						},
+					},
+					Selector: map[string]string{
+						// Non-matching selector ensures no local endpoints
+						"cnpg.io/cluster": "does-not-exist",
+						"cnpg.io/podRole": "does-not-exist",
+					},
+					SessionAffinity: corev1.ServiceAffinityNone,
+					Type:            corev1.ServiceTypeClusterIP,
+				},
+			}
+
+			err = r.Create(ctx, serviceRW)
+			if err != nil {
+				return fmt.Errorf("failed to create Istio dummy service %s: %w", serviceNameRW, err)
+			}
+		} else if err != nil {
+			return fmt.Errorf("failed to check for existing service %s: %w", serviceNameRW, err)
+		}
 	}
 
 	return nil
@@ -185,7 +246,7 @@ func (r *DocumentDBReconciler) CreateServiceImportAndExport(ctx context.Context,
 	return nil
 }
 
-func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, desired *cnpgv1.Cluster, documentdb *dbpreview.DocumentDB) (error, time.Duration) {
+func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, desired *cnpgv1.Cluster, documentdb *dbpreview.DocumentDB, replicationContext *util.ReplicationContext) (error, time.Duration) {
 	if current.Spec.ReplicaCluster == nil || desired.Spec.ReplicaCluster == nil {
 		// FOR NOW assume that we aren't going to turn on or off physical replication
 		return nil, -1
@@ -250,21 +311,21 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 		}
 
 		// push out the  promotion token
-		err = r.CreateTokenService(ctx, current.Status.DemotionToken, documentdb.Namespace, documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud)
+		err = r.CreateTokenService(ctx, current.Status.DemotionToken, documentdb.Namespace, replicationContext)
 		if err != nil {
 			return err, time.Second * 10
 		}
 	} else if primaryChanged && desired.Spec.ReplicaCluster.Primary == current.Spec.ReplicaCluster.Self {
 		// Replica => primary
-		// Look for the token
+		// Look for the token if this is a managed failover
 		oldPrimaryAvailable := slices.Contains(
-			documentdb.Spec.ClusterReplication.ClusterList,
+			replicationContext.Others,
 			current.Spec.ReplicaCluster.Primary)
 
 		replicaClusterConfig := desired.Spec.ReplicaCluster
 		// If the old primary is available, we can read the token from it
 		if oldPrimaryAvailable {
-			token, err, refreshTime := r.ReadToken(ctx, documentdb.Namespace, documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud)
+			token, err, refreshTime := r.ReadToken(ctx, documentdb.Namespace, replicationContext)
 			if err != nil || refreshTime > 0 {
 				return err, refreshTime
 			}
@@ -339,11 +400,11 @@ func (r *DocumentDBReconciler) TryUpdateCluster(ctx context.Context, current, de
 	return nil, -1
 }
 
-func (r *DocumentDBReconciler) ReadToken(ctx context.Context, namespace string, fleetEnabled bool) (string, error, time.Duration) {
+func (r *DocumentDBReconciler) ReadToken(ctx context.Context, namespace string, replicationContext *util.ReplicationContext) (string, error, time.Duration) {
 	tokenServiceName := "promotion-token"
 
-	// If we are not using fleet, we only need to read the token from the configmap
-	if !fleetEnabled {
+	// If we are not using cross-cloud networking, we only need to read the token from the configmap
+	if !replicationContext.IsAzureFleetNetworking() && !replicationContext.IsIstioNetworking() {
 		configMap := &corev1.ConfigMap{}
 		err := r.Get(ctx, types.NamespacedName{Name: tokenServiceName, Namespace: namespace}, configMap)
 		if err != nil {
@@ -355,6 +416,61 @@ func (r *DocumentDBReconciler) ReadToken(ctx context.Context, namespace string, 
 		return configMap.Data["index.html"], nil, -1
 	}
 
+	// For Istio, create a dummy service so DNS resolution works
+	if replicationContext.IsIstioNetworking() {
+		foundService := &corev1.Service{}
+		err := r.Get(ctx, types.NamespacedName{Name: tokenServiceName, Namespace: namespace}, foundService)
+		if err != nil && errors.IsNotFound(err) {
+			log.Log.Info("Creating Istio dummy service for promotion token", "service", tokenServiceName)
+
+			service := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tokenServiceName,
+					Namespace: namespace,
+					Labels: map[string]string{
+						"app": tokenServiceName,
+					},
+				},
+				Spec: corev1.ServiceSpec{
+					Ports: []corev1.ServicePort{
+						{
+							Port:       80,
+							Protocol:   corev1.ProtocolTCP,
+							TargetPort: intstr.FromInt(80),
+						},
+					},
+					Selector: map[string]string{
+						// Non-matching selector ensures no local endpoints
+						"app": "does-not-exist",
+					},
+				},
+			}
+
+			err = r.Create(ctx, service)
+			if err != nil && !errors.IsAlreadyExists(err) {
+				return "", fmt.Errorf("failed to create Istio dummy service for promotion token: %w", err), time.Second * 10
+			}
+		} else if err != nil {
+			return "", fmt.Errorf("failed to check for existing service %s: %w", tokenServiceName, err), time.Second * 10
+		}
+
+		// Read token via HTTP through Istio service mesh
+		tokenRequestUrl := fmt.Sprintf("http://%s.%s.svc", tokenServiceName, namespace)
+		resp, err := http.Get(tokenRequestUrl)
+		if err != nil {
+			return "", fmt.Errorf("failed to get token from service: %w", err), time.Second * 10
+		}
+		defer resp.Body.Close()
+
+		token, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("failed to read token: %w", err), time.Second * 10
+		}
+
+		return string(token[:]), nil, -1
+	}
+
+	// This is the AzureFleet case
 	foundMCS := &fleetv1alpha1.MultiClusterService{}
 	err := r.Get(ctx, types.NamespacedName{Name: tokenServiceName, Namespace: namespace}, foundMCS)
 	if err != nil && errors.IsNotFound(err) {
@@ -409,7 +525,7 @@ func (r *DocumentDBReconciler) PromotionTokenNeedsUpdate(ctx context.Context, na
 	return configMap.Data["index.html"] == "", nil
 }
 
-func (r *DocumentDBReconciler) CreateTokenService(ctx context.Context, token string, namespace string, fleetEnabled bool) error {
+func (r *DocumentDBReconciler) CreateTokenService(ctx context.Context, token string, namespace string, replicationContext *util.ReplicationContext) error {
 	tokenServiceName := "promotion-token"
 	labels := map[string]string{
 		"app": tokenServiceName,
@@ -443,8 +559,8 @@ func (r *DocumentDBReconciler) CreateTokenService(ctx context.Context, token str
 		return fmt.Errorf("No token found yet")
 	}
 
-	// When not using fleet, just transfer with the configmap
-	if !fleetEnabled {
+	// When not using cross-cloud networking, just transfer with the configmap
+	if !replicationContext.IsAzureFleetNetworking() && !replicationContext.IsIstioNetworking() {
 		return nil
 	}
 
@@ -463,7 +579,7 @@ func (r *DocumentDBReconciler) CreateTokenService(ctx context.Context, token str
 					Ports: []corev1.ContainerPort{
 						{
 							ContainerPort: 80,
-							Protocol:      "TCP",
+							Protocol:      corev1.ProtocolTCP,
 						},
 					},
 					VolumeMounts: []corev1.VolumeMount{
@@ -507,7 +623,7 @@ func (r *DocumentDBReconciler) CreateTokenService(ctx context.Context, token str
 				{
 					Port:       80,
 					TargetPort: intstr.FromInt(80),
-					Protocol:   "TCP",
+					Protocol:   corev1.ProtocolTCP,
 				},
 			},
 		},
@@ -518,17 +634,19 @@ func (r *DocumentDBReconciler) CreateTokenService(ctx context.Context, token str
 		return fmt.Errorf("failed to create Service: %w", err)
 	}
 
-	// Create ServiceExport for fleet networking
-	serviceExport := &fleetv1alpha1.ServiceExport{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      tokenServiceName,
-			Namespace: namespace,
-		},
-	}
+	// Create ServiceExport only for fleet networking
+	if replicationContext.IsAzureFleetNetworking() {
+		serviceExport := &fleetv1alpha1.ServiceExport{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      tokenServiceName,
+				Namespace: namespace,
+			},
+		}
 
-	err = r.Client.Create(ctx, serviceExport)
-	if err != nil && !errors.IsAlreadyExists(err) {
-		return fmt.Errorf("failed to create ServiceExport: %w", err)
+		err = r.Client.Create(ctx, serviceExport)
+		if err != nil && !errors.IsAlreadyExists(err) {
+			return fmt.Errorf("failed to create ServiceExport: %w", err)
+		}
 	}
 
 	return nil

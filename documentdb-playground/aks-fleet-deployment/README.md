@@ -28,10 +28,15 @@ This directory contains templates for deploying an AKS Fleet with member cluster
 
 ```bash
 ./deploy-fleet-bicep.sh
+
+# With customer resource group name
+# This will need to be set for all other scripts as well
+export RESOURCE_GROUP=<resource group name>
+./deploy-fleet-bicep.sh
 ```
 
 The script will:
-1. Create a resource group (`german-aks-fleet-rg`)
+1. Create a resource group (default if not set: `documentdb-aks-fleet-rg`)
 2. Deploy the Fleet resource
 3. Create VNets with non-overlapping IP ranges
 4. Deploy member clusters in each region
@@ -52,6 +57,7 @@ This script will:
 - Add the jetstack Helm repository
 - Install cert-manager with CRDs on each member cluster
 - Wait for deployments to be ready
+- Install cert-manager CRDs on the hub
 - Display pod status for verification
 
 ### 3. Install DocumentDB Operator
@@ -63,7 +69,6 @@ Deploy the DocumentDB operator using Fleet:
 ```
 
 This script will:
-- Install cert-manager CRDs on the hub
 - Package the local DocumentDB chart
 - Deploy the operator via Helm
 - Verify deployment across all member clusters
@@ -134,14 +139,6 @@ Default VNet ranges:
 - UK South VNet: 10.2.0.0/16
 - East US 2 VNet: 10.3.0.0/16
 
-## Environment Variables
-
-The deployment scripts automatically set and export:
-- `FLEET_ID`: Full resource ID of the fleet
-- `IDENTITY`: Your Azure AD user ID
-- `DOCUMENTDB_PASSWORD`: Database password (when deploying DocumentDB)
-- `RESOURCE_GROUP`: Resource group name (default: german-aks-fleet-rg)
-
 ## kubectl Aliases
 
 After deployment, these aliases are available:
@@ -159,10 +156,10 @@ source ~/.bashrc
 
 ```bash
 # Show fleet details
-az fleet show --name aks-fleet-hub-fleet --resource-group german-aks-fleet-rg
+az fleet show --name aks-fleet-hub-fleet --resource-group $RESOURCE_GROUP
 
 # List fleet members
-az fleet member list --fleet-name aks-fleet-hub-fleet --resource-group german-aks-fleet-rg
+az fleet member list --fleet-name aks-fleet-hub-fleet --resource-group $RESOURCE_GROUP
 
 # Check ClusterResourcePlacement status
 kubectl --context hub get clusterresourceplacement
@@ -184,7 +181,7 @@ for c in member-eastus2-xxx member-uksouth-xxx member-westus3-xxx; do
 done
 
 # Check operator status on all clusters
-for cluster in $(az aks list -g german-aks-fleet-rg -o json | jq -r '.[] | select(.name|startswith("member-")) | .name'); do
+for cluster in $(az aks list -g $RESOURCE_GROUP -o json | jq -r '.[] | select(.name|startswith("member-")) | .name'); do
   echo "=== $cluster ==="
   kubectl --context $cluster get deploy -n documentdb-operator
   kubectl --context $cluster get pods -n documentdb-operator
@@ -220,7 +217,7 @@ kubectl --context hub patch documentdb documentdb-preview -n documentdb-preview-
 watch 'kubectl --context hub get clusterresourceplacement documentdb-crp -o wide'
 
 # Monitor all DocumentDB instances
-watch 'for c in $(az aks list -g german-aks-fleet-rg -o json | jq -r ".[] | select(.name|startswith(\"member-\")) | .name"); do \
+watch 'for c in $(az aks list -g $RESOURCE_GROUP -o json | jq -r ".[] | select(.name|startswith(\"member-\")) | .name"); do \
   echo "=== $c ==="; \
   kubectl --context $c get documentdb,pods -n documentdb-preview-ns; \
   echo; \
@@ -254,8 +251,81 @@ kubectl --context member-westus3-xxx run test-pod --image=nicolaka/netshoot -it 
 Verify VNet peering:
 
 ```bash
-az network vnet peering list --resource-group german-aks-fleet-rg \
+az network vnet peering list --resource-group $RESOURCE_GROUP \
   --vnet-name member-westus3-vnet --output table
+```
+
+## Backup and Restore
+### Backup
+
+Create a one-time backup:
+```bash
+kubectl --context hub apply -f - <<EOF
+apiVersion: db.microsoft.com/preview
+kind: Backup
+metadata:
+  name: backup-documentdb
+  namespace: documentdb-preview-ns
+spec:
+  cluster:
+    name: documentdb-preview
+EOF
+```
+
+Create automatic backups on a schedule:
+```bash
+kubectl --context hub apply -f - <<EOF
+apiVersion: db.microsoft.com/preview
+kind: ScheduledBackup
+metadata:
+  name: scheduled-backup
+  namespace: documentdb-preview-ns
+spec:
+  cluster:
+    name: documentdb-preview
+  schedule: "0 2 * * *" # Daily at 2 AM
+EOF
+```
+
+Backups will be created on the primary cluster. 
+
+### Restore
+
+Step 1: Identify Available Backups
+```bash
+PRIMARY_CLUSTER=$(kubectl --context hub get documentdb documentdb-preview -n documentdb-preview-ns -o jsonpath='{.spec.clusterReplication.primary}')
+
+kubectl --context $PRIMARY_CLUSTER get backups -n documentdb-preview-ns
+```
+
+Step 2: Modify multi-region.yaml for Restore
+
+Important: Restores must be to a new DocumentDB resource with a different name.
+
+Edit `./multi-region.yaml` and change:
+1. The DocumentDB resource name (e.g., documentdb-preview-restore)
+2. Add the bootstrap section with backup reference
+
+Example:
+```yaml
+apiVersion: db.microsoft.com/preview
+kind: DocumentDB
+metadata:
+  name: documentdb-preview-restore  # New name, different from original
+  namespace: documentdb-preview-ns
+spec:
+  ...
+  bootstrap:
+    recovery:
+      backup:
+        name: scheduled-backup-xxxxxx  # Name of the backup to restore from
+```
+
+Step 3: Deploy the Restored Cluster
+
+Run the deployment script:
+```bash
+./deploy-multi-region.sh "${DOCUMENTDB_PASSWORD}"
 ```
 
 ## Troubleshooting
@@ -266,13 +336,13 @@ If you encounter authentication issues:
 
 ```bash
 # For web-based authentication (default)
-az fleet get-credentials --resource-group german-aks-fleet-rg --name aks-fleet-hub-fleet
+az fleet get-credentials --resource-group $RESOURCE_GROUP --name aks-fleet-hub-fleet
 
 # If web authentication is blocked, switch to Azure CLI authentication
 kubelogin convert-kubeconfig -l azurecli
 
 # For member clusters, use admin credentials
-az aks get-credentials --resource-group german-aks-fleet-rg \
+az aks get-credentials --resource-group $RESOURCE_GROUP \
   --name <cluster-name> --admin --overwrite-existing
 ```
 
@@ -296,14 +366,14 @@ kubectl --context hub describe clusterresourceplacement documentdb-crp
 
 # Verify member clusters are joined
 az fleet member list --fleet-name aks-fleet-hub-fleet \
-  --resource-group german-aks-fleet-rg -o table
+  --resource-group $RESOURCE_GROUP -o table
 ```
 
 ### Cluster List Formatting Issues
 
 If the cluster list in the YAML is not formatted correctly:
 1. Check that `jq` is installed: `which jq`
-2. Verify clusters are discovered: `az aks list -g german-aks-fleet-rg -o json | jq -r '.[] | select(.name|startswith("member-")) | .name'`
+2. Verify clusters are discovered: `az aks list -g $RESOURCE_GROUP -o json | jq -r '.[] | select(.name|startswith("member-")) | .name'`
 3. Review the generated YAML preview shown during deployment
 
 ### Debugging
@@ -325,7 +395,7 @@ To delete all resources:
 kubectl --context hub delete -f multi-region.yaml
 
 # Delete the entire resource group
-az group delete --name german-aks-fleet-rg --yes --no-wait
+az group delete --name $RESOURCE_GROUP --yes --no-wait
 ```
 
 ## Scripts in this Directory

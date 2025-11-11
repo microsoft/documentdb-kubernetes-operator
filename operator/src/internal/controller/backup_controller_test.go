@@ -65,8 +65,17 @@ var _ = Describe("Backup Controller", func() {
 				},
 			}
 
+			// Create the associated DocumentDB cluster
+			cluster := &dbpreview.DocumentDB{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      clusterName,
+					Namespace: backupNamespace,
+				},
+			}
+			Expect(fakeClient.Create(ctx, cluster)).To(Succeed())
+
 			// Call under test
-			res, err := reconciler.createCNPGBackup(ctx, backup, nil)
+			res, err := reconciler.createCNPGBackup(ctx, backup, cluster)
 			Expect(err).ToNot(HaveOccurred())
 			// controller uses a 5s requeue
 			Expect(res.RequeueAfter).To(Equal(5 * time.Second))
@@ -197,7 +206,7 @@ var _ = Describe("Backup Controller", func() {
 			updated := &dbpreview.Backup{}
 			Expect(fakeClient.Get(ctx, client.ObjectKey{Name: backupName, Namespace: backupNamespace}, updated)).To(Succeed())
 			Expect(string(updated.Status.Phase)).To(Equal(string(cnpgv1.BackupPhaseFailed)))
-			Expect(updated.Status.Error).To(Equal("connection timeout"))
+			Expect(updated.Status.Message).To(Equal("connection timeout"))
 			Expect(updated.Status.StartedAt).ToNot(BeNil())
 			Expect(updated.Status.StoppedAt).ToNot(BeNil())
 			Expect(updated.Status.StartedAt.Time.Unix()).To(Equal(startTime.Unix()))

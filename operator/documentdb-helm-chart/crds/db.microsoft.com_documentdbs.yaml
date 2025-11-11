@@ -87,12 +87,36 @@ spec:
                     description: ClusterList is the list of clusters participating
                       in replication.
                     items:
-                      type: string
+                      properties:
+                        environment:
+                          description: |-
+                            EnvironmentOverride is the cloud environment of the member cluster.
+                            Will default to the global setting
+                          enum:
+                          - eks
+                          - aks
+                          - gke
+                          type: string
+                        name:
+                          description: Name is the name of the member cluster.
+                          type: string
+                        storageClass:
+                          description: StorageClassOverride specifies the storage
+                            class for DocumentDB persistent volumes in this member
+                            cluster.
+                          type: string
+                      required:
+                      - name
+                      type: object
                     type: array
-                  enableFleetForCrossCloud:
-                    description: EnableFleetForCrossCloud determines whether to use
-                      KubeFleet mechanics for the replication
-                    type: boolean
+                  crossCloudNetworkingStrategy:
+                    description: CrossCloudNetworking determines which type of networking
+                      mechanics for the replication
+                    enum:
+                    - AzureFleet
+                    - Istio
+                    - None
+                    type: string
                   highAvailability:
                     description: Whether or not to have replicas on the primary cluster.
                     type: boolean
@@ -279,13 +303,13 @@ spec:
             properties:
               connectionString:
                 type: string
+              localPrimary:
+                type: string
               status:
                 description: Status reflects the status field from the underlying
                   CNPG Cluster.
                 type: string
               targetPrimary:
-                type: string
-              localPrimary:
                 type: string
               tls:
                 description: TLS reports gateway TLS provisioning status (Phase 1).

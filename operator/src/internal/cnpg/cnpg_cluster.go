@@ -16,7 +16,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, documentdb_image string, serviceAccountName string, log logr.Logger) *cnpgv1.Cluster {
+func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, documentdb_image, serviceAccountName, storageClass string, isPrimaryRegion bool, log logr.Logger) *cnpgv1.Cluster {
 	sidecarPluginName := documentdb.Spec.SidecarInjectorPluginName
 	if sidecarPluginName == "" {
 		sidecarPluginName = util.DEFAULT_SIDECAR_INJECTOR_PLUGIN
@@ -32,9 +32,9 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, docu
 	}
 
 	// Configure storage class - use specified storage class or nil for default
-	var storageClass *string
-	if documentdb.Spec.Resource.Storage.StorageClass != "" {
-		storageClass = &documentdb.Spec.Resource.Storage.StorageClass
+	var storageClassPointer *string
+	if storageClass != "" {
+		storageClassPointer = &storageClass
 	}
 
 	return &cnpgv1.Cluster{
@@ -57,7 +57,7 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, docu
 				Instances: documentdb.Spec.InstancesPerNode,
 				ImageName: documentdb_image,
 				StorageConfiguration: cnpgv1.StorageConfiguration{
-					StorageClass: storageClass, // Use configured storage class or default
+					StorageClass: storageClassPointer, // Use configured storage class or default
 					Size:         documentdb.Spec.Resource.Storage.PvcSize,
 				},
 				InheritedMetadata: getInheritedMetadataLabels(documentdb.Name),
@@ -88,7 +88,7 @@ func GetCnpgClusterSpec(req ctrl.Request, documentdb *dbpreview.DocumentDB, docu
 						"host replication all all trust",
 					},
 				},
-				Bootstrap: getBootstrapConfiguration(documentdb, log),
+				Bootstrap: getBootstrapConfiguration(documentdb, isPrimaryRegion, log),
 				LogLevel:  cmp.Or(documentdb.Spec.LogLevel, "info"),
 				Backup: &cnpgv1.BackupConfiguration{
 					VolumeSnapshot: &cnpgv1.VolumeSnapshotConfiguration{
@@ -112,8 +112,8 @@ func getInheritedMetadataLabels(appName string) *cnpgv1.EmbeddedObjectMetadata {
 	}
 }
 
-func getBootstrapConfiguration(documentdb *dbpreview.DocumentDB, log logr.Logger) *cnpgv1.BootstrapConfiguration {
-	if documentdb.Spec.Bootstrap != nil && documentdb.Spec.Bootstrap.Recovery != nil && documentdb.Spec.Bootstrap.Recovery.Backup.Name != "" {
+func getBootstrapConfiguration(documentdb *dbpreview.DocumentDB, isPrimaryRegion bool, log logr.Logger) *cnpgv1.BootstrapConfiguration {
+	if isPrimaryRegion && documentdb.Spec.Bootstrap != nil && documentdb.Spec.Bootstrap.Recovery != nil && documentdb.Spec.Bootstrap.Recovery.Backup.Name != "" {
 		backupName := documentdb.Spec.Bootstrap.Recovery.Backup.Name
 		log.Info("DocumentDB cluster will be bootstrapped from backup", "backupName", backupName)
 		return &cnpgv1.BootstrapConfiguration{

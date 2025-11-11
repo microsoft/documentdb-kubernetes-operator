@@ -7,7 +7,7 @@
 1. Run the CSI driver deployment script **before** installing the documentdb-operator:
 
 ```bash
-scripts/test-scripts/deploy-csi-driver.sh
+./operator/src/scripts/test-scripts/deploy-csi-driver.sh
 ```
 
 2. Validate storage and snapshot components:

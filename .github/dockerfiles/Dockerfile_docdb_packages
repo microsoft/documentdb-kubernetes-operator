@@ -13,6 +13,23 @@ ENV LC_ALL=en_US.UTF-8
 ENV LANGUAGE=en_US
 ENV PATH=$PATH:/usr/lib/postgresql/${PG_VERSION}/bin
 
+# Install ICU 70 from Ubuntu 22.04 (DocumentDB packages are built against ICU 70)
+# Debian Bookworm ships with ICU 72, which causes symbol compatibility issues
+RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
+    && apt-get install -y --no-install-recommends wget ca-certificates \
+    && mkdir -p /tmp/icu70 && cd /tmp/icu70 \
+    && ARCH=$(dpkg --print-architecture) \
+    # Use different mirror for arm64 vs amd64
+    && if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then \
+        MIRROR="http://ports.ubuntu.com/ubuntu-ports"; \
+       else \
+        MIRROR="http://archive.ubuntu.com/ubuntu"; \
+       fi \
+    && wget -q ${MIRROR}/pool/main/i/icu/libicu70_70.1-2_${ARCH}.deb \
+    && dpkg -i libicu70_70.1-2_${ARCH}.deb || apt-get install -f -y \
+    && rm -rf /tmp/icu70 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Install DocumentDB from official repository
 # This single RUN command replaces 100+ lines of build-from-source steps
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
@@ -53,21 +70,39 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && rm -rf /tmp/* \
     && rm -rf /var/tmp/*
 
-# Download DocumentDB scripts for server startup (minimal download)
-RUN wget -q -P /tmp https://github.com/documentdb/documentdb/archive/refs/tags/v${DocumentDB_VERSION}.zip \
-    && unzip -q /tmp/v${DocumentDB_VERSION}.zip -d /tmp/documentdb \
-    && mkdir -p /scripts \
-    && cp /tmp/documentdb/documentdb-${DocumentDB_VERSION}/scripts/s* /scripts/ 2>/dev/null || true \
-    && cp /tmp/documentdb/documentdb-${DocumentDB_VERSION}/scripts/utils.sh /scripts/ 2>/dev/null || true \
-    && rm -rf /tmp/documentdb /tmp/v${DocumentDB_VERSION}.zip
-
 # Create postgres user with proper permissions
 # Note: PostgreSQL installation may have already created the postgres user
 RUN usermod -aG sudo postgres || useradd -ms /bin/bash postgres -G sudo \
     && echo "%sudo ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers.d/no-pass-ask \
     && cat /etc/sudoers | grep secure_path | sed "s/\:\/bin\:/\:\/bin\:\/usr\/lib\/postgresql\/$PG_VERSION\/bin\:/" >> /etc/sudoers.d/postgres_path \
-    && mkdir -p /data /scripts \
-    && chown -R postgres:postgres /data /scripts
+    && mkdir -p /data /scripts
+
+# Download DocumentDB scripts for server startup (minimal download)
+RUN apt-get update && apt-get install -y --no-install-recommends wget unzip \
+    && wget -q -P /tmp https://github.com/documentdb/documentdb/archive/refs/tags/v${DocumentDB_VERSION}.zip \
+    && unzip -q /tmp/v${DocumentDB_VERSION}.zip -d /tmp/documentdb \
+    && cp /tmp/documentdb/documentdb-${DocumentDB_VERSION}/scripts/start*.sh /scripts/ \
+    && cp /tmp/documentdb/documentdb-${DocumentDB_VERSION}/scripts/stop*.sh /scripts/ 2>/dev/null || true \
+    && cp /tmp/documentdb/documentdb-${DocumentDB_VERSION}/scripts/setup*.sh /scripts/ 2>/dev/null || true \
+    && cp /tmp/documentdb/documentdb-${DocumentDB_VERSION}/scripts/utils.sh /scripts/ 2>/dev/null || true \
+    && chmod +x /scripts/*.sh \
+    && chown -R postgres:postgres /data /scripts \
+    && apt-get remove -y --purge wget unzip \
+    && apt-get autoremove -y && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/documentdb /tmp/v${DocumentDB_VERSION}.zip
+
+# Set environment to ensure ICU 70 is used (DocumentDB was built against ICU 70)
+# Detect architecture and set LD_PRELOAD accordingly
+RUN ARCH=$(dpkg --print-architecture) \
+    && if [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then \
+        LIB_PATH="/usr/lib/aarch64-linux-gnu"; \
+       else \
+        LIB_PATH="/usr/lib/x86_64-linux-gnu"; \
+       fi \
+    && mkdir -p /etc/profile.d /home/postgres \
+    && echo "export LD_PRELOAD=${LIB_PATH}/libicuuc.so.70:${LIB_PATH}/libicudata.so.70:${LIB_PATH}/libicui18n.so.70" > /etc/profile.d/icu70.sh \
+    && echo "export LD_PRELOAD=${LIB_PATH}/libicuuc.so.70:${LIB_PATH}/libicudata.so.70:${LIB_PATH}/libicui18n.so.70" > /home/postgres/.bashrc \
+    && chown -R postgres:postgres /home/postgres
 
 # Health check to verify PostgreSQL is running
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

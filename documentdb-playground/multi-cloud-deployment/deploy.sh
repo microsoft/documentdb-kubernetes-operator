@@ -8,7 +8,7 @@ set -euo pipefail
 # Configuration
 # ============================================================================
 
-RESOURCE_GROUP="${RESOURCE_GROUP:-german-aks-fleet-rg}"
+RESOURCE_GROUP="${RESOURCE_GROUP:-documentdb-aks-fleet-rg}"
 RG_LOCATION="${RG_LOCATION:-eastus2}"
 HUB_REGION="${HUB_REGION:-$RG_LOCATION}"
 TEMPLATE_DIR="$(dirname "$0")"

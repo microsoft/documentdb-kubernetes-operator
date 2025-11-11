@@ -203,7 +203,7 @@ mongosh "mongodb+srv://default_user:<password>@<zone-name>.<parent-zone>/?tls=tr
 
 Example:
 ```bash
-mongosh "mongodb+srv://default_user:mypassword@german-aks-fleet-rg.multi-cloud.pgmongo-dev.cosmos.windows-int.net/?tls=true&tlsAllowInvalidCertificates=true&authMechanism=SCRAM-SHA-256"
+mongosh "mongodb+srv://default_user:mypassword@documentdb-aks-fleet-rg.multi-cloud.pgmongo-dev.cosmos.windows-int.net/?tls=true&tlsAllowInvalidCertificates=true&authMechanism=SCRAM-SHA-256"
 ```
 
 ### Observability and Telemetry

@@ -1,6 +1,6 @@
 #/bin/bash
 
-RESOURCE_GROUP="${RESOURCE_GROUP:-german-aks-fleet-rg}"
+RESOURCE_GROUP="${RESOURCE_GROUP:-documentdb-aks-fleet-rg}"
 DOCUMENTDB_NAME="${DOCUMENTDB_NAME:-documentdb-preview}"
 DOCUMENTDB_NAMESPACE="${DOCUMENTDB_NAMESPACE:-documentdb-preview-ns}"
 HUB_CONTEXT="${HUB_CONTEXT:-hub}"

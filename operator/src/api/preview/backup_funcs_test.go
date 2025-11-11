@@ -35,7 +35,7 @@ var _ = Describe("Backup", func() {
 				},
 			}
 
-			cnpg, err := backup.CreateCNPGBackup(scheme)
+			cnpg, err := backup.CreateCNPGBackup(scheme, "my-cluster-x")
 			Expect(err).To(BeNil())
 			Expect(cnpg).ToNot(BeNil())
 
@@ -43,7 +43,7 @@ var _ = Describe("Backup", func() {
 			Expect(cnpg.Name).To(Equal("my-backup"))
 			Expect(cnpg.Namespace).To(Equal("my-ns"))
 			Expect(cnpg.Spec.Method).To(Equal(cnpgv1.BackupMethodVolumeSnapshot))
-			Expect(cnpg.Spec.Cluster.Name).To(Equal("my-cluster"))
+			Expect(cnpg.Spec.Cluster.Name).To(Equal("my-cluster-x"))
 
 			// owner reference set by SetControllerReference
 			Expect(len(cnpg.OwnerReferences)).To(BeNumerically(">", 0))
@@ -79,7 +79,7 @@ var _ = Describe("Backup", func() {
 					Phase:     cnpgv1.BackupPhase(""),
 					StartedAt: nil,
 					StoppedAt: nil,
-					Error:     "",
+					Message:   "",
 				},
 			}
 
@@ -88,7 +88,7 @@ var _ = Describe("Backup", func() {
 			Expect(string(backup.Status.Phase)).To(Equal(cnpgv1.BackupPhaseCompleted))
 			Expect(backup.Status.StartedAt).To(Equal(&startedAt))
 			Expect(backup.Status.StoppedAt).To(Equal(&stoppedAt))
-			Expect(backup.Status.Error).To(Equal("none"))
+			Expect(backup.Status.Message).To(Equal("none"))
 			// ExpiredAt should be StoppedAt + 30 days (default)
 			Expect(backup.Status.ExpiredAt).ToNot(BeNil())
 			Expect(backup.Status.ExpiredAt.Time.Equal(stoppedAt.Time.Add(30 * 24 * time.Hour))).To(BeTrue())
@@ -114,7 +114,7 @@ var _ = Describe("Backup", func() {
 					Phase:     cnpgv1.BackupPhaseCompleted,
 					StartedAt: &startedAt,
 					StoppedAt: &stoppedAt,
-					Error:     "none",
+					Message:   "none",
 					ExpiredAt: &expiredAt,
 				},
 			}
@@ -221,6 +221,13 @@ var _ = Describe("Backup", func() {
 		It("returns true when phase is Failed", func() {
 			status := &BackupStatus{
 				Phase: cnpgv1.BackupPhaseFailed,
+			}
+			Expect(status.IsDone()).To(BeTrue())
+		})
+
+		It("returns true when phase is Skipped", func() {
+			status := &BackupStatus{
+				Phase: BackupPhaseSkipped,
 			}
 			Expect(status.IsDone()).To(BeTrue())
 		})

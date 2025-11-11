@@ -255,6 +255,79 @@ az network vnet peering list --resource-group $RESOURCE_GROUP \
   --vnet-name member-westus3-vnet --output table
 ```
 
+## Backup and Restore
+### Backup
+
+Create a one-time backup:
+```bash
+kubectl --context hub apply -f - <<EOF
+apiVersion: db.microsoft.com/preview
+kind: Backup
+metadata:
+  name: backup-documentdb
+  namespace: documentdb-preview-ns
+spec:
+  cluster:
+    name: documentdb-preview
+EOF
+```
+
+Create automatic backups on a schedule:
+```bash
+kubectl --context hub apply -f - <<EOF
+apiVersion: db.microsoft.com/preview
+kind: ScheduledBackup
+metadata:
+  name: scheduled-backup
+  namespace: documentdb-preview-ns
+spec:
+  cluster:
+    name: documentdb-preview
+  schedule: "0 2 * * *" # Daily at 2 AM
+EOF
+```
+
+Backups will be created on the primary cluster. 
+
+### Restore
+
+Step 1: Identify Available Backups
+```bash
+PRIMARY_CLUSTER=$(kubectl --context hub get documentdb documentdb-preview -n documentdb-preview-ns -o jsonpath='{.spec.clusterReplication.primary}')
+
+kubectl --context $PRIMARY_CLUSTER get backups -n documentdb-preview-ns
+```
+
+Step 2: Modify multi-region.yaml for Restore
+
+Important: Restores must be to a new DocumentDB resource with a different name.
+
+Edit `./multi-region.yaml` and change:
+1. The DocumentDB resource name (e.g., documentdb-preview-restore)
+2. Add the bootstrap section with backup reference
+
+Example:
+```yaml
+apiVersion: db.microsoft.com/preview
+kind: DocumentDB
+metadata:
+  name: documentdb-preview-restore  # New name, different from original
+  namespace: documentdb-preview-ns
+spec:
+  ...
+  bootstrap:
+    recovery:
+      backup:
+        name: scheduled-backup-xxxxxx  # Name of the backup to restore from
+```
+
+Step 3: Deploy the Restored Cluster
+
+Run the deployment script:
+```bash
+./deploy-multi-region.sh "${DOCUMENTDB_PASSWORD}"
+```
+
 ## Troubleshooting
 
 ### Authentication Issues

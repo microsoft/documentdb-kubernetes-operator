@@ -61,9 +61,12 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 		// If primary and HA we want a local standby and a slot for the WAL replica
 		// TODO change to 2 when WAL replica is available
 		cnpgCluster.Spec.Instances = 3
-		cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL =
-			append(cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL,
+		// Restoring from backup won't have PostInitSQL configured
+		if cnpgCluster.Spec.Bootstrap != nil && cnpgCluster.Spec.Bootstrap.InitDB != nil && cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL != nil {
+			cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL = append(
+				cnpgCluster.Spec.Bootstrap.InitDB.PostInitSQL,
 				"select * from pg_create_physical_replication_slot('wal_replica');")
+		}
 		// Also need to configure quorum writes
 		cnpgCluster.Spec.PostgresConfiguration.Synchronous = &cnpgv1.SynchronousReplicaConfiguration{
 			Method:          cnpgv1.SynchronousReplicaConfigurationMethodAny,

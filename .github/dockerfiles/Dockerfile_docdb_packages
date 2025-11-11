@@ -1,7 +1,7 @@
 # Simplified DocumentDB Dockerfile using official packages
 # This replaces the build-from-source approach with pre-built binary packages
 # Benefits: 10-20x faster builds, smaller image, GPG-signed packages, easier maintenance
-FROM mcr.microsoft.com/mirror/docker/library/ubuntu:22.04
+FROM mcr.microsoft.com/mirror/docker/library/debian:bookworm-slim
 
 ARG PG_VERSION=16
 ARG DocumentDB_VERSION=0.107-0

@@ -58,7 +58,7 @@ for cluster in "${CLUSTER_ARRAY[@]}"; do
   echo "  - $cluster"
 done
 
-PRIMARY_CLUSTER=${CLUSTER_ARRAY[0]}
+PRIMARY_CLUSTER=${CLUSTER_ARRAY[1]}
 echo ""
 echo "Selected primary cluster: $PRIMARY_CLUSTER"
 

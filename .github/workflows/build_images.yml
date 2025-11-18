@@ -15,7 +15,6 @@ on:
   push:
     branches:
       - 'main'
-      - 'docdb-from-packages'
     paths-ignore:
       - '*.md'
 

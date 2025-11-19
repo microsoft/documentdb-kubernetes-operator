@@ -118,11 +118,103 @@ jobs:
         path: sidecar-${{ matrix.arch }}-image.tar
         retention-days: 1
 
+  build-documentdb:
+    name: Build DocumentDB Images
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            base_arch: AMD64
+            runner: ubuntu-22.04
+          - arch: arm64
+            base_arch: ARM64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build documentdb Docker image for ${{ matrix.arch }}
+      run: |
+        echo "Building documentdb Docker image for ${{ matrix.arch }} architecture..."
+        docker buildx build \
+          --platform linux/${{ matrix.arch }} \
+          --build-arg ARCH=${{ matrix.base_arch }} \
+          --tag ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/documentdb:${{ env.IMAGE_TAG }}-${{ matrix.arch }} \
+          --load \
+          -f .github/dockerfiles/Dockerfile_docdb .
+        
+        echo "✓ DocumentDB Docker image built successfully for ${{ matrix.arch }}"
+
+    - name: Save documentdb Docker image as artifact
+      run: |
+        echo "Saving documentdb ${{ matrix.arch }} Docker image as tar file..."
+        docker save ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/documentdb:${{ env.IMAGE_TAG }}-${{ matrix.arch }} > documentdb-${{ matrix.arch }}-image.tar
+        echo "✓ DocumentDB ${{ matrix.arch }} Docker image saved to tar file"
+
+    - name: Upload documentdb Docker image artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-docker-documentdb-${{ matrix.arch }}
+        path: documentdb-${{ matrix.arch }}-image.tar
+        retention-days: 1
+
+  build-gateway:
+    name: Build Gateway Images
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            base_arch: AMD64
+            runner: ubuntu-22.04
+          - arch: arm64
+            base_arch: ARM64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build gateway Docker image for ${{ matrix.arch }}
+      run: |
+        echo "Building gateway Docker image for ${{ matrix.arch }} architecture..."
+        docker buildx build \
+          --platform linux/${{ matrix.arch }} \
+          --build-arg ARCH=${{ matrix.base_arch }} \
+          --tag ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/gateway:${{ env.IMAGE_TAG }}-${{ matrix.arch }} \
+          --load \
+          -f .github/dockerfiles/Dockerfile_gateway .
+        
+        echo "✓ Gateway Docker image built successfully for ${{ matrix.arch }}"
+
+    - name: Save gateway Docker image as artifact
+      run: |
+        echo "Saving gateway ${{ matrix.arch }} Docker image as tar file..."
+        docker save ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/gateway:${{ env.IMAGE_TAG }}-${{ matrix.arch }} > gateway-${{ matrix.arch }}-image.tar
+        echo "✓ Gateway ${{ matrix.arch }} Docker image saved to tar file"
+
+    - name: Upload gateway Docker image artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-docker-gateway-${{ matrix.arch }}
+        path: gateway-${{ matrix.arch }}-image.tar
+        retention-days: 1
+
   consolidate-images:
     name: Consolidate Platform Images
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [build-operator, build-sidecar]
+    needs: [build-operator, build-sidecar, build-documentdb, build-gateway]
     outputs:
       image_tag: ${{ env.IMAGE_TAG }}
     steps:
@@ -182,6 +274,48 @@ jobs:
           exit 1
         fi
         
+        # Load documentdb images
+        echo "Loading documentdb AMD64 image..."
+        if [ -f ./artifacts/build-docker-documentdb-amd64/documentdb-amd64-image.tar ]; then
+          docker load < ./artifacts/build-docker-documentdb-amd64/documentdb-amd64-image.tar
+          echo "✓ DocumentDB AMD64 image loaded"
+        else
+          echo "❌ DocumentDB AMD64 image file not found"
+          ls -la ./artifacts/build-docker-documentdb-amd64/ || echo "Directory not found"
+          exit 1
+        fi
+        
+        echo "Loading documentdb ARM64 image..."
+        if [ -f ./artifacts/build-docker-documentdb-arm64/documentdb-arm64-image.tar ]; then
+          docker load < ./artifacts/build-docker-documentdb-arm64/documentdb-arm64-image.tar
+          echo "✓ DocumentDB ARM64 image loaded"
+        else
+          echo "❌ DocumentDB ARM64 image file not found"
+          ls -la ./artifacts/build-docker-documentdb-arm64/ || echo "Directory not found"
+          exit 1
+        fi
+        
+        # Load gateway images
+        echo "Loading gateway AMD64 image..."
+        if [ -f ./artifacts/build-docker-gateway-amd64/gateway-amd64-image.tar ]; then
+          docker load < ./artifacts/build-docker-gateway-amd64/gateway-amd64-image.tar
+          echo "✓ Gateway AMD64 image loaded"
+        else
+          echo "❌ Gateway AMD64 image file not found"
+          ls -la ./artifacts/build-docker-gateway-amd64/ || echo "Directory not found"
+          exit 1
+        fi
+        
+        echo "Loading gateway ARM64 image..."
+        if [ -f ./artifacts/build-docker-gateway-arm64/gateway-arm64-image.tar ]; then
+          docker load < ./artifacts/build-docker-gateway-arm64/gateway-arm64-image.tar
+          echo "✓ Gateway ARM64 image loaded"
+        else
+          echo "❌ Gateway ARM64 image file not found"
+          ls -la ./artifacts/build-docker-gateway-arm64/ || echo "Directory not found"
+          exit 1
+        fi
+        
         echo "✓ All Docker images loaded successfully"
         echo "Loaded images:"
         docker images | grep documentdb-kubernetes-operator | sort
@@ -190,12 +324,16 @@ jobs:
       run: |
         echo "Saving platform-specific images as artifacts..."
         
-        # Save all 4 platform-specific images
+        # Save all 8 platform-specific images (4 types x 2 architectures)
         docker save \
           ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/operator:${{ env.IMAGE_TAG }}-amd64 \
           ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/operator:${{ env.IMAGE_TAG }}-arm64 \
           ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/sidecar:${{ env.IMAGE_TAG }}-amd64 \
           ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/sidecar:${{ env.IMAGE_TAG }}-arm64 \
+          ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/documentdb:${{ env.IMAGE_TAG }}-amd64 \
+          ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/documentdb:${{ env.IMAGE_TAG }}-arm64 \
+          ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/gateway:${{ env.IMAGE_TAG }}-amd64 \
+          ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/gateway:${{ env.IMAGE_TAG }}-arm64 \
           > platform-specific-images.tar
         
         echo "✓ Platform-specific images saved as artifacts"
@@ -207,11 +345,56 @@ jobs:
         path: platform-specific-images.tar
         retention-days: 1
 
+  create-manifests:
+    name: Create Multi-Arch Manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [consolidate-images]
+    strategy:
+      matrix:
+        image: [operator, sidecar, documentdb, gateway]
+    steps:
+    - name: Download platform-specific images
+      uses: actions/download-artifact@v4
+      with:
+        name: build-platform-images
+        path: ./artifacts
+
+    - name: Load platform-specific images
+      run: |
+        echo "Loading platform-specific images..."
+        docker load < ./artifacts/platform-specific-images.tar
+        echo "✓ Images loaded"
+        docker images | grep documentdb-kubernetes-operator | sort
+
+    - name: Create multi-arch manifest for ${{ matrix.image }}
+      run: |
+        echo "Creating multi-arch manifest for ${{ matrix.image }}..."
+        docker manifest create ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/${{ matrix.image }}:${{ env.IMAGE_TAG }} \
+          --amend ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/${{ matrix.image }}:${{ env.IMAGE_TAG }}-amd64 \
+          --amend ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/${{ matrix.image }}:${{ env.IMAGE_TAG }}-arm64
+        
+        echo "✓ Multi-arch manifest created for ${{ matrix.image }}:${{ env.IMAGE_TAG }}"
+
+    - name: Save manifest as artifact
+      run: |
+        # Save the manifest list
+        mkdir -p manifests
+        docker manifest inspect ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/${{ matrix.image }}:${{ env.IMAGE_TAG }} > manifests/${{ matrix.image }}-manifest.json
+        echo "✓ Manifest saved for ${{ matrix.image }}"
+
+    - name: Upload manifest artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-manifest-${{ matrix.image }}
+        path: manifests/${{ matrix.image }}-manifest.json
+        retention-days: 1
+
   create-helm-chart:
     name: Create Platform-Specific Helm Charts
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [consolidate-images]
+    needs: [consolidate-images, create-manifests]
     strategy:
       matrix:
         arch: [amd64, arm64]
@@ -230,14 +413,16 @@ jobs:
         cp -r operator/documentdb-helm-chart documentdb-chart-${{ matrix.arch }}
         
         # Update the operator image tag and repository in values.yaml for this platform
-        sed -i '/documentdbk8soperator:/,/tag:/ s|tag:.*|tag: \"${{ env.IMAGE_TAG }}-${{ matrix.arch }}\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
+        # Note: Using CHART_VERSION (same as appVersion) for image tag - manifest handles multi-arch
+        sed -i '/documentdbk8soperator:/,/tag:/ s|tag:.*|tag: \"${{ env.CHART_VERSION }}\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
         sed -i '/documentdbk8soperator:/,/repository:/ s|repository:.*|repository: \"ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/operator\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
         
         # Update the sidecar image tag and repository in values.yaml for this platform
-        sed -i '/sidecarinjector:/,/tag:/ s|tag:.*|tag: \"${{ env.IMAGE_TAG }}-${{ matrix.arch }}\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
+        sed -i '/sidecarinjector:/,/tag:/ s|tag:.*|tag: \"${{ env.CHART_VERSION }}\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
         sed -i '/sidecarinjector:/,/repository:/ s|repository:.*|repository: \"ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/sidecar\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
         
         # Update Chart.yaml version, appVersion and name for this platform
+        # Both version and appVersion use CHART_VERSION for consistency
         sed -i "s|^version:.*|version: ${{ env.CHART_VERSION }}|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
         sed -i "s|^appVersion:.*|appVersion: \"${{ env.CHART_VERSION }}\"|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
         sed -i "s|^name:.*|name: documentdb-chart-${{ matrix.arch }}|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml

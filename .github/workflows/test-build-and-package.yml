@@ -345,56 +345,11 @@ jobs:
         path: platform-specific-images.tar
         retention-days: 1
 
-  create-manifests:
-    name: Create Multi-Arch Manifests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: [consolidate-images]
-    strategy:
-      matrix:
-        image: [operator, sidecar, documentdb, gateway]
-    steps:
-    - name: Download platform-specific images
-      uses: actions/download-artifact@v4
-      with:
-        name: build-platform-images
-        path: ./artifacts
-
-    - name: Load platform-specific images
-      run: |
-        echo "Loading platform-specific images..."
-        docker load < ./artifacts/platform-specific-images.tar
-        echo "✓ Images loaded"
-        docker images | grep documentdb-kubernetes-operator | sort
-
-    - name: Create multi-arch manifest for ${{ matrix.image }}
-      run: |
-        echo "Creating multi-arch manifest for ${{ matrix.image }}..."
-        docker manifest create ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/${{ matrix.image }}:${{ env.IMAGE_TAG }} \
-          --amend ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/${{ matrix.image }}:${{ env.IMAGE_TAG }}-amd64 \
-          --amend ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/${{ matrix.image }}:${{ env.IMAGE_TAG }}-arm64
-        
-        echo "✓ Multi-arch manifest created for ${{ matrix.image }}:${{ env.IMAGE_TAG }}"
-
-    - name: Save manifest as artifact
-      run: |
-        # Save the manifest list
-        mkdir -p manifests
-        docker manifest inspect ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/${{ matrix.image }}:${{ env.IMAGE_TAG }} > manifests/${{ matrix.image }}-manifest.json
-        echo "✓ Manifest saved for ${{ matrix.image }}"
-
-    - name: Upload manifest artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-manifest-${{ matrix.image }}
-        path: manifests/${{ matrix.image }}-manifest.json
-        retention-days: 1
-
   create-helm-chart:
     name: Create Platform-Specific Helm Charts
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [consolidate-images, create-manifests]
+    needs: [consolidate-images]
     strategy:
       matrix:
         arch: [amd64, arm64]
@@ -413,18 +368,18 @@ jobs:
         cp -r operator/documentdb-helm-chart documentdb-chart-${{ matrix.arch }}
         
         # Update the operator image tag and repository in values.yaml for this platform
-        # Note: Using CHART_VERSION (same as appVersion) for image tag - manifest handles multi-arch
-        sed -i '/documentdbk8soperator:/,/tag:/ s|tag:.*|tag: \"${{ env.CHART_VERSION }}\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
-        sed -i '/documentdbk8soperator:/,/repository:/ s|repository:.*|repository: \"ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/operator\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
+        # Note: Using CHART_VERSION with arch suffix to match image tags exactly
+        sed -i '/documentdbk8soperator:/,/tag:/ s|tag:.*|tag: "${{ env.CHART_VERSION }}-${{ matrix.arch }}"|' documentdb-chart-${{ matrix.arch }}/values.yaml
+        sed -i '/documentdbk8soperator:/,/repository:/ s|repository:.*|repository: "ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/operator"|' documentdb-chart-${{ matrix.arch }}/values.yaml
         
         # Update the sidecar image tag and repository in values.yaml for this platform
-        sed -i '/sidecarinjector:/,/tag:/ s|tag:.*|tag: \"${{ env.CHART_VERSION }}\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
-        sed -i '/sidecarinjector:/,/repository:/ s|repository:.*|repository: \"ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/sidecar\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
+        sed -i '/sidecarinjector:/,/tag:/ s|tag:.*|tag: "${{ env.CHART_VERSION }}-${{ matrix.arch }}"|' documentdb-chart-${{ matrix.arch }}/values.yaml
+        sed -i '/sidecarinjector:/,/repository:/ s|repository:.*|repository: "ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/sidecar"|' documentdb-chart-${{ matrix.arch }}/values.yaml
         
         # Update Chart.yaml version, appVersion and name for this platform
-        # Both version and appVersion use CHART_VERSION for consistency
-        sed -i "s|^version:.*|version: ${{ env.CHART_VERSION }}|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
-        sed -i "s|^appVersion:.*|appVersion: \"${{ env.CHART_VERSION }}\"|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
+        # Both version and appVersion include arch suffix to match image tags exactly
+        sed -i "s|^version:.*|version: ${{ env.CHART_VERSION }}-${{ matrix.arch }}|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
+        sed -i "s|^appVersion:.*|appVersion: \"${{ env.CHART_VERSION }}-${{ matrix.arch }}\"|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
         sed -i "s|^name:.*|name: documentdb-chart-${{ matrix.arch }}|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
         
         echo "Updated Chart.yaml for ${{ matrix.arch }}:"
@@ -444,8 +399,8 @@ jobs:
         echo "Validating chart..."
         helm lint documentdb-chart-${{ matrix.arch }}
         
-        echo "Packaging chart with version ${{ env.CHART_VERSION }} for ${{ matrix.arch }}..."
-        helm package documentdb-chart-${{ matrix.arch }} --version ${{ env.CHART_VERSION }}
+        echo "Packaging chart with version ${{ env.CHART_VERSION }}-${{ matrix.arch }} for ${{ matrix.arch }}..."
+        helm package documentdb-chart-${{ matrix.arch }} --version ${{ env.CHART_VERSION }}-${{ matrix.arch }}
         
         echo "Generated chart package for ${{ matrix.arch }}:"
         ls -la *.tgz

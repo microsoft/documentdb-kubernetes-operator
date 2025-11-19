@@ -462,7 +462,7 @@ runs:
         echo "Building Helm chart with external image references..."
         
         # Create platform-specific chart directory
-        cp -r documentdb-chart documentdb-chart-external
+        cp -r operator/documentdb-helm-chart documentdb-chart-external
         
         # Update the operator image tag and repository in values.yaml for external images
         sed -i '/documentdbk8soperator:/,/tag:/ s|tag:.*|tag: \"${{ inputs.image-tag }}\"|' documentdb-chart-external/values.yaml

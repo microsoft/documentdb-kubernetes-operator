@@ -370,8 +370,9 @@ runs:
         echo "Installing from platform-specific local Helm chart..."
         
         # Extract and prepare platform-specific local chart - match e2e test pattern
+        # Chart version now includes arch suffix, so filename is documentdb-chart-{version}-{arch}.tgz
         CHART_ARTIFACT_DIR="./artifacts/build-helm-chart-${{ inputs.architecture }}"
-        EXPECTED_CHART_FILE="$CHART_ARTIFACT_DIR/documentdb-chart-${{ inputs.architecture }}-${{ inputs.chart-version }}.tgz"
+        EXPECTED_CHART_FILE="$CHART_ARTIFACT_DIR/documentdb-chart-${{ inputs.chart-version }}-${{ inputs.architecture }}.tgz"
         
         if [ -f "$EXPECTED_CHART_FILE" ]; then
           echo "Found platform-specific chart file: $EXPECTED_CHART_FILE"
@@ -392,14 +393,14 @@ runs:
         EOF
             
             # Remove cert-manager Certificate resources from the sidecar injector template
-            sed -i '/^apiVersion: cert-manager\.io\/v1$/,/^---$/d' ./documentdb-chart-${{ inputs.architecture }}/templates/02_documentdb_sidecar_injector.yaml
+            sed -i '/^apiVersion: cert-manager\.io\/v1$/,/^---$/d' ./documentdb-chart/templates/02_documentdb_sidecar_injector.yaml
             
             echo "✓ Chart modified to skip cert-manager resources"
           fi
           
           # Install the operator using the platform-specific local chart with image tag overrides
           if [[ "$CERT_MANAGER_READY" == "true" ]]; then
-            helm install documentdb-operator ./documentdb-chart-${{ inputs.architecture }} \
+            helm install documentdb-operator ./documentdb-chart \
               --namespace ${{ inputs.operator-namespace }} \
               --create-namespace \
               --set documentDbVersion="$LOCAL_IMAGE_TAG" \
@@ -407,7 +408,7 @@ runs:
               --set image.sidecarinjector.tag="$LOCAL_IMAGE_TAG" \
               --wait --timeout=15m
           else
-            helm install documentdb-operator ./documentdb-chart-${{ inputs.architecture }} \
+            helm install documentdb-operator ./documentdb-chart \
               --namespace ${{ inputs.operator-namespace }} \
               --create-namespace \
               --set documentDbVersion="$LOCAL_IMAGE_TAG" \
@@ -462,7 +463,7 @@ runs:
         echo "Building Helm chart with external image references..."
         
         # Create platform-specific chart directory
-        cp -r documentdb-chart documentdb-chart-external
+        cp -r operator/documentdb-helm-chart documentdb-chart-external
         
         # Update the operator image tag and repository in values.yaml for external images
         sed -i '/documentdbk8soperator:/,/tag:/ s|tag:.*|tag: \"${{ inputs.image-tag }}\"|' documentdb-chart-external/values.yaml

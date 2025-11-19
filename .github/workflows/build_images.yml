@@ -3,9 +3,10 @@ name: RELEASE - Build Candidate Images
 on:
   workflow_dispatch:
     inputs:
-      manifest_tag:
-        description: 'Tag for the Docker manifest'
+      version:
+        description: 'Version for the build (will be tagged as {version}-test)'
         required: false
+        default: '0.1.1'
       skip_optional_images:
         type: boolean
         description: 'Skip building documentdb and gateway images'
@@ -24,8 +25,8 @@ permissions:
   id-token: write
 
 env:
-  DEFAULT_MANIFEST_TAG: 'test'
-  IMAGE_TAG: ${{ github.run_id }}-$(date +'%Y-%m-%d')
+  VERSION: ${{ github.event.inputs.version || '0.1.1' }}
+  IMAGE_TAG: ${{ github.event.inputs.version || '0.1.1' }}-test
 
 jobs:
   build-and-push:
@@ -74,11 +75,12 @@ jobs:
     name: Create, Push, Sign & Verify Manifest
     strategy:
       matrix:
-        image: [operator, sidecar]
+        image: [operator, sidecar, documentdb, gateway]
     runs-on: ubuntu-22.04
     needs: build-and-push
     env:
-      MANIFEST_TAG: ${{ github.event.inputs.manifest_tag || 'test' }}
+      VERSION: ${{ github.event.inputs.version || '0.1.1' }}
+      MANIFEST_TAG: ${{ github.event.inputs.version || '0.1.1' }}
     steps:
     - name: Login to GHCR
       run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin

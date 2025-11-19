@@ -55,7 +55,7 @@ jobs:
 
   copy-and-push-manifest:
     name: Release Images
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     needs: [test-e2e, test-integration, test-backup-and-restore]
     if: ${{ always() && (needs.test-e2e.result == 'success' || needs.test-e2e.result == 'skipped') && (needs.test-integration.result == 'success' || needs.test-integration.result == 'skipped') && (needs.test-backup-and-restore.result == 'success' || needs.test-backup-and-restore.result == 'skipped') }}
     strategy:
@@ -77,7 +77,7 @@ jobs:
 
   publish-helm-chart:
     name: Publish Helm Chart
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     needs: copy-and-push-manifest
     if: ${{ always() && needs.copy-and-push-manifest.result == 'success' }}
     permissions:

@@ -370,8 +370,9 @@ runs:
         echo "Installing from platform-specific local Helm chart..."
         
         # Extract and prepare platform-specific local chart - match e2e test pattern
+        # Chart version now includes arch suffix, so filename is documentdb-chart-{version}-{arch}.tgz
         CHART_ARTIFACT_DIR="./artifacts/build-helm-chart-${{ inputs.architecture }}"
-        EXPECTED_CHART_FILE="$CHART_ARTIFACT_DIR/documentdb-chart-${{ inputs.architecture }}-${{ inputs.chart-version }}.tgz"
+        EXPECTED_CHART_FILE="$CHART_ARTIFACT_DIR/documentdb-chart-${{ inputs.chart-version }}.tgz"
         
         if [ -f "$EXPECTED_CHART_FILE" ]; then
           echo "Found platform-specific chart file: $EXPECTED_CHART_FILE"

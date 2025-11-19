@@ -378,9 +378,10 @@ jobs:
         
         # Update Chart.yaml version, appVersion and name for this platform
         # Both version and appVersion include arch suffix to match image tags exactly
+        # Chart name doesn't include arch since version already has it
         sed -i "s|^version:.*|version: ${{ env.CHART_VERSION }}-${{ matrix.arch }}|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
         sed -i "s|^appVersion:.*|appVersion: \"${{ env.CHART_VERSION }}-${{ matrix.arch }}\"|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
-        sed -i "s|^name:.*|name: documentdb-chart-${{ matrix.arch }}|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
+        sed -i "s|^name:.*|name: documentdb-chart|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
         
         echo "Updated Chart.yaml for ${{ matrix.arch }}:"
         cat documentdb-chart-${{ matrix.arch }}/Chart.yaml

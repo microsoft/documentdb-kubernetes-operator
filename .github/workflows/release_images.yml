@@ -3,23 +3,15 @@ name: RELEASE - Promote Candidate Images and Publish Helm Chart
 on:
   workflow_dispatch:
     inputs:
-      image_tag:
-        description: 'Image tag to release (both operator and sidecar images use the same tag)'
+      version:
+        description: 'Version to release (used for images and Helm chart)'
         required: true
-        default: 'test'
-      target_tag:
-        description: 'Target tag to apply (default: preview)'
-        required: false
-        default: 'preview'
+        default: '0.1.1'
       run_tests:
         description: 'Run tests before releasing'
         required: false
-        default: false
+        default: true
         type: boolean
-      chart_version:
-        description: 'Helm chart version to publish'
-        required: false
-        default: '0.1.1'
 
 permissions:
   contents: read
@@ -34,7 +26,7 @@ jobs:
     if: ${{ inputs.run_tests == true }}
     uses: ./.github/workflows/test-E2E.yml
     with:
-      image_tag: ${{ inputs.image_tag }}
+      image_tag: ${{ inputs.version }}-test
     secrets: inherit
 
   test-integration:
@@ -42,7 +34,7 @@ jobs:
     if: ${{ inputs.run_tests == true }}
     uses: ./.github/workflows/test-integration.yml
     with:
-      image_tag: ${{ inputs.image_tag }}
+      image_tag: ${{ inputs.version }}-test
     secrets: inherit
 
   test-backup-and-restore:
@@ -50,7 +42,7 @@ jobs:
     if: ${{ inputs.run_tests == true }}
     uses: ./.github/workflows/test-backup-and-restore.yml
     with:
-      image_tag: ${{ inputs.image_tag }}
+      image_tag: ${{ inputs.version }}-test
     secrets: inherit
 
   copy-and-push-manifest:
@@ -67,8 +59,8 @@ jobs:
 
       - name: Retag existing manifest
         env:
-          SOURCE_TAG: ${{ github.event.inputs.image_tag }}
-          TARGET_TAG: ${{ github.event.inputs.target_tag }}
+          SOURCE_TAG: ${{ github.event.inputs.version }}-test
+          TARGET_TAG: ${{ github.event.inputs.version }}
         run: |
           echo "Releasing ${{ matrix.image }} image from tag $SOURCE_TAG to $TARGET_TAG"
           docker buildx imagetools create \
@@ -94,27 +86,17 @@ jobs:
       - name: Set up Helm
         uses: azure/setup-helm@v4
 
-      - name: Update values.yaml with target tag
-        if: ${{ github.event.inputs.target_tag != 'preview' }}
+      - name: Update values.yaml with version tag
         run: |
-          echo "Updating values.yaml with target tag: ${{ github.event.inputs.target_tag }}"
-          sed -i 's/tag: preview/tag: ${{ github.event.inputs.target_tag }}/g' operator/documentdb-helm-chart/values.yaml
+          echo "Updating values.yaml with version tag: ${{ github.event.inputs.version }}"
+          sed -i 's/tag: .*/tag: ${{ github.event.inputs.version }}/g' operator/documentdb-helm-chart/values.yaml
           echo "Updated values.yaml content:"
           cat operator/documentdb-helm-chart/values.yaml
 
       - name: Set chart version
         run: |
-            CHART_VERSION_INPUT="${{ github.event.inputs.chart_version }}"
-            if [[ -z "$CHART_VERSION_INPUT" ]]; then
-              CHART_VERSION_FROM_FILE=$(awk -F': *' '/^version:/ {print $2; exit}' operator/documentdb-helm-chart/Chart.yaml)
-              if [[ -z "$CHART_VERSION_FROM_FILE" ]]; then
-                echo "Failed to determine chart version from operator/documentdb-helm-chart/Chart.yaml" >&2
-                exit 1
-              fi
-              CHART_VERSION_INPUT="$CHART_VERSION_FROM_FILE"
-            fi
-            echo "CHART_VERSION=${CHART_VERSION_INPUT}" >> $GITHUB_ENV
-            echo "Using chart version: ${CHART_VERSION_INPUT}"
+            echo "CHART_VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+            echo "Using chart version: ${{ github.event.inputs.version }}"
 
       - name: Update Chart.yaml metadata
         run: |
@@ -139,14 +121,11 @@ jobs:
           echo "## Helm Chart Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Chart Name**: \`$CHART_NAME\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Chart Version**: \`$CHART_VERSION\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Image Tag**: \`${{ github.event.inputs.target_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: \`$CHART_VERSION\` (unified for chart and images)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source Tag**: \`${{ github.event.inputs.version }}-test\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target Tag**: \`${{ github.event.inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Registry**: \`$GHCR_REPO\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [[ "${{ github.event.inputs.target_tag }}" == "preview" ]]; then
-            echo "**Note**: Used default preview configuration (values.yaml unchanged)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "**Note**: Updated values.yaml to use tag \`${{ github.event.inputs.target_tag }}\`" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "**Note**: Images promoted from \`${{ github.event.inputs.version }}-test\` to \`${{ github.event.inputs.version }}\` and Helm chart published" >> $GITHUB_STEP_SUMMARY
 
   

@@ -74,7 +74,7 @@ jobs:
     name: Create, Push, Sign & Verify Manifest
     strategy:
       matrix:
-        image: [operator, sidecar]
+        image: [operator, sidecar, documentdb, gateway]
     runs-on: ubuntu-22.04
     needs: build-and-push
     env:

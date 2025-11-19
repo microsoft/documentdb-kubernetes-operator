@@ -465,15 +465,8 @@ runs:
         # Create platform-specific chart directory
         cp -r operator/documentdb-helm-chart documentdb-chart-external
         
-        # Update the operator image tag and repository in values.yaml for external images
-        sed -i '/documentdbk8soperator:/,/tag:/ s|tag:.*|tag: \"${{ inputs.image-tag }}\"|' documentdb-chart-external/values.yaml
-        sed -i '/documentdbk8soperator:/,/repository:/ s|repository:.*|repository: \"ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/operator\"|' documentdb-chart-external/values.yaml
-        
-        # Update the sidecar image tag and repository in values.yaml for external images
-        sed -i '/sidecarinjector:/,/tag:/ s|tag:.*|tag: \"${{ inputs.image-tag }}\"|' documentdb-chart-external/values.yaml
-        sed -i '/sidecarinjector:/,/repository:/ s|repository:.*|repository: \"ghcr.io/${{ inputs.repository-owner }}/documentdb-kubernetes-operator/sidecar\"|' documentdb-chart-external/values.yaml
-        
-        # Update Chart.yaml version and name for external usage
+        # Update Chart.yaml with the external image tag as appVersion
+        sed -i "s|^appVersion:.*|appVersion: \"${{ inputs.image-tag }}\"|g" documentdb-chart-external/Chart.yaml
         sed -i "s|^version:.*|version: ${{ inputs.chart-version }}|g" documentdb-chart-external/Chart.yaml
         sed -i "s|^name:.*|name: documentdb-chart-external|g" documentdb-chart-external/Chart.yaml
         

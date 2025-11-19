@@ -42,7 +42,7 @@ jobs:
             dockerfile: operator/cnpg-plugins/sidecar-injector/Dockerfile
             context: operator/cnpg-plugins/sidecar-injector/
           - name: documentdb
-            dockerfile: .github/dockerfiles/Dockerfile_docdb
+            dockerfile: .github/dockerfiles/Dockerfile_docdb_packages
             context: .
           - name: gateway
             dockerfile: .github/dockerfiles/Dockerfile_gateway

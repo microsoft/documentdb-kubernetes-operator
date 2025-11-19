@@ -60,7 +60,7 @@ jobs:
     if: ${{ always() && (needs.test-e2e.result == 'success' || needs.test-e2e.result == 'skipped') && (needs.test-integration.result == 'success' || needs.test-integration.result == 'skipped') && (needs.test-backup-and-restore.result == 'success' || needs.test-backup-and-restore.result == 'skipped') }}
     strategy:
       matrix:
-        image: [operator, sidecar]
+        image: [operator, sidecar, documentdb, gateway]
     steps:
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin

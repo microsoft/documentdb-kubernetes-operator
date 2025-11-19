@@ -30,7 +30,7 @@ jobs:
     if: ${{ inputs.run_tests == true }}
     uses: ./.github/workflows/test-E2E.yml
     with:
-      image_tag: ${{ inputs.version }}-test
+      image_tag: ${{ inputs.candidate_version }}
     secrets: inherit
 
   test-integration:
@@ -38,7 +38,7 @@ jobs:
     if: ${{ inputs.run_tests == true }}
     uses: ./.github/workflows/test-integration.yml
     with:
-      image_tag: ${{ inputs.version }}-test
+      image_tag: ${{ inputs.candidate_version }}
     secrets: inherit
 
   test-backup-and-restore:
@@ -46,7 +46,7 @@ jobs:
     if: ${{ inputs.run_tests == true }}
     uses: ./.github/workflows/test-backup-and-restore.yml
     with:
-      image_tag: ${{ inputs.version }}-test
+      image_tag: ${{ inputs.candidate_version }}
     secrets: inherit
 
   copy-and-push-manifest:
@@ -63,7 +63,7 @@ jobs:
 
       - name: Retag existing manifest
         env:
-          SOURCE_TAG: ${{ github.event.inputs.version }}-test
+          SOURCE_TAG: ${{ github.event.inputs.candidate_version }}
           TARGET_TAG: ${{ github.event.inputs.version }}
         run: |
           echo "Releasing ${{ matrix.image }} image from tag $SOURCE_TAG to $TARGET_TAG"
@@ -126,10 +126,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Chart Name**: \`$CHART_NAME\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: \`$CHART_VERSION\` (unified for chart and images)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Source Tag**: \`${{ github.event.inputs.version }}-test\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source Tag**: \`${{ github.event.inputs.candidate_version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Target Tag**: \`${{ github.event.inputs.version }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Registry**: \`$GHCR_REPO\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note**: Images promoted from \`${{ github.event.inputs.version }}-test\` to \`${{ github.event.inputs.version }}\` and Helm chart published" >> $GITHUB_STEP_SUMMARY
-
+          echo "**Note**: Images promoted from \`${{ github.event.inputs.candidate_version }}\` to \`${{ github.event.inputs.version }}\` and Helm chart published" >> $GITHUB_STEP_SUMMARY
   

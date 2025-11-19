@@ -41,8 +41,7 @@ jobs:
     if: ${{ github.event.inputs.image_tag == '' || github.event.inputs.image_tag == null }}
     uses: ./.github/workflows/test-build-and-package.yml
     with:
-      image_tag_prefix: 'integration-test'
-      chart_version_prefix: '0.1.0'
+      version: '0.1.0'
     secrets: inherit
 
   integration-test:

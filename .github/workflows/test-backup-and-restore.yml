@@ -60,8 +60,7 @@ jobs:
     if: ${{ inputs.image_tag == '' || inputs.image_tag == null }}
     uses: ./.github/workflows/test-build-and-package.yml
     with:
-      image_tag_prefix: 'backup-and-restore-test'
-      chart_version_prefix: '0.1.0'
+      version: '0.1.0'
     secrets: inherit
     
   backup-and-restore-test:

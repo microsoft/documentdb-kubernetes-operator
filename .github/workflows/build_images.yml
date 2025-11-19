@@ -26,7 +26,7 @@ permissions:
 
 env:
   VERSION: ${{ github.event.inputs.version || '0.1.1' }}
-  IMAGE_TAG: ${{ github.run_id }}
+  IMAGE_TAG: ${{ github.event.inputs.version || '0.1.1' }}-test
 
 jobs:
   build-and-push:
@@ -80,7 +80,7 @@ jobs:
     needs: build-and-push
     env:
       VERSION: ${{ github.event.inputs.version || '0.1.1' }}
-      MANIFEST_TAG: ${{ github.event.inputs.version || '0.1.1' }}-test
+      MANIFEST_TAG: ${{ github.event.inputs.version || '0.1.1' }}
     steps:
     - name: Login to GHCR
       run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin

@@ -3,13 +3,8 @@ name: TEST - Build and Package for Tests
 on:
   workflow_call:
     inputs:
-      image_tag_prefix:
-        description: 'Prefix for image tag'
-        required: false
-        default: 'build'
-        type: string
-      chart_version_prefix:
-        description: 'Prefix for chart version'
+      version:
+        description: 'Version for both image tag and chart version'
         required: false
         default: '0.1.0'
         type: string
@@ -25,9 +20,10 @@ permissions:
   contents: read
 
 env:
-  IMAGE_TAG: ${{ inputs.image_tag_prefix }}-${{ github.run_id }}
+  VERSION: ${{ inputs.version }}-test-${{ github.run_id }}
+  IMAGE_TAG: ${{ inputs.version }}-test-${{ github.run_id }}
   CHART_NAME: operator/documentdb-helm-chart
-  CHART_VERSION: ${{ inputs.chart_version_prefix }}-${{ github.run_id }}
+  CHART_VERSION: ${{ inputs.version }}-test-${{ github.run_id }}
 
 jobs:
   build-operator:
@@ -286,8 +282,8 @@ jobs:
         echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Configuration:" >> $GITHUB_STEP_SUMMARY
-        echo "- **Image Tag Prefix**: ${{ inputs.image_tag_prefix }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Chart Version Prefix**: ${{ inputs.chart_version_prefix }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Version**: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Generated Tag**: ${{ inputs.version }}-test-${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Build Mode**: Platform-specific artifacts with architecture suffixes" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         
@@ -298,7 +294,5 @@ jobs:
         
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Job Results:" >> $GITHUB_STEP_SUMMARY
-        echo "- **Build Operator**: ${{ needs.build-operator.result }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Build Sidecar**: ${{ needs.build-sidecar.result }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Consolidate Images**: ${{ needs.consolidate-images.result }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Create Charts**: ${{ needs.create-helm-chart.result }}" >> $GITHUB_STEP_SUMMARY

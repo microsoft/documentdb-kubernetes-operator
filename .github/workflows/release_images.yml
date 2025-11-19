@@ -106,9 +106,9 @@ jobs:
         run: |
             CHART_VERSION_INPUT="${{ github.event.inputs.chart_version }}"
             if [[ -z "$CHART_VERSION_INPUT" ]]; then
-              CHART_VERSION_FROM_FILE=$(awk -F': *' '/^version:/ {print $2; exit}' documentdb-chart/Chart.yaml)
+              CHART_VERSION_FROM_FILE=$(awk -F': *' '/^version:/ {print $2; exit}' operator/documentdb-helm-chart/Chart.yaml)
               if [[ -z "$CHART_VERSION_FROM_FILE" ]]; then
-                echo "Failed to determine chart version from documentdb-chart/Chart.yaml" >&2
+                echo "Failed to determine chart version from operator/documentdb-helm-chart/Chart.yaml" >&2
                 exit 1
               fi
               CHART_VERSION_INPUT="$CHART_VERSION_FROM_FILE"
@@ -118,8 +118,8 @@ jobs:
 
       - name: Update Chart.yaml metadata
         run: |
-          sed -i "s/^version: .*/version: ${CHART_VERSION}/" documentdb-chart/Chart.yaml
-          sed -i "s/^appVersion: .*/appVersion: \"${CHART_VERSION}\"/" documentdb-chart/Chart.yaml
+          sed -i "s/^version: .*/version: ${CHART_VERSION}/" operator/documentdb-helm-chart/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"${CHART_VERSION}\"/" operator/documentdb-helm-chart/Chart.yaml
 
       - name: Package Helm chart
         run: |

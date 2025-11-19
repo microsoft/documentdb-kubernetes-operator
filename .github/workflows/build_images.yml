@@ -71,13 +71,52 @@ jobs:
           -f ${{ matrix.image.dockerfile }} ${{ matrix.image.context }}
         docker push ghcr.io/${{ github.repository }}/${{ matrix.image.name }}:$TAG
 
+  publish-helm-chart:
+    name: Publish Helm Chart for Testing
+    runs-on: ubuntu-22.04
+    needs: build-and-push
+    permissions:
+      contents: read
+      packages: write
+    env:
+      CHART_VERSION: ${{ github.event.inputs.version || '0.1.1' }}-test
+      IMAGE_TAG: ${{ github.event.inputs.version || '0.1.1' }}-test
+      CHART_NAME: operator/documentdb-helm-chart
+      GHCR_REPO: ghcr.io/${{ github.repository_owner }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Helm
+      uses: azure/setup-helm@v4
+    
+    - name: Update Chart.yaml with test version
+      run: |
+        sed -i "s/^version: .*/version: ${{ env.CHART_VERSION }}/" ${{ env.CHART_NAME }}/Chart.yaml
+        sed -i "s/^appVersion: .*/appVersion: \"${{ env.IMAGE_TAG }}\"/" ${{ env.CHART_NAME }}/Chart.yaml
+        echo "Updated Chart.yaml:"
+        cat ${{ env.CHART_NAME }}/Chart.yaml
+    
+    - name: Package Helm chart
+      run: |
+        helm dependency update ${{ env.CHART_NAME }}
+        helm package ${{ env.CHART_NAME }} --version ${{ env.CHART_VERSION }}
+    
+    - name: Log in to GHCR
+      run: |
+        echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username ${{ github.actor }} --password-stdin
+    
+    - name: Push Helm chart to GHCR
+      run: |
+        helm push documentdb-operator-${{ env.CHART_VERSION }}.tgz oci://${{ env.GHCR_REPO }}
+
   create-manifest:
     name: Create, Push, Sign & Verify Manifest
     strategy:
       matrix:
         image: [operator, sidecar, documentdb, gateway]
     runs-on: ubuntu-22.04
-    needs: build-and-push
+    needs: [build-and-push, publish-helm-chart]
     env:
       VERSION: ${{ github.event.inputs.version || '0.1.1' }}
       MANIFEST_TAG: ${{ github.event.inputs.version || '0.1.1' }}-test

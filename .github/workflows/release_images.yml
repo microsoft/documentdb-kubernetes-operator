@@ -3,6 +3,10 @@ name: RELEASE - Promote Candidate Images and Publish Helm Chart
 on:
   workflow_dispatch:
     inputs:
+      candidate_version:
+        description: 'Version of the build candidate to promote (will be tagged as {version})'
+        required: true
+        default: '0.1.1-test'
       version:
         description: 'Version to release (used for images and Helm chart)'
         required: true

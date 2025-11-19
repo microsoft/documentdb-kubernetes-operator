@@ -237,8 +237,9 @@ jobs:
         sed -i '/sidecarinjector:/,/tag:/ s|tag:.*|tag: \"${{ env.IMAGE_TAG }}-${{ matrix.arch }}\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
         sed -i '/sidecarinjector:/,/repository:/ s|repository:.*|repository: \"ghcr.io/${{ github.repository_owner }}/documentdb-kubernetes-operator/sidecar\"|' documentdb-chart-${{ matrix.arch }}/values.yaml
         
-        # Update Chart.yaml version and name for this platform
+        # Update Chart.yaml version, appVersion and name for this platform
         sed -i "s|^version:.*|version: ${{ env.CHART_VERSION }}|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
+        sed -i "s|^appVersion:.*|appVersion: \"${{ env.CHART_VERSION }}\"|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
         sed -i "s|^name:.*|name: documentdb-chart-${{ matrix.arch }}|g" documentdb-chart-${{ matrix.arch }}/Chart.yaml
         
         echo "Updated Chart.yaml for ${{ matrix.arch }}:"
@@ -283,7 +284,7 @@ jobs:
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### Configuration:" >> $GITHUB_STEP_SUMMARY
         echo "- **Version**: ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Generated Tag**: ${{ inputs.version }}-test-${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Generated Tag**: ${{ env.VERSION }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Build Mode**: Platform-specific artifacts with architecture suffixes" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         

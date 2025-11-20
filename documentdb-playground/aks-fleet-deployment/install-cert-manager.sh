@@ -39,6 +39,6 @@ fi
 
 # Install cert-manager CRDs on the hub context (safe to re-apply)
 echo "Applying cert-manager CRDs on hub ($HUB_CONTEXT)..."
-run kubectl --context "$HUB_CONTEXT" apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.crds.yaml
+kubectl --context "$HUB_CONTEXT" apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.crds.yaml
 
 echo -e "\nDone."

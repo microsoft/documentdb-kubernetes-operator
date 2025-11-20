@@ -4,25 +4,32 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
 	"github.com/cloudnative-pg/cloudnative-pg/pkg/resources/status"
 	pgTime "github.com/cloudnative-pg/machinery/pkg/postgres/time"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/ptr"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/remotecommand"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
 	cnpg "github.com/microsoft/documentdb-operator/internal/cnpg"
@@ -37,7 +44,9 @@ const (
 // DocumentDBReconciler reconciles a DocumentDB object
 type DocumentDBReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme    *runtime.Scheme
+	Config    *rest.Config
+	Clientset kubernetes.Interface
 }
 
 var reconcileMutex sync.Mutex
@@ -95,8 +104,8 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		// Ensure DocumentDB Service has an IP assigned
 		documentDbServiceIp, err = util.EnsureServiceIP(ctx, foundService)
 		if err != nil {
-			logger.Info("DocumentDB Service IP not assigned, Requeuing.")
-			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+			logger.Info("DocumentDB Service IP not assigned, pausing until update posted.")
+			return ctrl.Result{}, nil
 		}
 	}
 
@@ -115,7 +124,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if replicationContext.IsReplicating() {
 		err = r.AddClusterReplicationToClusterSpec(ctx, documentdb, replicationContext, desiredCnpgCluster)
 		if err != nil {
-			logger.Error(err, "Failed to add physical replication features cnpg Cluster spec; Proceeding as single cluster.")
+			logger.Error(err, "Failed to add physical replication features cnpg Cluster spec")
 			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 		}
 	}
@@ -187,12 +196,22 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	if currentCnpgCluster.Status.Phase == "Cluster in healthy state" && replicationContext.IsPrimary() {
-		grantCommand := "GRANT documentdb_admin_role TO streaming_replica;"
+	if slices.Contains(currentCnpgCluster.Status.InstancesStatus[cnpgv1.PodHealthy], currentCnpgCluster.Status.CurrentPrimary) && replicationContext.IsPrimary() {
+		// Check if permissions have already been granted
+		checkCommand := "SELECT 1 FROM pg_roles WHERE rolname = 'streaming_replica' AND pg_has_role('streaming_replica', 'documentdb_admin_role', 'USAGE');"
+		output, err := r.executeSQLCommand(ctx, currentCnpgCluster, replicationContext, checkCommand, "check-permissions")
+		if err != nil {
+			logger.Error(err, "Failed to check if permissions already granted")
+			return ctrl.Result{RequeueAfter: RequeueAfterLong}, nil
+		}
 
-		if err := r.executeSQLCommand(ctx, documentdb, replicationContext, grantCommand, "grant-permissions"); err != nil {
-			logger.Error(err, "Failed to grant permissions to streaming_replica")
-			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+		if !strings.Contains(output, "(1 row)") {
+			grantCommand := "GRANT documentdb_admin_role TO streaming_replica;"
+
+			if _, err := r.executeSQLCommand(ctx, currentCnpgCluster, replicationContext, grantCommand, "grant-permissions"); err != nil {
+				logger.Error(err, "Failed to grant permissions to streaming_replica")
+				return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+			}
 		}
 	}
 
@@ -224,7 +243,8 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	return ctrl.Result{RequeueAfter: RequeueAfterLong}, nil
+	// Don't reque again unless there is a change
+	return ctrl.Result{}, nil
 }
 
 // cleanupResources handles the cleanup of associated resources when a DocumentDB resource is not found
@@ -283,12 +303,48 @@ func (r *DocumentDBReconciler) EnsureServiceAccountRoleAndRoleBinding(ctx contex
 	return nil
 }
 
+// If you ever have another state from the cluster that you want to trigger on, add it here
+func clusterInstanceStatusChangedPredicate() predicate.Predicate {
+	return predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldCluster, ok := e.ObjectOld.(*cnpgv1.Cluster)
+			if !ok {
+				return true
+			}
+			newCluster, ok := e.ObjectNew.(*cnpgv1.Cluster)
+			if !ok {
+				return true
+			}
+			return !slices.Equal(oldCluster.Status.InstancesStatus[cnpgv1.PodHealthy], newCluster.Status.InstancesStatus[cnpgv1.PodHealthy])
+		},
+	}
+}
+
+// documentDBServicePredicate returns a predicate that only triggers reconciliation
+// for services created by the DocumentDB operator (with the documentdb-service- prefix)
+func documentDBServicePredicate() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			return strings.HasPrefix(e.Object.GetName(), util.DOCUMENTDB_SERVICE_PREFIX)
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return strings.HasPrefix(e.ObjectNew.GetName(), util.DOCUMENTDB_SERVICE_PREFIX)
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return strings.HasPrefix(e.Object.GetName(), util.DOCUMENTDB_SERVICE_PREFIX)
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			return strings.HasPrefix(e.Object.GetName(), util.DOCUMENTDB_SERVICE_PREFIX)
+		},
+	}
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *DocumentDBReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&dbpreview.DocumentDB{}).
-		Owns(&corev1.Service{}).
-		Owns(&cnpgv1.Cluster{}).
+		Owns(&corev1.Service{}, builder.WithPredicates(documentDBServicePredicate())).
+		Owns(&cnpgv1.Cluster{}, builder.WithPredicates(clusterInstanceStatusChangedPredicate())).
 		Owns(&cnpgv1.Publication{}).
 		Owns(&cnpgv1.Subscription{}).
 		Named("documentdb-controller").
@@ -342,68 +398,58 @@ func Promote(ctx context.Context, cli client.Client,
 	return nil
 }
 
-// executeSQLCommand creates a pod to execute SQL commands against the azure-cluster-rw service
-// TODO: Should find a less intrusive way to do this with CNPG
-func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdb *dbpreview.DocumentDB, replicationContext *util.ReplicationContext, sqlCommand, uniqueName string) error {
-	zero := int32(0)
-	host := replicationContext.Self + "-rw"
-	sqlPod := &batchv1.Job{
-		ObjectMeta: ctrl.ObjectMeta{
-			Name:      fmt.Sprintf("%s-%s-sql-executor", documentdb.Name, uniqueName),
-			Namespace: documentdb.Namespace,
-		},
-		Spec: batchv1.JobSpec{
-			Template: corev1.PodTemplateSpec{
-				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
-					Containers: []corev1.Container{
-						{
-							Name:  "sql-executor",
-							Image: documentdb.Spec.DocumentDBImage,
-							Command: []string{
-								"psql",
-								"-h", host,
-								"-U", "postgres",
-								"-d", "postgres",
-								"-c", sqlCommand,
-							},
-							Resources: corev1.ResourceRequirements{
-								Requests: corev1.ResourceList{
-									"cpu":    resource.MustParse(util.SQL_JOB_REQUESTS_CPU),
-									"memory": resource.MustParse(util.SQL_JOB_REQUESTS_MEMORY),
-								},
-								Limits: corev1.ResourceList{
-									"cpu":    resource.MustParse(util.SQL_JOB_LIMITS_CPU),
-									"memory": resource.MustParse(util.SQL_JOB_LIMITS_MEMORY),
-								},
-							},
-							SecurityContext: &corev1.SecurityContext{
-								RunAsUser:                ptr.To(int64(util.SQL_JOB_LINUX_UID)),
-								RunAsNonRoot:             ptr.To(util.SQL_JOB_RUN_AS_NON_ROOT),
-								AllowPrivilegeEscalation: ptr.To(util.SQL_JOB_ALLOW_PRIVILEGED),
-							},
-						},
-					},
-				},
-			},
-			TTLSecondsAfterFinished: &zero,
-		},
+// executeSQLCommand executes SQL commands directly in the postgres container of a running pod
+func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, cluster *cnpgv1.Cluster, replicationContext *util.ReplicationContext, sqlCommand, uniqueName string) (string, error) {
+	logger := log.FromContext(ctx)
+
+	var targetPod corev1.Pod
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: cluster.Status.CurrentPrimary, Namespace: cluster.Namespace}, &targetPod); err != nil {
+		return "", fmt.Errorf("failed to get primary pod: %w", err)
 	}
 
-	if replicationContext.IsIstioNetworking() {
-		sqlPod.Spec.Template.ObjectMeta =
-			ctrl.ObjectMeta{
-				Annotations: map[string]string{
-					"sidecar.istio.io/inject": "false",
-				},
-			}
+	// Execute psql command in the postgres container
+	cmd := []string{
+		"psql",
+		"-U", "postgres",
+		"-d", "postgres",
+		"-c", sqlCommand,
 	}
 
-	if err := r.Client.Create(ctx, sqlPod); err != nil {
-		if !errors.IsAlreadyExists(err) {
-			return err
-		}
+	req := r.Clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(targetPod.Name).
+		Namespace(cluster.Namespace).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: "postgres",
+			Command:   cmd,
+			Stdin:     false,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
+		}, scheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(r.Config, "POST", req.URL())
+	if err != nil {
+		return "", fmt.Errorf("failed to create executor: %w", err)
 	}
 
-	return nil
+	var stdout, stderr bytes.Buffer
+	err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+
+	if err != nil {
+		logger.Error(err, "Failed to execute SQL command",
+			"stdout", stdout.String(),
+			"stderr", stderr.String())
+		return "", fmt.Errorf("failed to execute command: %w (stderr: %s)", err, stderr.String())
+	}
+
+	if stderr.Len() > 0 && !strings.Contains(stderr.String(), "GRANT") {
+		logger.Info("SQL command executed with warnings", "stderr", stderr.String())
+	}
+
+	return stdout.String(), nil
 }

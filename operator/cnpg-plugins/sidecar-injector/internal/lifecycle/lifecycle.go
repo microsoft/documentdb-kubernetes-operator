@@ -222,7 +222,7 @@ func (impl Implementation) reconcileMetadata(
 
 	// Check if the pod has the label replication_cluster_type=replica or is not a local primary
 	if mutatedPod.Labels["replication_cluster_type"] == "replica" || cluster.Status.TargetPrimary != mutatedPod.Name {
-		sidecar.Args = []string{"--create-user", "false", "--start-pg", "false", "--pg-port", "5432"}
+		args = append([]string{"--create-user", "false"}, args...)
 	} else {
 		args = append([]string{"--create-user", "true"}, args...)
 	}

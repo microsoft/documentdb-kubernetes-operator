@@ -1,6 +1,13 @@
-name: Deploy MkDocs
+name: Deploy MkDocs and Helm Repo
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'operator/documentdb-helm-chart/**'
 
 permissions:
   contents: read
@@ -27,6 +34,24 @@ jobs:
         run: pip install mkdocs mkdocs-material
       - name: Build documentation
         run: mkdocs build --clean
+      
+      - name: Install Helm
+        run: |
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      
+      - name: Update chart dependencies
+        run: |
+          cd operator/documentdb-helm-chart
+          helm dependency update
+      
+      - name: Package Helm chart
+        run: |
+          helm package operator/documentdb-helm-chart -d site
+      
+      - name: Generate Helm index
+        run: |
+          helm repo index site --url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+      
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact

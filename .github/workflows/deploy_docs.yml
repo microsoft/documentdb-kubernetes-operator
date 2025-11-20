@@ -51,7 +51,7 @@ jobs:
       
       - name: Generate Helm index
         run: |
-          helm repo index site/charts --url https://guanzhousongmicrosoft.github.io/documentdb-kubernetes-operator/charts
+          helm repo index site/charts --url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
       
       - name: Setup Pages
         uses: actions/configure-pages@v5

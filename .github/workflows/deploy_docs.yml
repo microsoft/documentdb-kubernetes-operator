@@ -46,12 +46,11 @@ jobs:
       
       - name: Package Helm chart
         run: |
-          mkdir -p site/charts
-          helm package operator/documentdb-helm-chart -d site/charts
+          helm package operator/documentdb-helm-chart -d site
       
       - name: Generate Helm index
         run: |
-          helm repo index site/charts --url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+          helm repo index site --url https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
       
       - name: Setup Pages
         uses: actions/configure-pages@v5

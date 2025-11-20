@@ -42,7 +42,7 @@ jobs:
             dockerfile: operator/cnpg-plugins/sidecar-injector/Dockerfile
             context: operator/cnpg-plugins/sidecar-injector/
           - name: documentdb
-            dockerfile: .github/dockerfiles/Dockerfile_docdb
+            dockerfile: .github/dockerfiles/Dockerfile_docdb_packages
             context: .
           - name: gateway
             dockerfile: .github/dockerfiles/Dockerfile_gateway
@@ -71,16 +71,18 @@ jobs:
           -f ${{ matrix.image.dockerfile }} ${{ matrix.image.context }}
         docker push ghcr.io/${{ github.repository }}/${{ matrix.image.name }}:$TAG
 
+
   create-manifest:
     name: Create, Push, Sign & Verify Manifest
     strategy:
       matrix:
         image: [operator, sidecar, documentdb, gateway]
     runs-on: ubuntu-22.04
-    needs: build-and-push
+    needs: [build-and-push]
     env:
       VERSION: ${{ github.event.inputs.version || '0.1.1' }}
-      MANIFEST_TAG: ${{ github.event.inputs.version || '0.1.1' }}
+      MANIFEST_TAG: ${{ github.event.inputs.version || '0.1.1' }}-test
+      IMAGE_TAG: ${{ github.event.inputs.version || '0.1.1' }}-test
     steps:
     - name: Login to GHCR
       run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin

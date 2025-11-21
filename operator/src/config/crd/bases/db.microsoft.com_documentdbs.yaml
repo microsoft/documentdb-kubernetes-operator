@@ -176,9 +176,9 @@ spec:
                   If not specified, defaults to a version that matches the DocumentDB operator version.
                 type: string
               instancesPerNode:
-                description: InstancesPerNode is the number of DocumentDB instances
-                  per node. Must be 1.
-                maximum: 1
+                description: 'InstancesPerNode is the number of DocumentDB instances
+                  per node. Range: 1-3.'
+                maximum: 3
                 minimum: 1
                 type: integer
               logLevel:

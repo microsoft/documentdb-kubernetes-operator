@@ -29,6 +29,8 @@ ENABLE_AZURE_DNS="${ENABLE_AZURE_DNS:-true}"
 
 # Set password from argument or environment variable
 DOCUMENTDB_PASSWORD="${1:-${DOCUMENTDB_PASSWORD:-}}"
+DOCUMENTDB_IMAGE="${DOCUMENTDB_IMAGE:-ghcr.io/microsoft/documentdb/documentdb-local:16}"
+GATEWAY_IMAGE="${GATEWAY_IMAGE:-${DOCUMENTDB_IMAGE}}"
 
 # If no password provided, generate a secure one
 if [ -z "$DOCUMENTDB_PASSWORD" ]; then
@@ -96,7 +98,7 @@ echo "======================================="
 
 for cluster in "${CLUSTER_ARRAY[@]}"; do
   echo ""
-  echo "Processing ConfigMap for $cluster..."
+  echo "Processing ConfigMaps for $cluster..."
   
   # Check if context exists
   if ! kubectl config get-contexts "$cluster" &>/dev/null; then
@@ -107,7 +109,7 @@ for cluster in "${CLUSTER_ARRAY[@]}"; do
   # Extract region from cluster name (member-<region>-<suffix>)
   REGION=$(echo "$cluster" | awk -F- '{print $2}')
   
-  # Create or update the cluster-name ConfigMap
+  # Create or update the cluster-name ConfigMap in kube-system
   kubectl --context "$cluster" create configmap cluster-name \
     -n kube-system \
     --from-literal=name="$cluster" \
@@ -116,9 +118,9 @@ for cluster in "${CLUSTER_ARRAY[@]}"; do
   
   # Verify the ConfigMap was created
   if kubectl --context "$cluster" get configmap cluster-name -n kube-system &>/dev/null; then
-    echo "✓ ConfigMap created/updated for $cluster (region: $REGION)"
+    echo "✓ ConfigMap cluster-name created/updated for $cluster (region: $REGION)"
   else
-    echo "✗ Failed to create ConfigMap for $cluster"
+    echo "✗ Failed to create ConfigMap cluster-name for $cluster"
   fi
 done
 
@@ -193,6 +195,8 @@ TEMP_YAML=$(mktemp)
 # Use sed for safer substitution
 sed -e "s/{{DOCUMENTDB_PASSWORD}}/$DOCUMENTDB_PASSWORD/g" \
     -e "s/{{PRIMARY_CLUSTER}}/$PRIMARY_CLUSTER/g" \
+    -e "s#{{DOCUMENTDB_IMAGE}}#$DOCUMENTDB_IMAGE#g" \
+    -e "s#{{GATEWAY_IMAGE}}#$GATEWAY_IMAGE#g" \
     "$SCRIPT_DIR/multi-region.yaml" | \
 while IFS= read -r line; do
   if [[ "$line" == '{{CLUSTER_LIST}}' ]]; then

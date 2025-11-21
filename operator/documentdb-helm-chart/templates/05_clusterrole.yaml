@@ -13,7 +13,7 @@ rules:
   resources: ["statefulsets", "deployments"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 - apiGroups: [""]
-  resources: ["services", "pods", "endpoints", "leases", "serviceaccounts", "configmaps", "namespaces", "persistentvolumeclaims"]
+  resources: ["services", "pods", "endpoints", "leases", "serviceaccounts", "configmaps", "namespaces", "persistentvolumeclaims", "pods/exec"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 - apiGroups: ["metrics.k8s.io"]
   resources: ["pods"]

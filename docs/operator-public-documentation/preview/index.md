@@ -404,6 +404,38 @@ The DocumentDB operator uses a sidecar injector plugin to automatically inject t
 For detailed information on configuring the sidecar injector plugin, see: [Sidecar Injector Plugin Configuration](../../developer-guides/sidecar-injector-plugin-configuration.md)
 
 
+### Local High-Availability (HA)
+
+The DocumentDB operator supports local high-availability by deploying multiple DocumentDB instances with automatic failover capabilities. This is achieved by setting `instancesPerNode` to a value greater than 1, which creates a cluster of DocumentDB instances with built-in redundancy.
+
+#### Enable Local HA
+
+To enable local HA, set `instancesPerNode: 3` in your DocumentDB resource:
+
+```sh
+cat <<EOF | kubectl apply -f -
+apiVersion: db.microsoft.com/preview
+kind: DocumentDB
+metadata:
+  name: documentdb-ha
+  namespace: your-namespace
+spec:
+  nodeCount: 1
+  instancesPerNode: 3  # Creates 3 DocumentDB instances for HA
+  documentDbCredentialSecret: documentdb-credentials
+  resource:
+    storage:
+      pvcSize: 10Gi
+  exposeViaService:
+    serviceType: LoadBalancer
+EOF
+```
+
+This configuration creates:
+- **1 Primary instance**: Handles all write operations
+- **2 Replica instances**: Provide read scalability and automatic failover capability
+
+
 ### Multi-Cloud Deployment
 
 The DocumentDB operator supports deployment across multiple cloud environments and Kubernetes distributions. For guidance on multi-cloud deployments, see: [Multi-Cloud Deployment Guide](../../../documentdb-playground/multi-clould-setup/multi-cloud-deployment-guide.md)

@@ -14,10 +14,9 @@ NODE_SIZE="Standard_D4s_v5"
 KUBERNETES_VERSION="1.31.11"
 
 # DocumentDB Operator Configuration
-# For testing: use hossain-rayhan/documentdb-operator (fork with Azure enhancements)
-# For production: use microsoft/documentdb-operator (official)
-OPERATOR_GITHUB_ORG="hossain-rayhan"
-OPERATOR_CHART_VERSION="0.1.112"
+# For testing: update with your account/org if using a fork
+OPERATOR_GITHUB_ORG="documentdb"
+OPERATOR_CHART_VERSION="0.1.1"
 
 # Feature flags - set to "true" to enable, "false" to skip
 INSTALL_OPERATOR="${INSTALL_OPERATOR:-false}"
@@ -399,6 +398,9 @@ Then run the script again with --install-operator"
         --version ${OPERATOR_CHART_VERSION} \
         --namespace documentdb-operator \
         --create-namespace \
+        --set documentDbVersion=${OPERATOR_CHART_VERSION} \
+        --set image.documentdbk8soperator.repository=ghcr.io/${OPERATOR_GITHUB_ORG}/documentdb-kubernetes-operator/operator \
+        --set image.sidecarinjector.repository=ghcr.io/${OPERATOR_GITHUB_ORG}/documentdb-kubernetes-operator/sidecar \
         --wait \
         --timeout 10m
 

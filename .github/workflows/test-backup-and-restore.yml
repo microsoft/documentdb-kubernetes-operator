@@ -173,7 +173,7 @@ jobs:
       shell: bash
       run: |
         cat <<EOF | kubectl apply -f -
-        apiVersion: db.microsoft.com/preview
+        apiVersion: db.documentdb.com/preview
         kind: ScheduledBackup
         metadata:
           name: $DB_NAME-backup
@@ -271,7 +271,7 @@ jobs:
 
         # Create DocumentDB resource
         cat <<EOF | kubectl apply -f -
-        apiVersion: db.microsoft.com/preview
+        apiVersion: db.documentdb.com/preview
         kind: DocumentDB
         metadata:
           name: ${{ env.DB_RESTORE_NAME }}

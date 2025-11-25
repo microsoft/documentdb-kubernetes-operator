@@ -16,7 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
+	dbpreview "github.com/documentdb/documentdb-operator/api/preview"
 )
 
 var _ = Describe("Backup Controller", func() {

@@ -1,6 +1,6 @@
 package main
 
-import "github.com/microsoft/documentdb-operator/documentdb-kubectl-plugin/cmd"
+import "github.com/documentdb/documentdb-operator/documentdb-kubectl-plugin/cmd"
 
 func main() {
 	cmd.Execute()

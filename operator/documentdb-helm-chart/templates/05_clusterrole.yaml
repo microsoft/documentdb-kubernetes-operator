@@ -6,7 +6,7 @@ metadata:
     app.kubernetes.io/name: "documentdb-operator"
     app.kubernetes.io/managed-by: "Helm"
 rules:
-- apiGroups: ["db.microsoft.com"] # documentdb.microsoft.com permissions
+- apiGroups: ["db.documentdb.com"] # documentdb.documentdb.com permissions
   resources: ["documentdbs", "documentdbs/status", "documentdbs/finalizers"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 - apiGroups: ["apps"]
@@ -41,11 +41,11 @@ rules:
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
 # Backup permissions
-- apiGroups: ["db.microsoft.com"]
+- apiGroups: ["db.documentdb.com"]
   resources: ["backups", "backups/status", "backups/finalizers"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 # ScheduledBackup permissions
-- apiGroups: ["db.microsoft.com"]
+- apiGroups: ["db.documentdb.com"]
   resources: ["scheduledbackups", "scheduledbackups/status", "scheduledbackups/finalizers"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 # CNPG Backup permissions

@@ -31,9 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
-	cnpg "github.com/microsoft/documentdb-operator/internal/cnpg"
-	util "github.com/microsoft/documentdb-operator/internal/utils"
+	dbpreview "github.com/documentdb/documentdb-operator/api/preview"
+	cnpg "github.com/documentdb/documentdb-operator/internal/cnpg"
+	util "github.com/documentdb/documentdb-operator/internal/utils"
 )
 
 const (
@@ -51,9 +51,9 @@ type DocumentDBReconciler struct {
 
 var reconcileMutex sync.Mutex
 
-// +kubebuilder:rbac:groups=db.microsoft.com,resources=documentdbs,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=db.microsoft.com,resources=documentdbs/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=db.microsoft.com,resources=documentdbs/finalizers,verbs=update
+// +kubebuilder:rbac:groups=db.documentdb.com,resources=documentdbs,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=db.documentdb.com,resources=documentdbs/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=db.documentdb.com,resources=documentdbs/finalizers,verbs=update
 func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	reconcileMutex.Lock()
 	defer reconcileMutex.Unlock()
@@ -180,7 +180,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				if currentCnpgCluster.Annotations == nil {
 					currentCnpgCluster.Annotations = map[string]string{}
 				}
-				currentCnpgCluster.Annotations["db.microsoft.com/gateway-tls-rev"] = time.Now().Format(time.RFC3339Nano)
+				currentCnpgCluster.Annotations["db.documentdb.com/gateway-tls-rev"] = time.Now().Format(time.RFC3339Nano)
 				if err := r.Client.Update(ctx, currentCnpgCluster); err == nil {
 					logger.Info("Patched CNPG Cluster with TLS settings; requeueing for pod update")
 					return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil

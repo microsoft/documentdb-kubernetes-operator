@@ -7,7 +7,7 @@ import (
 	"context"
 	"fmt"
 
-	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
+	dbpreview "github.com/documentdb/documentdb-operator/api/preview"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"

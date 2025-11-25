@@ -151,9 +151,8 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: requeueTime}, nil
 	}
 
-	// Update DocumentDB status with CNPG Cluster status and connection string
+	// Sync TLS secret parameter into CNPG Cluster plugin if ready
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: desiredCnpgCluster.Name, Namespace: req.Namespace}, currentCnpgCluster); err == nil {
-		// Ensure plugin enabled and TLS secret parameter kept in sync once ready
 		if documentdb.Status.TLS != nil && documentdb.Status.TLS.Ready && documentdb.Status.TLS.SecretName != "" {
 			logger.Info("Syncing TLS secret into CNPG Cluster plugin parameters", "secret", documentdb.Status.TLS.SecretName)
 			updated := false
@@ -188,10 +187,6 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				} else {
 					logger.Error(err, "Failed to update CNPG Cluster with TLS settings")
 				}
-			}
-
-			if err := r.Status().Update(ctx, documentdb); err != nil {
-				logger.Error(err, "Failed to update DocumentDB status and connection string")
 			}
 		}
 	}
@@ -233,13 +228,32 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
 			}
 		}
-		// Update status connection string
-		if documentDbServiceIp != "" {
-			trustTLS := documentdb.Status.TLS != nil && documentdb.Status.TLS.Ready
-			documentdb.Status.ConnectionString = util.GenerateConnectionString(documentdb, documentDbServiceIp, trustTLS)
+	}
+
+	// Update DocumentDB status with CNPG Cluster phase and connection string
+	if err := r.Client.Get(ctx, types.NamespacedName{Name: desiredCnpgCluster.Name, Namespace: req.Namespace}, currentCnpgCluster); err == nil {
+		statusChanged := false
+
+		// Update phase status from CNPG Cluster
+		if currentCnpgCluster.Status.Phase != "" && documentdb.Status.Status != currentCnpgCluster.Status.Phase {
+			documentdb.Status.Status = currentCnpgCluster.Status.Phase
+			statusChanged = true
 		}
-		if err := r.Status().Update(ctx, documentdb); err != nil {
-			logger.Error(err, "Failed to update DocumentDB status and connection string")
+
+		// Update connection string if primary and service IP available
+		if replicationContext.IsPrimary() && documentDbServiceIp != "" {
+			trustTLS := documentdb.Status.TLS != nil && documentdb.Status.TLS.Ready
+			newConnStr := util.GenerateConnectionString(documentdb, documentDbServiceIp, trustTLS)
+			if documentdb.Status.ConnectionString != newConnStr {
+				documentdb.Status.ConnectionString = newConnStr
+				statusChanged = true
+			}
+		}
+
+		if statusChanged {
+			if err := r.Status().Update(ctx, documentdb); err != nil {
+				logger.Error(err, "Failed to update DocumentDB status")
+			}
 		}
 	}
 
@@ -315,7 +329,9 @@ func clusterInstanceStatusChangedPredicate() predicate.Predicate {
 			if !ok {
 				return true
 			}
-			return !slices.Equal(oldCluster.Status.InstancesStatus[cnpgv1.PodHealthy], newCluster.Status.InstancesStatus[cnpgv1.PodHealthy])
+			// Trigger on healthy instances change OR phase change
+			return !slices.Equal(oldCluster.Status.InstancesStatus[cnpgv1.PodHealthy], newCluster.Status.InstancesStatus[cnpgv1.PodHealthy]) ||
+				oldCluster.Status.Phase != newCluster.Status.Phase
 		},
 	}
 }

@@ -233,6 +233,37 @@ jobs:
         # Clean up output log
         rm -f /tmp/perf_pf_output.log
 
+    - name: Verify DocumentDB Status and Connection String
+      run: |
+        echo "Verifying DocumentDB status fields on ${{ matrix.architecture }}..."
+        
+        # Get the DocumentDB resource status
+        DB_STATUS=$(kubectl get documentdb $DB_NAME -n $DB_NS -o jsonpath='{.status.status}')
+        CONNECTION_STRING=$(kubectl get documentdb $DB_NAME -n $DB_NS -o jsonpath='{.status.connectionString}')
+        
+        echo "DocumentDB Status: $DB_STATUS"
+        echo "Connection String: ${CONNECTION_STRING:0:50}..." # Print first 50 chars only
+        
+        # Verify status is "Cluster in healthy state"
+        if [[ "$DB_STATUS" == "Cluster in healthy state" ]]; then
+          echo "✓ DocumentDB status is healthy"
+        else
+          echo "❌ DocumentDB status is not healthy: $DB_STATUS"
+          kubectl get documentdb $DB_NAME -n $DB_NS -o yaml
+          exit 1
+        fi
+        
+        # Verify connection string is not empty
+        if [[ -n "$CONNECTION_STRING" ]]; then
+          echo "✓ Connection string is populated"
+        else
+          echo "❌ Connection string is empty"
+          kubectl get documentdb $DB_NAME -n $DB_NS -o yaml
+          exit 1
+        fi
+        
+        echo "✅ DocumentDB status validation passed"
+
     - name: Test cluster health and monitoring
       run: |
         echo "Testing cluster health and monitoring on ${{ matrix.architecture }}..."

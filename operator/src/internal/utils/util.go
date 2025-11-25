@@ -36,8 +36,9 @@ func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, replicatio
 	}
 	if replicationContext.EndpointEnabled() {
 		selector = map[string]string{
-			"cnpg.io/cluster":      documentdb.Name,
+			LABEL_APP:              documentdb.Name,
 			"cnpg.io/instanceRole": "primary", // Service forwards traffic to CNPG primary instance
+			LABEL_REPLICA_TYPE:     "primary",
 		}
 	}
 

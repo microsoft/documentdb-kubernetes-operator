@@ -285,7 +285,6 @@ func TestGetDocumentDBServiceDefinition_CNPGLabels(t *testing.T) {
 			serviceType:     corev1.ServiceTypeLoadBalancer,
 			expectedSelector: map[string]string{
 				"app":                  "test-documentdb",
-				"cnpg.io/cluster":      "test-documentdb",
 				"cnpg.io/instanceRole": "primary",
 				"replica_type":         "primary",
 			},
@@ -298,7 +297,6 @@ func TestGetDocumentDBServiceDefinition_CNPGLabels(t *testing.T) {
 			serviceType:     corev1.ServiceTypeClusterIP,
 			expectedSelector: map[string]string{
 				"app":                  "test-documentdb",
-				"cnpg.io/cluster":      "test-documentdb",
 				"cnpg.io/instanceRole": "primary",
 				"replica_type":         "primary",
 			},
@@ -311,7 +309,6 @@ func TestGetDocumentDBServiceDefinition_CNPGLabels(t *testing.T) {
 			serviceType:     corev1.ServiceTypeLoadBalancer,
 			expectedSelector: map[string]string{
 				"app":                  "my-db-cluster",
-				"cnpg.io/cluster":      "my-db-cluster",
 				"cnpg.io/instanceRole": "primary",
 				"replica_type":         "primary",
 			},

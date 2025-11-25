@@ -168,7 +168,7 @@ spec:
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
-      name: documentdbs.db.microsoft.com
+      name: documentdbs.db.documentdb.com
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
@@ -319,7 +319,7 @@ metadata:
 
 ---
 
-apiVersion: db.microsoft.com/preview
+apiVersion: db.documentdb.com/preview
 kind: DocumentDB
 metadata:
   name: documentdb-preview

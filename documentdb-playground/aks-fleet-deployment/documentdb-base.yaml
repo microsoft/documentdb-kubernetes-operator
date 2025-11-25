@@ -15,7 +15,7 @@ spec:
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
-      name: documentdbs.db.microsoft.com
+      name: documentdbs.db.documentdb.com
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
@@ -43,11 +43,11 @@ spec:
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
-      name: backups.db.microsoft.com
+      name: backups.db.documentdb.com
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
-      name: scheduledbackups.db.microsoft.com
+      name: scheduledbackups.db.documentdb.com
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition

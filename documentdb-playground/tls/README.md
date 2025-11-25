@@ -357,7 +357,7 @@ The operator automatically creates:
 
 **Configuration Example:**
 ```yaml
-apiVersion: db.microsoft.com/v1
+apiVersion: db.documentdb.com/v1
 kind: DocumentDB
 metadata:
   name: documentdb-preview
@@ -376,7 +376,7 @@ You provide an existing certificate from an external source (e.g., Azure Key Vau
 
 **Configuration Example:**
 ```yaml
-apiVersion: db.microsoft.com/v1
+apiVersion: db.documentdb.com/v1
 kind: DocumentDB
 metadata:
   name: documentdb-preview
@@ -397,7 +397,7 @@ Use cert-manager with your own Issuer or ClusterIssuer (e.g., Let's Encrypt, Ven
 
 **Configuration Example:**
 ```yaml
-apiVersion: db.microsoft.com/v1
+apiVersion: db.documentdb.com/v1
 kind: DocumentDB
 metadata:
   name: documentdb-preview

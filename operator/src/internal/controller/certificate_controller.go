@@ -20,8 +20,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
-	util "github.com/microsoft/documentdb-operator/internal/utils"
+	dbpreview "github.com/documentdb/documentdb-operator/api/preview"
+	util "github.com/documentdb/documentdb-operator/internal/utils"
 )
 
 // CertificateReconciler manages certificate lifecycle for DocumentDB components.
@@ -31,8 +31,8 @@ type CertificateReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=db.microsoft.com,resources=documentdbs,verbs=get;list;watch
-// +kubebuilder:rbac:groups=db.microsoft.com,resources=documentdbs/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=db.documentdb.com,resources=documentdbs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=db.documentdb.com,resources=documentdbs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=cert-manager.io,resources=certificates;issuers,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=cert-manager.io,resources=certificates/status;issuers/status,verbs=get
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch

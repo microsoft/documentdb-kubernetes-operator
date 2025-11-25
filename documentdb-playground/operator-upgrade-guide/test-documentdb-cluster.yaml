@@ -13,7 +13,7 @@ stringData:
   username: docdb
   password: TestPassword123
 ---
-apiVersion: db.microsoft.com/preview
+apiVersion: db.documentdb.com/preview
 kind: DocumentDB
 metadata:
   name: documentdb-cluster

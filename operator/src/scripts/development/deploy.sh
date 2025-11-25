@@ -135,7 +135,7 @@ kind: Namespace
 metadata:
   name: documentdb-preview-ns
 ---
-apiVersion: db.microsoft.com/preview
+apiVersion: db.documentdb.com/preview
 kind: DocumentDB
 metadata:
   name: documentdb-preview

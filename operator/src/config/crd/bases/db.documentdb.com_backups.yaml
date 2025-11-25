@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: backups.db.microsoft.com
+  name: backups.db.documentdb.com
 spec:
-  group: db.microsoft.com
+  group: db.documentdb.com
   names:
     kind: Backup
     listKind: BackupList

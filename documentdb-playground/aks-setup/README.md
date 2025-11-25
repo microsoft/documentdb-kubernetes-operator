@@ -176,7 +176,7 @@ export GITHUB_TOKEN="your-token"
 
 # 3. Deploy DocumentDB instance manually
 kubectl apply -f - <<EOF
-apiVersion: db.microsoft.com/preview
+apiVersion: db.documentdb.com/preview
 kind: DocumentDB
 metadata:
   name: my-documentdb
@@ -305,7 +305,7 @@ az aks enable-addons --resource-group RESOURCE_GROUP --name CLUSTER_NAME --addon
 - [AKS Documentation](https://docs.microsoft.com/en-us/azure/aks/)
 - [Azure CNI Networking](https://docs.microsoft.com/en-us/azure/aks/configure-azure-cni)
 - [Azure Load Balancer](https://docs.microsoft.com/en-us/azure/load-balancer/)
-- [DocumentDB Operator GitHub](https://github.com/microsoft/documentdb-operator)
+- [DocumentDB Operator GitHub](https://github.com/documentdb/documentdb-operator)
 
 ## 🆘 Support
 

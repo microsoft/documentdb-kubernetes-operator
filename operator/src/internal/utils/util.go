@@ -38,7 +38,6 @@ func GetDocumentDBServiceDefinition(documentdb *dbpreview.DocumentDB, replicatio
 		selector = map[string]string{
 			LABEL_APP:              documentdb.Name,
 			"cnpg.io/instanceRole": "primary", // Service forwards traffic to CNPG primary instance
-			LABEL_REPLICA_TYPE:     "primary",
 		}
 	}
 

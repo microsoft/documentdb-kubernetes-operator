@@ -286,7 +286,6 @@ func TestGetDocumentDBServiceDefinition_CNPGLabels(t *testing.T) {
 			expectedSelector: map[string]string{
 				"app":                  "test-documentdb",
 				"cnpg.io/instanceRole": "primary",
-				"replica_type":         "primary",
 			},
 			description: "When endpoint is enabled, service should use CNPG labels for failover support",
 		},
@@ -298,7 +297,6 @@ func TestGetDocumentDBServiceDefinition_CNPGLabels(t *testing.T) {
 			expectedSelector: map[string]string{
 				"app":                  "test-documentdb",
 				"cnpg.io/instanceRole": "primary",
-				"replica_type":         "primary",
 			},
 			description: "Service type should not affect selector labels",
 		},
@@ -310,7 +308,6 @@ func TestGetDocumentDBServiceDefinition_CNPGLabels(t *testing.T) {
 			expectedSelector: map[string]string{
 				"app":                  "my-db-cluster",
 				"cnpg.io/instanceRole": "primary",
-				"replica_type":         "primary",
 			},
 			description: "Cluster label should match DocumentDB instance name",
 		},

@@ -154,7 +154,7 @@ kubectl -n "$NAMESPACE" create secret generic "$SECRET_NAME" \
 
 {
   cat <<EOF
-apiVersion: db.microsoft.com/preview
+apiVersion: db.documentdb.com/preview
 kind: DocumentDB
 metadata:
   name: ${DOCDB_NAME}

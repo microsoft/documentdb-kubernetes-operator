@@ -16,7 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
+	dbpreview "github.com/documentdb/documentdb-operator/api/preview"
 )
 
 var _ = Describe("ScheduledBackup Controller", func() {

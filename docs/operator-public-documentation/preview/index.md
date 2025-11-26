@@ -98,7 +98,7 @@ kubectl get crd | grep documentdb
 Output:
 
 ```text
-documentdbs.db.microsoft.com
+documentdbs.db.documentdb.com
 ```
 
 ### Store DocumentDB credentials in K8s Secret
@@ -166,7 +166,7 @@ kind: Namespace
 metadata:
   name: documentdb-preview-ns
 ---
-apiVersion: db.microsoft.com/preview
+apiVersion: db.documentdb.com/preview
 kind: DocumentDB
 metadata:
   name: documentdb-preview
@@ -239,7 +239,7 @@ If you prefer direct external access (recommended for cloud environments like Az
 **Step 1:** Deploy DocumentDB with LoadBalancer service:
 ```sh
 cat <<EOF | kubectl apply -f -
-apiVersion: db.microsoft.com/preview
+apiVersion: db.documentdb.com/preview
 kind: DocumentDB
 metadata:
   name: documentdb-preview
@@ -472,5 +472,5 @@ kubectl delete crd backups.postgresql.cnpg.io \
   publications.postgresql.cnpg.io \
   scheduledbackups.postgresql.cnpg.io \
   subscriptions.postgresql.cnpg.io \
-  documentdbs.db.microsoft.com
+  documentdbs.db.documentdb.com
 ```

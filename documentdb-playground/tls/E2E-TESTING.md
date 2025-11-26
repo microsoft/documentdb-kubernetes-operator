@@ -867,7 +867,7 @@ echo "=== Validation Complete ==="
 
 1. **Check DocumentDB CRD**:
    ```bash
-   kubectl get crd documentdbs.db.microsoft.com -o yaml | grep -A 5 "tls"
+   kubectl get crd documentdbs.db.documentdb.com -o yaml | grep -A 5 "tls"
    ```
 
 2. **Inspect TLS Configuration**:

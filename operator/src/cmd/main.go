@@ -27,8 +27,8 @@ import (
 
 	cmapi "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
-	"github.com/microsoft/documentdb-operator/internal/controller"
+	dbpreview "github.com/documentdb/documentdb-operator/api/preview"
+	"github.com/documentdb/documentdb-operator/internal/controller"
 	fleetv1alpha1 "go.goms.io/fleet-networking/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )

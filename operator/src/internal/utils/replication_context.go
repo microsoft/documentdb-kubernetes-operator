@@ -65,6 +65,9 @@ func GetReplicationContext(ctx context.Context, client client.Client, documentdb
 	}
 
 	primaryCluster := documentdb.Name + "-" + documentdb.Spec.ClusterReplication.Primary
+	if len(primaryCluster) > CNPG_MAX_CLUSTER_NAME_LENGTH {
+		primaryCluster = primaryCluster[:CNPG_MAX_CLUSTER_NAME_LENGTH]
+	}
 
 	storageClass := documentdb.Spec.Resource.Storage.StorageClass
 	if self.StorageClassOverride != "" {
@@ -201,8 +204,8 @@ func getTopology(ctx context.Context, client client.Client, documentdb dbpreview
 	for _, c := range documentdb.Spec.ClusterReplication.ClusterList {
 		if c.Name != selfName {
 			otherName := documentdb.Name + "-" + c.Name
-			if len(otherName) > 50 {
-				otherName = otherName[:50]
+			if len(otherName) > CNPG_MAX_CLUSTER_NAME_LENGTH {
+				otherName = otherName[:CNPG_MAX_CLUSTER_NAME_LENGTH]
 			}
 			others = append(others, otherName)
 		} else {
@@ -210,8 +213,8 @@ func getTopology(ctx context.Context, client client.Client, documentdb dbpreview
 		}
 	}
 	self.Name = documentdb.Name + "-" + self.Name
-	if len(self.Name) > 50 {
-		self.Name = self.Name[:50]
+	if len(self.Name) > CNPG_MAX_CLUSTER_NAME_LENGTH {
+		self.Name = self.Name[:CNPG_MAX_CLUSTER_NAME_LENGTH]
 	}
 	return &self, others, state, nil
 }

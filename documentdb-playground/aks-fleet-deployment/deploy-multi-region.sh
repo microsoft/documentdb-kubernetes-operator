@@ -329,7 +329,6 @@ if [ "$ENABLE_AZURE_DNS" = "true" ]; then
 
     # Create service name by concatenating documentdb-preview with cluster name (max 63 chars)
     SERVICE_NAME="documentdb-service-documentdb-preview"
-    SERVICE_NAME="${SERVICE_NAME:0:63}"
     
     # Get the external IP of the DocumentDB service
     EXTERNAL_IP=""

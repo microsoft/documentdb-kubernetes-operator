@@ -177,7 +177,6 @@ func (r *ReplicationContext) CreateStandbyNamesList() []string {
 	/* TODO re-enable when we have a WAL replica image
 	standbyNames[len(r.Others)] = "pg_receivewal"
 	*/
-	//Should this just be documentdb-preview twice?
 	return standbyNames
 }
 

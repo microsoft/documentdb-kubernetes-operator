@@ -31,8 +31,6 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 	replicationContext *util.ReplicationContext,
 	cnpgCluster *cnpgv1.Cluster,
 ) error {
-	isPrimary := documentdb.Spec.ClusterReplication.Primary == replicationContext.Self
-
 	if replicationContext.IsAzureFleetNetworking() {
 		err := r.CreateServiceImportAndExport(ctx, replicationContext, documentdb)
 		if err != nil {
@@ -48,7 +46,7 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 	// No more errors possible, so we can safely edit the spec
 	cnpgCluster.Name = replicationContext.Self
 
-	if !isPrimary {
+	if !replicationContext.IsPrimary() {
 		cnpgCluster.Spec.InheritedMetadata.Labels[util.LABEL_REPLICATION_CLUSTER_TYPE] = "replica"
 		cnpgCluster.Spec.Bootstrap = &cnpgv1.BootstrapConfiguration{
 			PgBaseBackup: &cnpgv1.BootstrapPgBaseBackup{

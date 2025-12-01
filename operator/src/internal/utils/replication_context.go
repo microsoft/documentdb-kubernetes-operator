@@ -6,6 +6,7 @@ package util
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 
 	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
 	corev1 "k8s.io/api/core/v1"
@@ -16,7 +17,7 @@ import (
 type ReplicationContext struct {
 	Self                         string
 	Others                       []string
-	PrimaryRegion                string
+	PrimaryCluster               string
 	CrossCloudNetworkingStrategy crossCloudNetworkingStrategy
 	Environment                  string
 	StorageClass                 string
@@ -53,7 +54,7 @@ func GetReplicationContext(ctx context.Context, client client.Client, documentdb
 		return &singleClusterReplicationContext, nil
 	}
 
-	self, others, err := splitSelfAndOthers(ctx, client, documentdb)
+	self, others, replicationState, err := getTopology(ctx, client, documentdb)
 	if err != nil {
 		return nil, err
 	}
@@ -63,12 +64,7 @@ func GetReplicationContext(ctx context.Context, client client.Client, documentdb
 		return &singleClusterReplicationContext, nil
 	}
 
-	state := Replica
-	if documentdb.Spec.ClusterReplication.Primary == self.Name {
-		state = Primary
-	}
-
-	primaryRegion := documentdb.Spec.ClusterReplication.Primary
+	primaryCluster := documentdb.Name + "-" + documentdb.Spec.ClusterReplication.Primary
 
 	storageClass := documentdb.Spec.Resource.Storage.StorageClass
 	if self.StorageClassOverride != "" {
@@ -83,10 +79,10 @@ func GetReplicationContext(ctx context.Context, client client.Client, documentdb
 		Self:                         self.Name,
 		Others:                       others,
 		CrossCloudNetworkingStrategy: crossCloudNetworkingStrategy(documentdb.Spec.ClusterReplication.CrossCloudNetworkingStrategy),
-		PrimaryRegion:                primaryRegion,
+		PrimaryCluster:               primaryCluster,
 		Environment:                  environment,
 		StorageClass:                 storageClass,
-		state:                        state,
+		state:                        replicationState,
 		targetLocalPrimary:           documentdb.Status.TargetPrimary,
 		currentLocalPrimary:          documentdb.Status.LocalPrimary,
 	}, nil
@@ -105,7 +101,7 @@ func (r ReplicationContext) String() string {
 	}
 
 	return fmt.Sprintf("ReplicationContext{Self: %s, State: %s, Others: %v, PrimaryRegion: %s, CurrentLocalPrimary: %s, TargetLocalPrimary: %s}",
-		r.Self, stateStr, r.Others, r.PrimaryRegion, r.currentLocalPrimary, r.targetLocalPrimary)
+		r.Self, stateStr, r.Others, r.PrimaryCluster, r.currentLocalPrimary, r.targetLocalPrimary)
 }
 
 // Returns true if this instance is the primary or if there is no replication configured.
@@ -120,7 +116,7 @@ func (r *ReplicationContext) IsReplicating() bool {
 // Gets the primary if you're a replica, otherwise returns the first other cluster
 func (r ReplicationContext) GetReplicationSource() string {
 	if r.state == Replica {
-		return r.PrimaryRegion
+		return r.PrimaryCluster
 	}
 	return r.Others[0]
 }
@@ -135,12 +131,12 @@ func (r ReplicationContext) EndpointEnabled() bool {
 	return r.currentLocalPrimary == r.targetLocalPrimary
 }
 
-func (r ReplicationContext) GenerateExternalClusterServices(namespace string, fleetEnabled bool) func(yield func(string, string) bool) {
+func (r ReplicationContext) GenerateExternalClusterServices(name, namespace string, fleetEnabled bool) func(yield func(string, string) bool) {
 	return func(yield func(string, string) bool) {
 		for _, other := range r.Others {
 			serviceName := other + "-rw." + namespace + ".svc"
 			if fleetEnabled {
-				serviceName = namespace + "-" + generateServiceName(other, r.Self, namespace) + ".fleet-system.svc"
+				serviceName = namespace + "-" + generateServiceName(name, other, r.Self, namespace) + ".fleet-system.svc"
 			}
 
 			if !yield(other, serviceName) {
@@ -151,10 +147,10 @@ func (r ReplicationContext) GenerateExternalClusterServices(namespace string, fl
 }
 
 // Create an iterator that yields outgoing service names, for use in a for each loop
-func (r ReplicationContext) GenerateIncomingServiceNames(resourceGroup string) func(yield func(string) bool) {
+func (r ReplicationContext) GenerateIncomingServiceNames(name, resourceGroup string) func(yield func(string) bool) {
 	return func(yield func(string) bool) {
 		for _, other := range r.Others {
-			serviceName := generateServiceName(other, r.Self, resourceGroup)
+			serviceName := generateServiceName(name, other, r.Self, resourceGroup)
 			if !yield(serviceName) {
 				break
 			}
@@ -163,28 +159,14 @@ func (r ReplicationContext) GenerateIncomingServiceNames(resourceGroup string) f
 }
 
 // Create an iterator that yields outgoing service names, for use in a for each loop
-func (r ReplicationContext) GenerateOutgoingServiceNames(resourceGroup string) func(yield func(string) bool) {
+func (r ReplicationContext) GenerateOutgoingServiceNames(name, resourceGroup string) func(yield func(string) bool) {
 	return func(yield func(string) bool) {
 		for _, other := range r.Others {
-			serviceName := generateServiceName(r.Self, other, resourceGroup)
+			serviceName := generateServiceName(name, r.Self, other, resourceGroup)
 			if !yield(serviceName) {
 				break
 			}
 		}
-	}
-}
-
-func generateServiceName(source, target, resourceGroup string) string {
-	name := fmt.Sprintf("%s-%s", source, target)
-	diff := 63 - len(name) - len(resourceGroup) - 2
-	if diff >= 0 {
-		return name
-	} else {
-		// truncate source and target region names equally if needed
-		truncateBy := (-diff + 1) / 2 // +1 to handle odd numbers
-		sourceLen := len(source) - truncateBy
-		targetLen := len(target) - truncateBy
-		return fmt.Sprintf("%s-%s", source[0:sourceLen], target[0:targetLen])
 	}
 }
 
@@ -195,30 +177,44 @@ func (r *ReplicationContext) CreateStandbyNamesList() []string {
 	/* TODO re-enable when we have a WAL replica image
 	standbyNames[len(r.Others)] = "pg_receivewal"
 	*/
+	//Should this just be documentdb-preview twice?
 	return standbyNames
 }
 
-func splitSelfAndOthers(ctx context.Context, client client.Client, documentdb dbpreview.DocumentDB) (*dbpreview.MemberCluster, []string, error) {
+func getTopology(ctx context.Context, client client.Client, documentdb dbpreview.DocumentDB) (*dbpreview.MemberCluster, []string, replicationState, error) {
 	selfName := documentdb.Name
 	var err error
 
 	if documentdb.Spec.ClusterReplication.CrossCloudNetworkingStrategy != string(None) {
 		selfName, err = GetSelfName(ctx, client)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, NoReplication, err
 		}
+	}
+
+	state := Replica
+	if documentdb.Spec.ClusterReplication.Primary == selfName {
+		state = Primary
 	}
 
 	others := []string{}
 	var self dbpreview.MemberCluster
 	for _, c := range documentdb.Spec.ClusterReplication.ClusterList {
 		if c.Name != selfName {
-			others = append(others, c.Name)
+			otherName := documentdb.Name + "-" + c.Name
+			if len(otherName) > 50 {
+				otherName = otherName[:50]
+			}
+			others = append(others, otherName)
 		} else {
 			self = c
 		}
 	}
-	return &self, others, nil
+	self.Name = documentdb.Name + "-" + self.Name
+	if len(self.Name) > 50 {
+		self.Name = self.Name[:50]
+	}
+	return &self, others, state, nil
 }
 
 func GetSelfName(ctx context.Context, client client.Client) (string, error) {
@@ -242,4 +238,20 @@ func (r *ReplicationContext) IsAzureFleetNetworking() bool {
 
 func (r *ReplicationContext) IsIstioNetworking() bool {
 	return r.CrossCloudNetworkingStrategy == Istio
+}
+
+func generateServiceName(docdbName, sourceCluster, targetCluster, resourceGroup string) string {
+	length := 63 - len(resourceGroup) - 1 // account for hyphen
+	h := fnv.New64a()
+	h.Write([]byte(sourceCluster))
+	h.Write([]byte(targetCluster))
+	hash := h.Sum64()
+
+	// Convert hash to hex string
+	hashStr := fmt.Sprintf("%s-%x", docdbName, hash)
+
+	if length >= 0 && length < len(hashStr) {
+		return hashStr[:length]
+	}
+	return hashStr
 }

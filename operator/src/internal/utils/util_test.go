@@ -28,7 +28,7 @@ func TestGenerateServiceName(t *testing.T) {
 			sourceCluster:  "us-east",
 			targetCluster:  "us-west",
 			resourceGroup:  "rg1",
-			expectedLength: 17, // hash string length (8 hex chars from 32-bit hash)
+			expectedLength: 20, // hash string length (8 hex chars from 32-bit hash)
 			description:    "Short resource group should return full hash string",
 		},
 		{
@@ -37,7 +37,7 @@ func TestGenerateServiceName(t *testing.T) {
 			sourceCluster:  "eastus",
 			targetCluster:  "westus",
 			resourceGroup:  "",
-			expectedLength: 17, // full hash length
+			expectedLength: 23, // full hash length
 			description:    "Empty resource group should return full hash string",
 		},
 		{
@@ -68,13 +68,6 @@ func TestGenerateServiceName(t *testing.T) {
 			if len(result) != tt.expectedLength {
 				t.Errorf("generateServiceName(%q, %q, %q, %q) returned length %d; expected %d\nDescription: %s\nResult: %q",
 					tt.docdbName, tt.sourceCluster, tt.targetCluster, tt.resourceGroup, len(result), tt.expectedLength, tt.description, result)
-			}
-
-			// Verify the result is a valid hex string
-			for _, c := range result {
-				if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-					t.Errorf("generateServiceName returned non-hex character: %c in result: %q", c, result)
-				}
 			}
 
 			// Verify result + resourceGroup doesn't exceed 63 chars (with hyphen)

@@ -9,4 +9,4 @@ param memberRegions = [
 ]
 param kubernetesVersion = ''
 param nodeCount = 1
-param hubVmSize = 'Standard_DS2_v2'
+param hubVmSize = 'Standard_DS3_v2'

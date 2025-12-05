@@ -4,30 +4,30 @@
 set -euo pipefail
 
 RESOURCE_GROUP="${RESOURCE_GROUP:-documentdb-aks-fleet-rg}"
+HUB_REGION="${HUB_REGION:-westus3}"
 MEMBERS=$(az aks list -g "$RESOURCE_GROUP" -o json | jq -r '.[] | select(.name|startswith("member-")) | .name')
 echo -e "Members:\n$MEMBERS"
 
-# Ensure contexts
-for C in $MEMBERS; do
-  echo "Fetching creds for $C..."
-  az aks get-credentials -g "$RESOURCE_GROUP" -n "$C" --overwrite-existing 1>/dev/null || true
+# Ensure contexts and get hub name
+for cluster in $MEMBERS; do
+  echo "Fetching creds for $cluster..."
+  az aks get-credentials -g "$RESOURCE_GROUP" -n "$cluster" --overwrite-existing
+  if [[ "$cluster" == *"$HUB_REGION"* ]]; then HUB_CLUSTER="$cluster"; fi
 done
 
-# Helm repo and install per member
-helm repo add jetstack https://charts.jetstack.io 1>/dev/null || true
-helm repo update 1>/dev/null || true
+helm repo add jetstack https://charts.jetstack.io 
+helm repo update 
 
-for C in $MEMBERS; do
-  echo -e "\nInstalling cert-manager on $C..."
-  kubectl config use-context "$C" 1>/dev/null
-  helm upgrade --install cert-manager jetstack/cert-manager \
-    --namespace cert-manager \
-    --create-namespace \
-    --set installCRDs=true 1>/dev/null || true
-  kubectl rollout status deployment/cert-manager -n cert-manager --timeout=240s || true
-  echo "Pods ($C):"
-  kubectl get pods -n cert-manager -o wide || true
-done
+# Install cert manager on hub cluster
+echo -e "\nInstalling cert-manager on $HUB_CLUSTER..."
+kubectl config use-context "$HUB_CLUSTER" 
+helm upgrade --install cert-manager jetstack/cert-manager \
+  --namespace cert-manager \
+  --create-namespace \
+  --set installCRDs=true 1>/dev/null || true
+kubectl rollout status deployment/cert-manager -n cert-manager --timeout=240s || true
+echo "Pods ($cluster):"
+kubectl get pods -n cert-manager -o wide || true
 
 # Verify we can talk to the hub API
 echo "Verifying API connectivity to hub context ($HUB_CONTEXT)..."

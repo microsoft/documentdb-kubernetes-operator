@@ -229,6 +229,7 @@ type TLSStatus struct {
 // +kubebuilder:printcolumn:name="Connection String",type=string,JSONPath=".status.connectionString",description="DocumentDB Connection String"
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:metadata:labels=app=documentdb-operator
 
 // DocumentDB is the Schema for the documentdbs API.
 type DocumentDB struct {

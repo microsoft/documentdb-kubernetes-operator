@@ -14,7 +14,7 @@ param kubernetesVersion string = ''
 param vmSize string = 'Standard_DS2_v2'
 
 @description('Number of nodes per cluster')
-param nodeCount int = 1
+param nodeCount int = 2
 
 // Optionally include kubernetesVersion in cluster properties
 var maybeK8sVersion = empty(kubernetesVersion) ? {} : { kubernetesVersion: kubernetesVersion }

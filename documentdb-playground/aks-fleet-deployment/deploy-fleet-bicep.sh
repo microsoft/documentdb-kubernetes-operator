@@ -8,7 +8,7 @@ RESOURCE_GROUP="${RESOURCE_GROUP:-documentdb-aks-fleet-rg}"
 RG_LOCATION="${RG_LOCATION:-eastus2}"
 # Hub region
 HUB_REGION="${HUB_REGION:-westus3}"
-TEMPLATE_DIR="$(dirname "$0")"
+SCRIPT_DIR="$(dirname "$0")"
 
 # Regions for member clusters (keep in sync with parameters.bicepparam if you change it)
 if [ -n "${MEMBER_REGIONS_CSV:-}" ]; then
@@ -61,7 +61,7 @@ if ! wait_for_no_inprogress "$RESOURCE_GROUP"; then
 fi
 # Build parameter overrides
 PARAMS=(
-  --parameters "$TEMPLATE_DIR/parameters.bicepparam"
+  --parameters "$SCRIPT_DIR/parameters.bicepparam"
   --parameters memberRegions="$MEMBER_REGIONS_JSON"
 )
 if [ -n "$KUBE_VM_SIZE" ]; then
@@ -73,7 +73,7 @@ DEPLOYMENT_NAME=${DEPLOYMENT_NAME:-"aks-deployment-$(date +%s)"}
 az deployment group create \
   --name "$DEPLOYMENT_NAME" \
   --resource-group $RESOURCE_GROUP \
-  --template-file "$TEMPLATE_DIR/main.bicep" \
+  --template-file "$SCRIPT_DIR/main.bicep" \
   "${PARAMS[@]}" >/dev/null
 
 # Retrieve outputs
@@ -104,18 +104,66 @@ helm upgrade --install hub-agent ./charts/hub-agent/ \
         --set image.pullPolicy=Always \
         --set image.repository=$REGISTRY/hub-agent \
         --set image.tag=$TAG \
-        --set namespace=fleet-system \
         --set logVerbosity=5 \
         --set enableGuardRail=false \
         --set forceDeleteWaitTime="3m0s" \
         --set clusterUnhealthyThreshold="5m0s" \
         --set logFileMaxSize=100000 \
         --set MaxConcurrentClusterPlacement=200 \
-        --set namespace=fleet-system-hub
+        --set namespace=fleet-system-hub \
+        --set enableWorkload=true
 
 # Run the script.
 chmod +x ./hack/membership/joinMC.sh
 ./hack/membership/joinMC.sh  $TAG $HUB_CLUSTER $MEMBER_CLUSTER_NAMES
+popd
+
+fleetNetworkingDir=$(mktemp -d)
+git clone https://github.com/Azure/fleet-networking.git $fleetNetworkingDir
+pushd $fleetNetworkingDir
+# Set up HUB_CLUSTER as the hub
+NETWORKING_TAG=$(curl "https://api.github.com/repos/Azure/fleet-networking/tags" | jq -r '.[0].name') # Gets latest tag
+
+# Install the helm chart for running Fleet agents on the hub cluster.
+kubectl config use-context $HUB_CLUSTER
+helm install hub-net-controller-manager ./charts/hub-net-controller-manager/ \
+  --set fleetSystemNamespace=fleet-system-hub \
+  --set leaderElectionNamespace=fleet-system-hub \
+  --set image.tag=$NETWORKING_TAG 
+
+HUB_CLUSTER_ADDRESS=$(kubectl config view -o jsonpath="{.clusters[?(@.name==\"$HUB_CLUSTER\")].cluster.server}")
+
+while read -r MEMBER_CLUSTER; do
+  kubectl config use-context $MEMBER_CLUSTER
+
+  kubectl apply -f config/crd/*
+
+  echo "Installing mcs-controller-manager..."
+  helm install mcs-controller-manager ./charts/mcs-controller-manager/ \
+    --set refreshtoken.repository=$REGISTRY/refresh-token \
+    --set refreshtoken.tag=$TAG \
+    --set image.tag=$NETWORKING_TAG \
+    --set image.pullPolicy=Always \
+    --set refreshtoken.pullPolicy=Always \
+    --set config.hubURL=$HUB_CLUSTER_ADDRESS \
+    --set config.memberClusterName=$MEMBER_CLUSTER \
+    --set enableV1Beta1APIs=true \
+    --set logVerbosity=8
+
+  echo "Installing member-net-controller-manager..."
+  helm install member-net-controller-manager ./charts/member-net-controller-manager/ \
+    --set refreshtoken.repository=$REGISTRY/refresh-token \
+    --set refreshtoken.tag=$TAG \
+    --set image.tag=$NETWORKING_TAG \
+    --set timage.pullPolicy=Always \
+    --set refreshtoken.pullPolicy=Always \
+    --set config.hubURL=$HUB_CLUSTER_ADDRESS \
+    --set config.memberClusterName=$MEMBER_CLUSTER \
+    --set enableV1Beta1APIs=true \
+    --set logVerbosity=8
+
+done <<< "$MEMBER_CLUSTER_NAMES"
+
 popd
 
 # Create kubectl aliases and export FLEET_ID (k-hub and k-<region>) persisted in ~/.bashrc

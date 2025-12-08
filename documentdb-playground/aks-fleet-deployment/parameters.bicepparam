@@ -6,5 +6,5 @@ param memberRegions = [
   'eastus2'
 ]
 param kubernetesVersion = ''
-param nodeCount = 1
+param nodeCount = 2
 param vmSize = 'Standard_DS2_v2'

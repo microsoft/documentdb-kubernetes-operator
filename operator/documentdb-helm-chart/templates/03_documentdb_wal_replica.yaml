@@ -5,6 +5,7 @@ metadata:
   labels:
     app: wal-replica
     cnpg.io/pluginName: cnpg-i-wal-replica.documentdb.io
+    app.kubernetes.io/name: {{ include "documentdb-chart.name" . }}
   annotations:
     cnpg.io/pluginClientSecret: walreplica-client-tls
     cnpg.io/pluginServerSecret: walreplica-server-tls
@@ -122,6 +123,7 @@ metadata:
   labels:
     app.kubernetes.io/name: wal-replia-manager
     app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: {{ include "documentdb-chart.name" . }}
   name: wal-replica-manager-binding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -138,6 +140,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: wal-replica-manager
+  labels:
+    app.kubernetes.io/name: {{ include "documentdb-chart.name" . }}
 rules: # TODO trim this down to what's actually needed
 - apiGroups: ["apps"]
   resources: ["deployments"]
@@ -171,4 +175,5 @@ metadata:
   labels:
     app.kubernetes.io/name: wal-replia-manager
     app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: {{ include "documentdb-chart.name" . }}
 {{- end }}

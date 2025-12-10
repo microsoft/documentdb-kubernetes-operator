@@ -101,7 +101,7 @@ func (config *Configuration) applyDefaults() {
 	}
 	// Set defaults
 	if config.GatewayImage == "" {
-		config.GatewayImage = "ghcr.io/documentdb/documentdb/documentdb-local:16"
+		config.GatewayImage = "ghcr.io/microsoft/documentdb/documentdb-local:16"
 	}
 	if config.DocumentDbCredentialSecret == "" {
 		config.DocumentDbCredentialSecret = "documentdb-credentials"

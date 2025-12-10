@@ -464,8 +464,8 @@ spec:
   environment: aks
   nodeCount: 1
   instancesPerNode: 1
-  documentDBImage: ghcr.io/documentdb/documentdb/documentdb-local:16
-  gatewayImage: ghcr.io/documentdb/documentdb/documentdb-local:16
+  documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+  gatewayImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   documentDbCredentialSecret: documentdb-credentials
   resource:
     storage:
@@ -487,8 +487,8 @@ spec:
   environment: aks
   nodeCount: 1
   instancesPerNode: 1
-  documentDBImage: ghcr.io/documentdb/documentdb/documentdb-local:16
-  gatewayImage: ghcr.io/documentdb/documentdb/documentdb-local:16
+  documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+  gatewayImage: ghcr.io/microsoft/documentdb/documentdb-local:16
   documentDbCredentialSecret: documentdb-credentials
   resource:
     storage:

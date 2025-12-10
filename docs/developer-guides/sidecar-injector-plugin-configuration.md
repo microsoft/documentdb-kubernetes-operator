@@ -51,7 +51,7 @@ spec:
 **Built-in Fallback:**
 If no explicit spec configuration is set, the system falls back to:
 ```
-ghcr.io/documentdb/documentdb/documentdb-local:16
+ghcr.io/microsoft/documentdb/documentdb-local:16
 ```
 
 ### 2. Pod Labels Configuration

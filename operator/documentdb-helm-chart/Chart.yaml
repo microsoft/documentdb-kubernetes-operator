@@ -6,5 +6,7 @@ description: A Helm chart for deploying the DocumentDB operator
 appVersion: "0.1.2"
 dependencies:
   - name: cloudnative-pg
-    version: "0.23.2"
+    version: "0.26.1"
     repository: "https://cloudnative-pg.github.io/charts/"
+    tags:
+      - documentdb-operator

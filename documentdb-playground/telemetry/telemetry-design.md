@@ -332,7 +332,7 @@ metadata:
 spec:
   containers:
   - name: gateway
-    image: ghcr.io/microsoft/documentdb/documentdb-local:16
+    image: ghcr.io/documentdb/documentdb/documentdb-local:16
     ports:
     - containerPort: 8080
       name: metrics

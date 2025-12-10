@@ -338,8 +338,8 @@ spec:
   nodeCount: 1
   instancesPerNode: 1
   documentDBVersion: "${DOCDB_VERSION}"
-  documentDBImage: "ghcr.io/microsoft/documentdb/documentdb-local:${DOCDB_VERSION}"
-  gatewayImage: "ghcr.io/microsoft/documentdb/documentdb-local:${DOCDB_VERSION}"
+  documentDBImage: "ghcr.io/documentdb/documentdb/documentdb-local:${DOCDB_VERSION}"
+  gatewayImage: "ghcr.io/documentdb/documentdb/documentdb-local:${DOCDB_VERSION}"
   documentDbCredentialSecret: "${SECRET_NAME}"
   resource:
     storage:

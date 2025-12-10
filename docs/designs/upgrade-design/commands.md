@@ -416,9 +416,9 @@ kubectl get clusters.postgresql.cnpg.io -A -o wide
 **Version Tagging Strategy:**
 ```bash
 # All component images tagged with same DocumentDB version
-ghcr.io/microsoft/documentdb-operator:v1.3.0
-ghcr.io/microsoft/documentdb-gateway:v1.3.0  
-ghcr.io/microsoft/documentdb-sidecar-injector:v1.3.0
+ghcr.io/documentdb/documentdb-operator:v1.3.0
+ghcr.io/documentdb/documentdb-gateway:v1.3.0  
+ghcr.io/documentdb/documentdb-sidecar-injector:v1.3.0
 mcr.microsoft.com/documentdb/documentdb:16.3-v1.3.0
 ```
 
@@ -762,7 +762,7 @@ helm rollback documentdb-operator $PREVIOUS_REVISION -n documentdb-system
 
 # Step 2: If Helm rollback fails, manual operator rollback
 kubectl patch deployment documentdb-operator -n documentdb-system -p \
-  '{"spec":{"template":{"spec":{"containers":[{"name":"documentdb-operator","image":"ghcr.io/microsoft/documentdb-operator:v1.2.3"}]}}}}'
+  '{"spec":{"template":{"spec":{"containers":[{"name":"documentdb-operator","image":"ghcr.io/documentdb/documentdb-operator:v1.2.3"}]}}}}'
 
 # Step 3: Manual CNPG operator rollback (if needed)
 kubectl patch deployment cnpg-controller-manager -n cnpg-system -p \
@@ -770,7 +770,7 @@ kubectl patch deployment cnpg-controller-manager -n cnpg-system -p \
 
 # Step 4: Manual sidecar injector rollback
 kubectl patch deployment sidecar-injector -n cnpg-system -p \
-  '{"spec":{"template":{"spec":{"containers":[{"name":"sidecar-injector","image":"ghcr.io/microsoft/documentdb-sidecar-injector:v1.2.3"}]}}}}'
+  '{"spec":{"template":{"spec":{"containers":[{"name":"sidecar-injector","image":"ghcr.io/documentdb/documentdb-sidecar-injector:v1.2.3"}]}}}}'
 
 # Step 5: Force rolling restart of all CNPG clusters
 for cluster in $(kubectl get clusters.postgresql.cnpg.io -A -o jsonpath='{.items[*].metadata.name}'); do

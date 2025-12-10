@@ -128,7 +128,7 @@ cert-manager        cert-manager-webhook-7cc5dccc4b-7jmrh           1/1     Runn
 
 ```bash
 kubectl config use-context hub
-helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-operator --version 0.0.1-multi-arch --namespace documentdb-operator --create-namespace
+helm install documentdb-operator oci://ghcr.io/documentdb/documentdb-operator --version 0.0.1-multi-arch --namespace documentdb-operator --create-namespace
 ```
 
 Verify the namespaces cnpg-system and documentdb-operator were created
@@ -327,7 +327,7 @@ metadata:
 spec:
   nodeCount: 1
   instancesPerNode: 1
-  documentDBImage: ghcr.io/microsoft/documentdb/documentdb-local:16
+  documentDBImage: ghcr.io/documentdb/documentdb/documentdb-local:16
   resource:
     storage:
       pvcSize: 10Gi

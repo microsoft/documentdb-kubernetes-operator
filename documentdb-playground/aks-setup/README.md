@@ -176,7 +176,7 @@ export GITHUB_TOKEN="your-token"
 
 # 3. Deploy DocumentDB instance manually
 kubectl apply -f - <<EOF
-apiVersion: db.documentdb.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: my-documentdb

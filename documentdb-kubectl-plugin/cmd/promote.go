@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	documentDBGVRGroup    = "db.documentdb.com"
+	documentDBGVRGroup    = "documentdb.io"
 	documentDBGVRVersion  = "preview"
 	documentDBGVRResource = "documentdbs"
 )

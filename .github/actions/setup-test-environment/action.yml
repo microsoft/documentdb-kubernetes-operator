@@ -449,7 +449,7 @@ runs:
         
         # Check for CRDs installation
         echo "Verifying DocumentDB CRDs are installed..."
-        kubectl get crd documentdbs.db.documentdb.com || echo "DocumentDB CRD not found"
+        kubectl get crd db.documentdb.io || echo "DocumentDB CRD not found"
         
         echo "✓ DocumentDB Operator installation completed on ${{ inputs.architecture }}"
 
@@ -533,7 +533,7 @@ runs:
         
         # Check for CRDs installation
         echo "Verifying DocumentDB CRDs are installed..."
-        kubectl get crd documentdbs.db.documentdb.com || echo "DocumentDB CRD not found"
+        kubectl get crd db.documentdb.io || echo "DocumentDB CRD not found"
         
         echo "✓ DocumentDB Operator installation completed on ${{ inputs.architecture }}"
 
@@ -570,7 +570,7 @@ runs:
         
         # Create DocumentDB resource
         cat <<EOF | kubectl apply -f -
-        apiVersion: db.documentdb.com/preview
+        apiVersion: documentdb.io/preview
         kind: DocumentDB
         metadata:
           name: ${{ inputs.db-cluster-name }}

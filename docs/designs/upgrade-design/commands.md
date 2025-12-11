@@ -26,14 +26,14 @@ helm upgrade documentdb-operator ./operator/documentdb-helm-chart \
 # Verify operator infrastructure health (Database Admin)
 kubectl rollout status deployment/documentdb-operator -n documentdb-system
 kubectl rollout status deployment/sidecar-injector -n cnpg-system
-kubectl get crd documentdbs.db.documentdb.com -o jsonpath='{.metadata.labels.version}'
+kubectl get crd dbs.documentdb.io -o jsonpath='{.metadata.labels.version}'
 
 # Confirm v2 operator can manage both v1 and v2 cluster APIs (Database Admin)
 kubectl get documentdb -A -o custom-columns="NAME:.metadata.name,API_VERSION:.apiVersion,CLUSTER_VERSION:.spec.version,STATUS:.status.phase"
 
 # Test creating new cluster with v2 API (Database Admin)
 kubectl apply -f - <<EOF
-apiVersion: db.documentdb.com/v2
+apiVersion: documentdb.io/v2
 kind: DocumentDB
 metadata:
   name: test-v2-cluster
@@ -52,8 +52,8 @@ EOF
 
 ```bash
 # Check available DocumentDB API versions (Developer)
-kubectl api-versions | grep db.documentdb.com
-kubectl explain documentdb --api-version=db.documentdb.com/v2
+kubectl api-versions | grep documentdb.io
+kubectl explain documentdb --api-version=documentdb.io/v2
 
 # Check current cluster API version (Developer)
 kubectl get documentdb my-cluster -o jsonpath='{.apiVersion}'
@@ -64,20 +64,20 @@ kubectl create backup my-cluster-pre-v2-migration --cluster my-cluster
 # Migrate cluster from API v1 to v2 (Developer)
 # Method 1: Update deployment file (Recommended - Standard Kubernetes Workflow)
 # Edit your existing DocumentDB deployment file:
-# Change: apiVersion: db.documentdb.com/v1
-# To:     apiVersion: db.documentdb.com/v2
+# Change: apiVersion: documentdb.io/v1
+# To:     apiVersion: documentdb.io/v2
 # Add any v2-specific configuration fields
 kubectl apply -f my-cluster-v2.yaml
 
 # Method 2: Using kubectl convert (if available)
 kubectl get documentdb my-cluster -o yaml > my-cluster-v1.yaml
-kubectl convert -f my-cluster-v1.yaml --output-version db.documentdb.com/v2 > my-cluster-v2.yaml
+kubectl convert -f my-cluster-v1.yaml --output-version documentdb.io/v2 > my-cluster-v2.yaml
 # Edit my-cluster-v2.yaml to add v2-specific features
 kubectl apply -f my-cluster-v2.yaml
 
 # Method 3: Using patch for simple migrations (Developer)
 kubectl patch documentdb my-cluster --type='merge' -p '{
-  "apiVersion": "db.documentdb.com/v2",
+  "apiVersion": "documentdb.io/v2",
   "spec": {
     "version": "v2",
     "enhancedMonitoring": true
@@ -87,7 +87,7 @@ kubectl patch documentdb my-cluster --type='merge' -p '{
 # Example: Deployment File Update (Method 1 - Recommended)
 # Original v1 deployment file:
 cat > my-cluster-v1.yaml << EOF
-apiVersion: db.documentdb.com/v1
+apiVersion: documentdb.io/v1
 kind: DocumentDB
 metadata:
   name: my-cluster
@@ -102,7 +102,7 @@ EOF
 
 # Updated v2 deployment file:
 cat > my-cluster-v2.yaml << EOF
-apiVersion: db.documentdb.com/v2
+apiVersion: documentdb.io/v2
 kind: DocumentDB
 metadata:
   name: my-cluster
@@ -145,7 +145,7 @@ kubectl apply -f my-cluster-v1.yaml
 
 # Method 2: Using kubectl patch
 kubectl patch documentdb my-cluster --type='merge' -p '{
-  "apiVersion": "db.documentdb.com/v1",
+  "apiVersion": "documentdb.io/v1",
   "spec": {
     "version": "v1"
   }
@@ -159,13 +159,13 @@ kubectl patch documentdb my-cluster --type='merge' -p '{
 kubectl get documentdb -A -o custom-columns="NAMESPACE:.metadata.namespace,NAME:.metadata.name,API_VERSION:.apiVersion,CLUSTER_VERSION:.spec.version,STATUS:.status.phase"
 
 # Database Admin: Check operator multi-version support status
-kubectl get crd documentdbs.db.documentdb.com -o jsonpath='{.spec.versions[*].name}'
+kubectl get crd dbs.documentdb.io -o jsonpath='{.spec.versions[*].name}'
 
 # Developer: Check if cluster is ready for API migration
 kubectl get documentdb my-cluster -o jsonpath='{.status.supportedApiVersions}'
 
 # Developer: Signal readiness for API migration
-kubectl label documentdb my-cluster api-migration.db.documentdb.com/ready-for-v2=true
+kubectl label documentdb my-cluster api-migration.documentdb.io/ready-for-v2=true
 
 # Developer: Check API version compatibility matrix
 kubectl get documentdb my-cluster -o jsonpath='{.status.operatorVersion}'
@@ -184,11 +184,11 @@ kubectl get events --field-selector reason=DeprecatedAPIUsage
 # Developer: Migrate from deprecated API v1 to v2
 kubectl get documentdb -A -o custom-columns="NAME:.metadata.name,API_VERSION:.apiVersion" | grep "v1" | while read name version; do
   echo "Migrating $name from $version to v2"
-  kubectl patch documentdb $name --type='merge' -p '{"apiVersion": "db.documentdb.com/v2", "spec": {"version": "v2"}}'
+  kubectl patch documentdb $name --type='merge' -p '{"apiVersion": "documentdb.io/v2", "spec": {"version": "v2"}}'
 done
 
 # Developer: Validate no v1 API usage before operator upgrade that removes v1
-kubectl get documentdb -A -o jsonpath='{.items[?(@.apiVersion=="db.documentdb.com/v1")].metadata.name}'
+kubectl get documentdb -A -o jsonpath='{.items[?(@.apiVersion=="documentdb.io/v1")].metadata.name}'
 ```
 
 ## Multi-Version API Example Commands
@@ -201,7 +201,7 @@ kubectl get documentdb -A -o jsonpath='{.items[?(@.apiVersion=="db.documentdb.co
 helm upgrade documentdb-operator ./operator/documentdb-helm-chart --version v2.0.0
 
 # Verify multi-version support
-kubectl get crd documentdbs.db.documentdb.com -o jsonpath='{.spec.versions[*].name}'
+kubectl get crd dbs.documentdb.io -o jsonpath='{.spec.versions[*].name}'
 # Output: v1 v2
 ```
 
@@ -209,11 +209,11 @@ kubectl get crd documentdbs.db.documentdb.com -o jsonpath='{.spec.versions[*].na
 ```bash
 # Check current API version
 kubectl get documentdb my-cluster -o jsonpath='{.apiVersion}'
-# Output: db.documentdb.com/v1
+# Output: documentdb.io/v1
 
 # Migrate to API v2
 kubectl patch documentdb my-cluster --type='merge' -p '{
-  "apiVersion": "db.documentdb.com/v2",
+  "apiVersion": "documentdb.io/v2",
   "spec": {
     "version": "v2",
     "enhancedMonitoring": true,
@@ -223,7 +223,7 @@ kubectl patch documentdb my-cluster --type='merge' -p '{
 
 # Verify migration
 kubectl get documentdb my-cluster -o jsonpath='{.apiVersion}'
-# Output: db.documentdb.com/v2
+# Output: documentdb.io/v2
 ```
 
 ### Operator v3 with API Deprecation
@@ -234,9 +234,9 @@ kubectl get documentdb my-cluster -o jsonpath='{.apiVersion}'
 helm upgrade documentdb-operator ./operator/documentdb-helm-chart --version v3.0.0
 
 # Check API version support with deprecation warnings
-kubectl get crd documentdbs.db.documentdb.com -o jsonpath='{.spec.versions[*].name}'
+kubectl get crd dbs.documentdb.io -o jsonpath='{.spec.versions[*].name}'
 # Output: v1 v2 v3
-kubectl get crd documentdbs.db.documentdb.com -o jsonpath='{.spec.versions[?(@.name=="v1")].deprecated}'
+kubectl get crd dbs.documentdb.io -o jsonpath='{.spec.versions[?(@.name=="v1")].deprecated}'
 # Output: true
 ```
 
@@ -247,12 +247,12 @@ kubectl get documentdb -A -o custom-columns="NAME:.metadata.name,API_VERSION:.ap
 
 # Migrate v1 → v2 or v1 → v3
 kubectl patch documentdb dev-cluster-1 --type='merge' -p '{
-  "apiVersion": "db.documentdb.com/v2",
+  "apiVersion": "documentdb.io/v2",
   "spec": {"version": "v2"}
 }'
 
 kubectl patch documentdb dev-cluster-2 --type='merge' -p '{
-  "apiVersion": "db.documentdb.com/v3", 
+  "apiVersion": "documentdb.io/v3", 
   "spec": {
     "version": "v3",
     "newV3Features": {
@@ -264,13 +264,13 @@ kubectl patch documentdb dev-cluster-2 --type='merge' -p '{
 
 # Week 2: Staging validation
 kubectl patch documentdb staging-cluster --type='merge' -p '{
-  "apiVersion": "db.documentdb.com/v3",
+  "apiVersion": "documentdb.io/v3",
   "spec": {"version": "v3"}
 }'
 
 # Week 3: Production (after testing)
 kubectl patch documentdb prod-cluster --type='merge' -p '{
-  "apiVersion": "db.documentdb.com/v3",
+  "apiVersion": "documentdb.io/v3",
   "spec": {"version": "v3"}
 }'
 ```
@@ -280,11 +280,11 @@ kubectl patch documentdb prod-cluster --type='merge' -p '{
 **Prerequisites: Ensure no v1 API usage**
 ```bash
 # Database Admin: Verify no clusters using deprecated v1 API
-kubectl get documentdb -A -o jsonpath='{.items[?(@.apiVersion=="db.documentdb.com/v1")].metadata.name}'
+kubectl get documentdb -A -o jsonpath='{.items[?(@.apiVersion=="documentdb.io/v1")].metadata.name}'
 # Output should be empty
 
 # If v1 clusters exist, they must be migrated first
-for cluster in $(kubectl get documentdb -A -o jsonpath='{.items[?(@.apiVersion=="db.documentdb.com/v1")].metadata.name}'); do
+for cluster in $(kubectl get documentdb -A -o jsonpath='{.items[?(@.apiVersion=="documentdb.io/v1")].metadata.name}'); do
   echo "ERROR: Cluster $cluster still using v1 API. Migration required before operator upgrade."
 done
 ```
@@ -295,7 +295,7 @@ done
 helm upgrade documentdb-operator ./operator/documentdb-helm-chart --version v4.0.0
 
 # Verify API support (v1 no longer supported)
-kubectl get crd documentdbs.db.documentdb.com -o jsonpath='{.spec.versions[*].name}'
+kubectl get crd dbs.documentdb.io -o jsonpath='{.spec.versions[*].name}'
 # Output: v2 v3 v4
 ```
 
@@ -303,7 +303,7 @@ kubectl get crd documentdbs.db.documentdb.com -o jsonpath='{.spec.versions[*].na
 ```bash
 # Month 1: Development clusters (v2 → v3 or v2 → v4)
 kubectl patch documentdb dev-cluster --type='merge' -p '{
-  "apiVersion": "db.documentdb.com/v4",
+  "apiVersion": "documentdb.io/v4",
   "spec": {
     "version": "v4",
     "nextGenFeatures": {
@@ -319,13 +319,13 @@ kubectl patch documentdb dev-cluster --type='merge' -p '{
 
 # Month 2: Staging environment validation
 kubectl patch documentdb staging-cluster --type='merge' -p '{
-  "apiVersion": "db.documentdb.com/v4",
+  "apiVersion": "documentdb.io/v4",
   "spec": {"version": "v4"}
 }'
 
 # Month 3: Production (after extensive testing)
 kubectl patch documentdb prod-cluster --type='merge' -p '{
-  "apiVersion": "db.documentdb.com/v4",
+  "apiVersion": "documentdb.io/v4",
   "spec": {"version": "v4"}
 }'
 ```
@@ -339,10 +339,10 @@ kubectl get documentdb -A -o custom-columns="NAMESPACE:.metadata.namespace,NAME:
 
 # Example output showing coexistence:
 # NAMESPACE    NAME           API_VERSION           STATUS
-# prod         legacy-app     db.documentdb.com/v2   Ready
-# prod         new-app        db.documentdb.com/v3   Ready  
-# staging      test-app       db.documentdb.com/v4   Ready
-# dev          experiment     db.documentdb.com/v4   Ready
+# prod         legacy-app     documentdb.io/v2   Ready
+# prod         new-app        documentdb.io/v3   Ready  
+# staging      test-app       documentdb.io/v4   Ready
+# dev          experiment     documentdb.io/v4   Ready
 ```
 
 **API Migration Validation**
@@ -359,7 +359,7 @@ migrate_and_test() {
   
   # Perform migration
   kubectl patch documentdb $cluster --type='merge' -p "{
-    \"apiVersion\": \"db.documentdb.com/$target_version\",
+    \"apiVersion\": \"documentdb.io/$target_version\",
     \"spec\": {\"version\": \"$target_version\"}
   }"
   
@@ -664,8 +664,8 @@ if [[ -v CHANGED_COMPONENTS[postgres] ]] || [[ -v CHANGED_COMPONENTS[gateway] ]]
         # Trigger rolling restart to revert to previous images
         kubectl annotate clusters.postgresql.cnpg.io $cluster -n $namespace \
             cnpg.io/reloadedAt="$(date -Iseconds)" \
-            rollback.documentdb.documentdb.com/version="$PREVIOUS_REVISION" \
-            rollback.documentdb.documentdb.com/reason="component-change-detected" \
+            rollback.documentdocumentdb.io/version="$PREVIOUS_REVISION" \
+            rollback.documentdocumentdb.io/reason="component-change-detected" \
             --overwrite
         
         # Wait for rollback to complete
@@ -882,8 +882,8 @@ metadata:
   name: documentdb-cluster
   namespace: production
   labels:
-    documentdb.documentdb.com/sidecar-inject: "true"   # Only if injector matches this label
-    documentdb.documentdb.com/cluster-version: "v1.4.0"
+    documentdocumentdb.io/sidecar-inject: "true"   # Only if injector matches this label
+    documentdocumentdb.io/cluster-version: "v1.4.0"
 spec:
   instances: 3   # 1 primary + 2 standbys
 

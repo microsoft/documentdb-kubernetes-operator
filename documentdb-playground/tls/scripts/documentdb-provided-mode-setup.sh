@@ -329,7 +329,7 @@ JSON
     echo "Creating DocumentDB ${DOCDB_NAME} in Provided mode"
     {
       cat <<EOF
-apiVersion: db.documentdb.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: ${DOCDB_NAME}

@@ -20,7 +20,7 @@ stringData:
 
 ---
 
-apiVersion: db.documentdb.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: documentdb-preview

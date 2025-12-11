@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: documentdbs.db.documentdb.com
+  name: dbs.documentdb.io
 spec:
-  group: db.documentdb.com
+  group: documentdb.io
   names:
     kind: DocumentDB
     listKind: DocumentDBList
-    plural: documentdbs
-    singular: documentdb
+    plural: dbs
+    singular: db
   scope: Namespaced
   versions:
   - additionalPrinterColumns:

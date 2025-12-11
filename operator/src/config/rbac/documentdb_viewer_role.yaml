@@ -1,7 +1,7 @@
 # This rule is not used by the project documentdb-operator itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants read-only access to db.documentdb.com resources.
+# Grants read-only access to documentdb.io resources.
 # This role is intended for users who need visibility into these resources
 # without permissions to modify them. It is ideal for monitoring purposes and limited-access viewing.
 
@@ -14,16 +14,16 @@ metadata:
   name: documentdb-viewer-role
 rules:
 - apiGroups:
-  - db.documentdb.com
+  - documentdb.io
   resources:
-  - documentdbs
+  - dbs
   verbs:
   - get
   - list
   - watch
 - apiGroups:
-  - db.documentdb.com
+  - documentdb.io
   resources:
-  - documentdbs/status
+  - dbs/status
   verbs:
   - get

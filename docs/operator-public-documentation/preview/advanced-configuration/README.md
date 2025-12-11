@@ -77,7 +77,7 @@ This single command will:
 #### Example 1: SelfSigned Mode
 
 ```yaml
-apiVersion: db.documentdb.com/v1
+apiVersion: documentdb.io/v1
 kind: DocumentDB
 metadata:
   name: documentdb-selfsigned
@@ -97,7 +97,7 @@ spec:
 #### Example 2: Provided Mode (Azure Key Vault)
 
 ```yaml
-apiVersion: db.documentdb.com/v1
+apiVersion: documentdb.io/v1
 kind: DocumentDB
 metadata:
   name: documentdb-provided
@@ -117,7 +117,7 @@ spec:
 #### Example 3: CertManager Mode with Let's Encrypt
 
 ```yaml
-apiVersion: db.documentdb.com/v1
+apiVersion: documentdb.io/v1
 kind: DocumentDB
 metadata:
   name: documentdb-letsencrypt
@@ -211,7 +211,7 @@ Configuration for high availability DocumentDB deployments.
 ### Multi-Instance Setup
 
 ```yaml
-apiVersion: db.documentdb.com/v1
+apiVersion: documentdb.io/v1
 kind: DocumentDB
 metadata:
   name: documentdb-ha
@@ -266,7 +266,7 @@ Configure resource requests and limits for optimal performance.
 ### Example Configuration
 
 ```yaml
-apiVersion: db.documentdb.com/v1
+apiVersion: documentdb.io/v1
 kind: DocumentDB
 metadata:
   name: documentdb-resources

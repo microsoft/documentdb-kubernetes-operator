@@ -31,8 +31,8 @@ type CertificateReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=db.documentdb.com,resources=documentdbs,verbs=get;list;watch
-// +kubebuilder:rbac:groups=db.documentdb.com,resources=documentdbs/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=documentdb.io,resources=dbs,verbs=get;list;watch
+// +kubebuilder:rbac:groups=documentdb.io,resources=dbs/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=cert-manager.io,resources=certificates;issuers,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=cert-manager.io,resources=certificates/status;issuers/status,verbs=get
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch

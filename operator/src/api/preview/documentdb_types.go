@@ -230,7 +230,7 @@ type TLSStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 
-// DocumentDB is the Schema for the documentdbs API.
+// DocumentDB is the Schema for the dbs API.
 type DocumentDB struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

@@ -265,7 +265,7 @@ We'll start with SelfSigned mode to get a LoadBalancer IP, then switch to Provid
 Create the DocumentDB manifest:
 ```bash
 cat > /tmp/documentdb-selfsigned.yaml <<'EOF'
-apiVersion: db.documentdb.com/v1
+apiVersion: documentdb.io/v1
 kind: DocumentDB
 metadata:
   name: documentdb-preview

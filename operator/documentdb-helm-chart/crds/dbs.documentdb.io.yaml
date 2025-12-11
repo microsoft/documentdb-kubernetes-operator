@@ -12,6 +12,10 @@ spec:
     listKind: DocumentDBList
     plural: dbs
     singular: db
+    shortNames:
+    - documentdb
+    - documentdbs
+    - docdb
   scope: Namespaced
   versions:
   - additionalPrinterColumns:

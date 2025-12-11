@@ -180,7 +180,7 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				if currentCnpgCluster.Annotations == nil {
 					currentCnpgCluster.Annotations = map[string]string{}
 				}
-					currentCnpgCluster.Annotations["documentdb.io/gateway-tls-rev"] = time.Now().Format(time.RFC3339Nano)
+				currentCnpgCluster.Annotations["documentdb.io/gateway-tls-rev"] = time.Now().Format(time.RFC3339Nano)
 				if err := r.Client.Update(ctx, currentCnpgCluster); err == nil {
 					logger.Info("Patched CNPG Cluster with TLS settings; requeueing for pod update")
 					return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil

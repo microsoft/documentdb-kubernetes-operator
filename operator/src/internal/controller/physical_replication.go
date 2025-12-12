@@ -13,8 +13,8 @@ import (
 	"time"
 
 	cnpgv1 "github.com/cloudnative-pg/cloudnative-pg/api/v1"
-	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
-	util "github.com/microsoft/documentdb-operator/internal/utils"
+	dbpreview "github.com/documentdb/documentdb-operator/api/preview"
+	util "github.com/documentdb/documentdb-operator/internal/utils"
 	fleetv1alpha1 "go.goms.io/fleet-networking/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"

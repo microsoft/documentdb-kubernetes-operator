@@ -129,5 +129,5 @@ export GITHUB_TOKEN="your-token"
 
 ## Support
 
-- [GitHub Issues](https://github.com/microsoft/documentdb-kubernetes-operator/issues)
-- [Documentation](https://microsoft.github.io/documentdb-kubernetes-operator)
+- [GitHub Issues](https://github.com/documentdb/documentdb-kubernetes-operator/issues)
+- [Documentation](https://documentdb.github.io/documentdb-kubernetes-operator)

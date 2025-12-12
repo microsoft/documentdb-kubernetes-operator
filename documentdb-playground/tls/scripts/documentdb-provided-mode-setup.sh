@@ -329,7 +329,7 @@ JSON
     echo "Creating DocumentDB ${DOCDB_NAME} in Provided mode"
     {
       cat <<EOF
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: ${DOCDB_NAME}
@@ -338,8 +338,8 @@ spec:
   nodeCount: 1
   instancesPerNode: 1
   documentDBVersion: "${DOCDB_VERSION}"
-  documentDBImage: "ghcr.io/microsoft/documentdb/documentdb-local:${DOCDB_VERSION}"
-  gatewayImage: "ghcr.io/microsoft/documentdb/documentdb-local:${DOCDB_VERSION}"
+  documentDBImage: "ghcr.io/documentdb/documentdb/documentdb-local:${DOCDB_VERSION}"
+  gatewayImage: "ghcr.io/documentdb/documentdb/documentdb-local:${DOCDB_VERSION}"
   documentDbCredentialSecret: "${SECRET_NAME}"
   resource:
     storage:

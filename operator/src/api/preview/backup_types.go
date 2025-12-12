@@ -52,6 +52,7 @@ type BackupStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:path=backups,scope=Namespaced
 // +kubebuilder:printcolumn:name="Cluster",type=string,JSONPath=".spec.cluster.name",description="Target DocumentDB cluster"
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase",description="Backup phase"
 // +kubebuilder:printcolumn:name="StartedAt",type=string,JSONPath=".status.startedAt",description="Backup start time"

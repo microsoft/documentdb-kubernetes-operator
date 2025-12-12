@@ -8,19 +8,12 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamic "k8s.io/client-go/dynamic"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
 )
 
 func TestWaitForPromotion(t *testing.T) {
 	t.Parallel()
-
-	scheme := runtime.NewScheme()
-	gvk := schema.GroupVersionKind{Group: documentDBGVRGroup, Version: documentDBGVRVersion, Kind: "DocumentDB"}
-	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
-	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("DocumentDBList"), &unstructured.UnstructuredList{})
 
 	namespace := defaultDocumentDBNamespace
 	docName := "sample"
@@ -28,9 +21,10 @@ func TestWaitForPromotion(t *testing.T) {
 
 	hubDoc := newDocument(docName, namespace, "cluster-a", "Creating")
 	targetDoc := newDocument(docName, namespace, "cluster-a", "Creating")
+	gvr := documentDBGVR()
 
-	hubClient := dynamicfake.NewSimpleDynamicClient(scheme, hubDoc.DeepCopy())
-	targetClient := dynamicfake.NewSimpleDynamicClient(scheme, targetDoc.DeepCopy())
+	hubClient := newFakeDynamicClient(hubDoc.DeepCopy())
+	targetClient := newFakeDynamicClient(targetDoc.DeepCopy())
 
 	opts := &promoteOptions{
 		documentDBName: docName,
@@ -42,7 +36,6 @@ func TestWaitForPromotion(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	gvr := schema.GroupVersionResource{Group: documentDBGVRGroup, Version: documentDBGVRVersion, Resource: documentDBGVRResource}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -69,8 +62,6 @@ func TestWaitForPromotion(t *testing.T) {
 
 func TestPatchDocumentDB(t *testing.T) {
 	t.Parallel()
-
-	scheme := newDocumentScheme()
 	gvr := documentDBGVR()
 
 	namespace := defaultDocumentDBNamespace
@@ -78,7 +69,7 @@ func TestPatchDocumentDB(t *testing.T) {
 
 	doc := newDocument(docName, namespace, "cluster-a", "Ready")
 
-	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, documentListKinds(), doc.DeepCopy())
+	client := newFakeDynamicClient(doc.DeepCopy())
 
 	opts := &promoteOptions{
 		documentDBName: docName,

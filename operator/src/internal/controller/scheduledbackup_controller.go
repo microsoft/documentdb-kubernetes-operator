@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
+	dbpreview "github.com/documentdb/documentdb-operator/api/preview"
 )
 
 // ScheduledBackupReconciler reconciles a ScheduledBackup object

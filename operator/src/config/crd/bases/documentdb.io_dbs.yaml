@@ -4,13 +4,15 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.17.2
-  name: documentdbs.db.microsoft.com
+  name: dbs.documentdb.io
 spec:
-  group: db.microsoft.com
+  group: documentdb.io
   names:
     kind: DocumentDB
     listKind: DocumentDBList
-    plural: documentdbs
+    plural: dbs
+    shortNames:
+    - documentdb
     singular: documentdb
   scope: Namespaced
   versions:
@@ -26,7 +28,7 @@ spec:
     name: preview
     schema:
       openAPIV3Schema:
-        description: DocumentDB is the Schema for the documentdbs API.
+        description: DocumentDB is the Schema for the dbs API.
         properties:
           apiVersion:
             description: |-

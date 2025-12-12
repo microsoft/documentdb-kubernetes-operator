@@ -1,4 +1,4 @@
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: test-versioned-cluster

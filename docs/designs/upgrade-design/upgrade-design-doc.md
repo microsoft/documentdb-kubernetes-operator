@@ -108,9 +108,9 @@ Clear separation: Kubernetes admins upgrade infrastructure, Database admins coor
 
 **Single Version for All Components:**
 - **DocumentDB Operator Version**: `v1.2.3` controls all component versions
-- **Gateway Image**: Automatically aligned (e.g., `ghcr.io/microsoft/documentdb/gateway:v1.2.3`)
+- **Gateway Image**: Automatically aligned (e.g., `ghcr.io/documentdb/documentdb/gateway:v1.2.3`)
 - **PostgreSQL + Extension**: Automatically aligned (e.g., `mcr.microsoft.com/documentdb/documentdb:16.2-v1.2.3`)
-- **Sidecar Injector**: Automatically aligned (e.g., `ghcr.io/microsoft/documentdb/sidecar-injector:v1.2.3`)
+- **Sidecar Injector**: Automatically aligned (e.g., `ghcr.io/documentdb/documentdb/sidecar-injector:v1.2.3`)
 - **CNPG Operator**: Locked to DocumentDB version (e.g., DocumentDB v1.2.3 → CNPG v0.24.0)
 
 **Benefits of Unified Versioning:**

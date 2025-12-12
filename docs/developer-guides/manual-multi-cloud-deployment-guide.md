@@ -128,7 +128,7 @@ cert-manager        cert-manager-webhook-7cc5dccc4b-7jmrh           1/1     Runn
 
 ```bash
 kubectl config use-context hub
-helm install documentdb-operator oci://ghcr.io/microsoft/documentdb-operator --version 0.0.1-multi-arch --namespace documentdb-operator --create-namespace
+helm install documentdb-operator oci://ghcr.io/documentdb/documentdb-operator --version 0.0.1-multi-arch --namespace documentdb-operator --create-namespace
 ```
 
 Verify the namespaces cnpg-system and documentdb-operator were created
@@ -168,7 +168,7 @@ spec:
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
-      name: documentdbs.db.microsoft.com
+      name: dbs.documentdb.io
     - group: "apiextensions.k8s.io"
       version: v1
       kind: CustomResourceDefinition
@@ -319,7 +319,7 @@ metadata:
 
 ---
 
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: documentdb-preview

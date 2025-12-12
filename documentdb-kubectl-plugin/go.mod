@@ -1,4 +1,4 @@
-module github.com/microsoft/documentdb-operator/documentdb-kubectl-plugin
+module github.com/documentdb/documentdb-operator/documentdb-kubectl-plugin
 
 go 1.23.5
 

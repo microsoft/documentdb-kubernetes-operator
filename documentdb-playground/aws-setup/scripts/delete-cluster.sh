@@ -279,7 +279,7 @@ delete_crds() {
         publications.postgresql.cnpg.io \
         scheduledbackups.postgresql.cnpg.io \
         subscriptions.postgresql.cnpg.io \
-        documentdbs.db.microsoft.com 2>/dev/null || warn "Some CRDs not found or already deleted"
+        dbs.documentdb.io 2>/dev/null || warn "Some CRDs not found or already deleted"
     
     # Only delete these if we're deleting the whole cluster
     if [ "$DELETE_CLUSTER" == "true" ]; then

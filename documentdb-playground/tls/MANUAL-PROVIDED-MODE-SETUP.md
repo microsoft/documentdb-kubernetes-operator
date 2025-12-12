@@ -241,7 +241,7 @@ helm upgrade --install documentdb-operator . \
 kubectl -n documentdb-operator get pods
 ```
 
-**Why override `documentDbVersion`?** The Helm chart defaults to `0.1.0`, and the operator uses that value when selecting the gateway image. Without this override, the CNPG pod attempts to pull `ghcr.io/microsoft/documentdb/documentdb-local:0.1.0`, which doesn't exist.
+**Why override `documentDbVersion`?** The Helm chart defaults to `0.1.0`, and the operator uses that value when selecting the gateway image. Without this override, the CNPG pod attempts to pull `ghcr.io/documentdb/documentdb/documentdb-local:0.1.0`, which doesn't exist.
 
 ## Step 1: Deploy DocumentDB with LoadBalancer
 
@@ -265,7 +265,7 @@ We'll start with SelfSigned mode to get a LoadBalancer IP, then switch to Provid
 Create the DocumentDB manifest:
 ```bash
 cat > /tmp/documentdb-selfsigned.yaml <<'EOF'
-apiVersion: db.microsoft.com/v1
+apiVersion: documentdb.io/v1
 kind: DocumentDB
 metadata:
   name: documentdb-preview

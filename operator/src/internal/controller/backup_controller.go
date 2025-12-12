@@ -18,8 +18,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
-	util "github.com/microsoft/documentdb-operator/internal/utils"
+	dbpreview "github.com/documentdb/documentdb-operator/api/preview"
+	util "github.com/documentdb/documentdb-operator/internal/utils"
 )
 
 // BackupReconciler reconciles a Backup object

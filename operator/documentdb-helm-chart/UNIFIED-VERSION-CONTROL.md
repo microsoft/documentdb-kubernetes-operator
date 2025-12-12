@@ -151,5 +151,5 @@ helm upgrade documentdb-operator ./operator/documentdb-helm-chart
 **Adding Version Constraint:**
 ```bash
 helm upgrade documentdb-operator ./operator/documentdb-helm-chart \
-  --set documentDbVersion=0.1.2
+  --set documentDbVersion=0.1.3
 ```

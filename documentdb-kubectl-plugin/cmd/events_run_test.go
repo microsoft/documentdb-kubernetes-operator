@@ -17,8 +17,6 @@ import (
 )
 
 func TestEventsRunPrintsExistingEvents(t *testing.T) {
-	t.Parallel()
-
 	prevLoad := loadConfigFunc
 	prevKube := kubernetesClientForConfig
 	defer func() {

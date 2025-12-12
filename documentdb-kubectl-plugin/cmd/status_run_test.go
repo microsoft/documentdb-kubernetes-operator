@@ -11,18 +11,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 )
 
 func TestStatusRunRendersClusterTable(t *testing.T) {
-	t.Parallel()
-
 	prevLoad := loadConfigFunc
 	prevDynamic := dynamicClientForConfig
 	prevKube := kubernetesClientForConfig
@@ -31,12 +26,6 @@ func TestStatusRunRendersClusterTable(t *testing.T) {
 		dynamicClientForConfig = prevDynamic
 		kubernetesClientForConfig = prevKube
 	}()
-
-	scheme := runtime.NewScheme()
-	gvk := schema.GroupVersionKind{Group: documentDBGVRGroup, Version: documentDBGVRVersion, Kind: "DocumentDB"}
-	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
-	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("DocumentDBList"), &unstructured.UnstructuredList{})
-	gvr := schema.GroupVersionResource{Group: documentDBGVRGroup, Version: documentDBGVRVersion, Resource: documentDBGVRResource}
 
 	namespace := defaultDocumentDBNamespace
 	docName := "documentdb-sample"
@@ -60,9 +49,9 @@ func TestStatusRunRendersClusterTable(t *testing.T) {
 
 	clusterBDoc := newDocument(docName, namespace, "cluster-a", "Syncing")
 
-	hubClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{gvr: "DocumentDBList"}, hubDoc.DeepCopy())
-	clusterAClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{gvr: "DocumentDBList"}, clusterADoc.DeepCopy())
-	clusterBClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{gvr: "DocumentDBList"}, clusterBDoc.DeepCopy())
+	hubClient := newFakeDynamicClient(hubDoc.DeepCopy())
+	clusterAClient := newFakeDynamicClient(clusterADoc.DeepCopy())
+	clusterBClient := newFakeDynamicClient(clusterBDoc.DeepCopy())
 
 	dynamicClients := map[string]dynamic.Interface{
 		"hub":       hubClient,

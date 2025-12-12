@@ -21,7 +21,7 @@ import (
 const (
 	documentDBGVRGroup    = "documentdb.io"
 	documentDBGVRVersion  = "preview"
-	documentDBGVRResource = "documentdbs"
+	documentDBGVRResource = "dbs"
 )
 
 type promoteOptions struct {

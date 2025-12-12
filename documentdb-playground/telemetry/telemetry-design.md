@@ -601,7 +601,7 @@ rules:
   resources: ["daemonsets", "deployments", "replicasets"]
   verbs: ["get", "list", "watch"]
 - apiGroups: ["documentdb.io"]
-  resources: ["documentdbs"]
+  resources: ["dbs"]
   verbs: ["get", "list", "watch"]
 - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]
   verbs: ["get"]

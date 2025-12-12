@@ -148,7 +148,7 @@ kubectl get pods -n documentdb-test-ns -o jsonpath='{range .items[*]}{.metadata.
 
 ```bash
 # Update version for upgrade
-OPERATOR_VERSION=0.1.2
+OPERATOR_VERSION=0.1.3
 
 # Option A: Build and push new operator version
 docker build -t ${REPO_NAME}.azurecr.io/${OPERATOR_IMAGE}:${OPERATOR_VERSION} .
@@ -201,7 +201,7 @@ kubectl get pods -n documentdb-test-ns -o jsonpath='{range .items[*]}{.metadata.
 
 ### Expected Behavior
 
-- ✅ **Operator pods restart** with new image versions (0.1.2)
+- ✅ **Operator pods restart** with new image versions (0.1.3)
 - ✅ **DocumentDB cluster pods remain unchanged** initially 
 - ✅ **Cluster updates only when reconciliation is triggered** (manual annotation or spec change)
 
@@ -241,7 +241,7 @@ export OPERATOR_VERSION=0.1.1
 ### Upgrade
 ```bash
 # Update version
-export OPERATOR_VERSION=0.1.2
+export OPERATOR_VERSION=0.1.3
 
 # Option 1: Full rebuild and upgrade
 ./documentdb-playground/operator-upgrade-guide/operator-upgrade.sh

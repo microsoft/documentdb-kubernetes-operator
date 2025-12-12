@@ -14,7 +14,7 @@ if [[ -z "$REPO_NAME" || -z "$OPERATOR_IMAGE" || -z "$SIDECAR_INJECTOR_IMAGE" ||
     echo "export REPO_NAME=pgcosmoscontroller"
     echo "export OPERATOR_IMAGE=documentdb-k8s-operator"
     echo "export SIDECAR_INJECTOR_IMAGE=cnpg-plugin"
-    echo "export OPERATOR_VERSION=0.1.2"
+    echo "export OPERATOR_VERSION=0.1.3"
     exit 1
 fi
 

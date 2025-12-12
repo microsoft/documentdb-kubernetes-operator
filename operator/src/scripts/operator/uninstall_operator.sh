@@ -12,4 +12,4 @@ kubectl delete crd backups.postgresql.cnpg.io \
   publications.postgresql.cnpg.io \
   scheduledbackups.postgresql.cnpg.io \
   subscriptions.postgresql.cnpg.io \
-  documentdbs.db.microsoft.com
+  dbs.documentdb.io

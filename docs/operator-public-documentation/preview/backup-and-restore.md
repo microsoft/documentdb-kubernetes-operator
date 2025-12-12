@@ -38,7 +38,7 @@ If `csi-hostpath-snapclass` isn't present, the deploy script didn’t finish cor
 3. When creating a cluster, ensure you set the appropriate storage class:
 
 ```yaml
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: my-cluster
@@ -57,7 +57,7 @@ AKS already provides a CSI driver.
 To allow the documentdb-operator to auto-create a default `VolumeSnapshotClass`, set `spec.environment: aks` in your `DocumentDB` spec:
 
 ```yaml
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: my-cluster
@@ -101,7 +101,7 @@ An on-demand backup creates a single backup of a DocumentDB cluster.
 Create a `Backup` resource:
 
 ```yaml
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: Backup
 metadata:
   name: my-backup
@@ -141,7 +141,7 @@ Scheduled backups automatically create backups at regular intervals using a cron
 Create a `ScheduledBackup` resource on yaml file scheduledbackup.yaml
 
 ```yaml
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: ScheduledBackup
 metadata:
   name: my-scheduled-backup
@@ -212,7 +212,7 @@ kubectl get backups -n default
 Create a new `DocumentDB` resource with recovery configuration:
 
 ```yaml
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: my-restored-cluster
@@ -249,7 +249,7 @@ Backups don't live forever. Each one gets an expiration time. After that time pa
 ### Examples
 Per-backup override:
 ```yaml
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: Backup
 metadata:
   name: monthly-audit
@@ -261,7 +261,7 @@ spec:
 
 Scheduled backups (14‑day retention):
 ```yaml
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: ScheduledBackup
 metadata:
   name: nightly
@@ -274,7 +274,7 @@ spec:
 
 Cluster default (used when Backup doesn't set retention):
 ```yaml
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: prod-cluster

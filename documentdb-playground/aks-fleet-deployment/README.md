@@ -261,7 +261,7 @@ az network vnet peering list --resource-group $RESOURCE_GROUP \
 Create a one-time backup:
 ```bash
 kubectl --context hub apply -f - <<EOF
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: Backup
 metadata:
   name: backup-documentdb
@@ -275,7 +275,7 @@ EOF
 Create automatic backups on a schedule:
 ```bash
 kubectl --context hub apply -f - <<EOF
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: ScheduledBackup
 metadata:
   name: scheduled-backup
@@ -308,7 +308,7 @@ Edit `./multi-region.yaml` and change:
 
 Example:
 ```yaml
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: documentdb-preview-restore  # New name, different from original

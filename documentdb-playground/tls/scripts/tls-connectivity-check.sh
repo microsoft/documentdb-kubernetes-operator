@@ -164,7 +164,7 @@ apply_documentdb_manifest() {
   if [[ "$MODE" == "selfsigned" ]]; then
     {
       cat <<EOF
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: ${DOCDB_NAME}
@@ -173,8 +173,8 @@ spec:
   nodeCount: 1
   instancesPerNode: 1
   documentDBVersion: "${DOCDB_VERSION}"
-  documentDBImage: "ghcr.io/microsoft/documentdb/documentdb-local:${DOCDB_VERSION}"
-  gatewayImage: "ghcr.io/microsoft/documentdb/documentdb-local:${DOCDB_VERSION}"
+  documentDBImage: "ghcr.io/documentdb/documentdb/documentdb-local:${DOCDB_VERSION}"
+  gatewayImage: "ghcr.io/documentdb/documentdb/documentdb-local:${DOCDB_VERSION}"
   resource:
     storage:
       pvcSize: ${PVC_SIZE}
@@ -196,7 +196,7 @@ EOF
       exit 1
     fi
     cat <<EOF
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: ${DOCDB_NAME}
@@ -205,8 +205,8 @@ spec:
   nodeCount: 1
   instancesPerNode: 1
   documentDBVersion: "${DOCDB_VERSION}"
-  documentDBImage: "ghcr.io/microsoft/documentdb/documentdb-local:${DOCDB_VERSION}"
-  gatewayImage: "ghcr.io/microsoft/documentdb/documentdb-local:${DOCDB_VERSION}"
+  documentDBImage: "ghcr.io/documentdb/documentdb/documentdb-local:${DOCDB_VERSION}"
+  gatewayImage: "ghcr.io/documentdb/documentdb/documentdb-local:${DOCDB_VERSION}"
   resource:
     storage:
       pvcSize: ${PVC_SIZE}

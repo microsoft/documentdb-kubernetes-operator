@@ -14,8 +14,8 @@ NODES_MIN=1
 NODES_MAX=4
 
 # DocumentDB Operator Configuration
-# For production: use microsoft/documentdb-operator (official)
-OPERATOR_GITHUB_ORG="microsoft"
+# For production: use documentdb/documentdb-operator (official)
+OPERATOR_GITHUB_ORG="documentdb"
 OPERATOR_CHART_VERSION="0.1.0"
 
 # Feature flags - set to "true" to enable, "false" to skip
@@ -474,7 +474,7 @@ EOF
     
     # Deploy DocumentDB instance
     kubectl apply -f - <<EOF
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: sample-documentdb

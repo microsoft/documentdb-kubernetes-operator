@@ -3,7 +3,7 @@
 
 // Package preview contains API Schema definitions for the db preview API group.
 // +kubebuilder:object:generate=true
-// +groupName=db.microsoft.com
+// +groupName=documentdb.io
 package preview
 
 import (
@@ -13,7 +13,7 @@ import (
 
 var (
 	// GroupVersion is group version used to register these objects.
-	GroupVersion = schema.GroupVersion{Group: "db.microsoft.com", Version: "preview"}
+	GroupVersion = schema.GroupVersion{Group: "documentdb.io", Version: "preview"}
 
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}

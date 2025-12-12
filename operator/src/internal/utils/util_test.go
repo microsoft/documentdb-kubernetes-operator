@@ -6,7 +6,7 @@ package util
 import (
 	"testing"
 
-	dbpreview "github.com/microsoft/documentdb-operator/api/preview"
+	dbpreview "github.com/documentdb/documentdb-operator/api/preview"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -318,7 +318,7 @@ func TestGetDocumentDBServiceDefinition_CNPGLabels(t *testing.T) {
 			// Create a mock DocumentDB instance
 			documentdb := &dbpreview.DocumentDB{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: "db.microsoft.com/preview",
+					APIVersion: "documentdb.io/preview",
 					Kind:       "DocumentDB",
 				},
 				ObjectMeta: metav1.ObjectMeta{

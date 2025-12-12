@@ -15,7 +15,7 @@ usual, then proceed with the sections below.
 
 ```bash
 # From a shell on your workstation
-git clone https://github.com/microsoft/documentdb-kubernetes-operator.git
+git clone https://github.com/documentdb/documentdb-kubernetes-operator.git
 cd documentdb-kubernetes-operator
 ```
 

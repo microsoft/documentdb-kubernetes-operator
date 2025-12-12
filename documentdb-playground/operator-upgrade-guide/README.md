@@ -284,7 +284,7 @@ kubectl delete crd clusters.postgresql.cnpg.io 2>/dev/null || true
 kubectl delete crd backups.postgresql.cnpg.io 2>/dev/null || true
 kubectl delete crd scheduledbackups.postgresql.cnpg.io 2>/dev/null || true
 kubectl delete crd poolers.postgresql.cnpg.io 2>/dev/null || true
-kubectl delete crd documentdbs.db.microsoft.com 2>/dev/null || true
+kubectl delete crd dbs.documentdb.io 2>/dev/null || true
 
 # Then retry the helm install command
 ```

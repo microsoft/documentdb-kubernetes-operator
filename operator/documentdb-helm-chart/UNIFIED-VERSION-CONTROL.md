@@ -17,8 +17,8 @@ The DocumentDB operator uses a **three-tier priority system** for version manage
 # No configuration needed in values.yaml
 
 # Results in:
-# - Operator image: ghcr.io/microsoft/documentdb-kubernetes-operator/operator:0.1.0
-# - Sidecar Injector image: ghcr.io/microsoft/documentdb-kubernetes-operator/sidecar:0.1.0
+# - Operator image: ghcr.io/documentdb/documentdb-kubernetes-operator/operator:0.1.0
+# - Sidecar Injector image: ghcr.io/documentdb/documentdb-kubernetes-operator/sidecar:0.1.0
 # - Environment variable: DOCUMENTDB_VERSION=0.1.0 (in both containers)
 ```
 
@@ -28,8 +28,8 @@ The DocumentDB operator uses a **three-tier priority system** for version manage
 documentDbVersion: "0.1.1"
 
 # Results in:
-# - Operator image: ghcr.io/microsoft/documentdb-kubernetes-operator/operator:0.1.1
-# - Sidecar Injector image: ghcr.io/microsoft/documentdb-kubernetes-operator/sidecar:0.1.1
+# - Operator image: ghcr.io/documentdb/documentdb-kubernetes-operator/operator:0.1.1
+# - Sidecar Injector image: ghcr.io/documentdb/documentdb-kubernetes-operator/sidecar:0.1.1
 # - Environment variable: DOCUMENTDB_VERSION=0.1.1 (in both containers)
 ```
 
@@ -43,8 +43,8 @@ image:
     tag: "v0.2.0-rc1"
 
 # Results in:
-# - Operator image: ghcr.io/microsoft/documentdb-kubernetes-operator/operator:preview
-# - Sidecar Injector image: ghcr.io/microsoft/documentdb-kubernetes-operator/sidecar:v0.2.0-rc1
+# - Operator image: ghcr.io/documentdb/documentdb-kubernetes-operator/operator:preview
+# - Sidecar Injector image: ghcr.io/documentdb/documentdb-kubernetes-operator/sidecar:v0.2.0-rc1
 # - Environment variable: DOCUMENTDB_VERSION=0.1.0 (Chart.AppVersion fallback)
 ```
 
@@ -58,8 +58,8 @@ image:
   # sidecarinjector has no tag, so uses documentDbVersion
 
 # Results in:
-# - Operator image: ghcr.io/microsoft/documentdb-kubernetes-operator/operator:preview
-# - Sidecar Injector image: ghcr.io/microsoft/documentdb-kubernetes-operator/sidecar:0.1.1
+# - Operator image: ghcr.io/documentdb/documentdb-kubernetes-operator/operator:preview
+# - Sidecar Injector image: ghcr.io/documentdb/documentdb-kubernetes-operator/sidecar:0.1.1
 # - Environment variable: DOCUMENTDB_VERSION=0.1.1
 ```
 
@@ -94,13 +94,13 @@ image: "{{ .Values.image.COMPONENT.repository }}:{{ .Values.image.COMPONENT.tag 
 
 ### **DocumentDB Operator Container:**
 - **Purpose**: Main controller managing DocumentDB custom resources
-- **Image**: `ghcr.io/microsoft/documentdb-kubernetes-operator/operator`
+- **Image**: `ghcr.io/documentdb/documentdb-kubernetes-operator/operator`
 - **Version Source**: Component tag → documentDbVersion → Chart.AppVersion
 - **Uses DOCUMENTDB_VERSION**: For DocumentDB instance image selection
 
 ### **Sidecar Injector Container:**
 - **Purpose**: CNPG plugin injecting DocumentDB sidecars into PostgreSQL pods  
-- **Image**: `ghcr.io/microsoft/documentdb-kubernetes-operator/sidecar`
+- **Image**: `ghcr.io/documentdb/documentdb-kubernetes-operator/sidecar`
 - **Version Source**: Component tag → documentDbVersion → Chart.AppVersion
 - **Uses DOCUMENTDB_VERSION**: For version consistency and plugin functionality
 

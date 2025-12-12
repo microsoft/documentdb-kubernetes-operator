@@ -64,7 +64,7 @@ else
   if [ -n "$VALUES_FILE" ] && [ -f "$VALUES_FILE" ]; then
     echo "Using values file: $VALUES_FILE"
     run helm upgrade --install documentdb-operator \
-      oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator \
+      oci://ghcr.io/documentdb/documentdb-kubernetes-operator/documentdb-operator \
       --version 0.0.1 \
       --namespace documentdb-operator \
       --kube-context "$HUB_CONTEXT" \
@@ -72,7 +72,7 @@ else
       --values "$VALUES_FILE"
   else
     run helm upgrade --install documentdb-operator \
-      oci://ghcr.io/microsoft/documentdb-kubernetes-operator/documentdb-operator \
+      oci://ghcr.io/documentdb/documentdb-kubernetes-operator/documentdb-operator \
       --version 0.0.1 \
       --namespace documentdb-operator \
       --kube-context "$HUB_CONTEXT" \

@@ -12,7 +12,7 @@ const (
 	DOCUMENTDB_VERSION_ENV = "DOCUMENTDB_VERSION"
 
 	// DocumentDB image repository
-	DOCUMENTDB_IMAGE_REPOSITORY = "ghcr.io/documentdb/documentdb/documentdb-local"
+	DOCUMENTDB_IMAGE_REPOSITORY = "ghcr.io/microsoft/documentdb/documentdb-local"
 
 	DEFAULT_DOCUMENTDB_IMAGE              = DOCUMENTDB_IMAGE_REPOSITORY + ":16"
 	DEFAULT_GATEWAY_IMAGE                 = DOCUMENTDB_IMAGE_REPOSITORY + ":16"

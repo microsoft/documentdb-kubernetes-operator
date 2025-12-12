@@ -13,7 +13,7 @@ Options:
   -n, --namespace <name>          Kubernetes namespace for the DocumentDB resource (default: documentdb-preview-ns)
       --name <name>               DocumentDB resource name (default: documentdb-preview)
       --docdb-version <ver>       DocumentDB engine version (default: 16)
-      --docdb-image <ref>         DocumentDB image reference (default: ghcr.io/documentdb/documentdb/documentdb-local:<version>)
+      --docdb-image <ref>         DocumentDB image reference (default: ghcr.io/microsoft/documentdb/documentdb-local:<version>)
       --gateway-image <ref>       Gateway image reference (default: same as --docdb-image)
       --pvc-size <size>           Persistent volume claim size (default: 10Gi)
       --storage-class <name>      StorageClass to use for PVCs (optional)
@@ -116,7 +116,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$DOCDB_IMAGE" ]]; then
-  DOCDB_IMAGE="ghcr.io/documentdb/documentdb/documentdb-local:${DOCDB_VERSION}"
+  DOCDB_IMAGE="ghcr.io/microsoft/documentdb/documentdb-local:${DOCDB_VERSION}"
 fi
 if [[ -z "$GATEWAY_IMAGE" ]]; then
   GATEWAY_IMAGE="$DOCDB_IMAGE"

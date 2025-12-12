@@ -414,7 +414,7 @@ To enable local HA, set `instancesPerNode: 3` in your DocumentDB resource:
 
 ```sh
 cat <<EOF | kubectl apply -f -
-apiVersion: db.microsoft.com/preview
+apiVersion: documentdb.io/preview
 kind: DocumentDB
 metadata:
   name: documentdb-ha

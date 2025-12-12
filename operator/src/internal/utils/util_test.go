@@ -318,7 +318,7 @@ func TestGetDocumentDBServiceDefinition_CNPGLabels(t *testing.T) {
 			// Create a mock DocumentDB instance
 			documentdb := &dbpreview.DocumentDB{
 				TypeMeta: metav1.TypeMeta{
-					APIVersion: "db.microsoft.com/preview",
+					APIVersion: "documentdb.io/preview",
 					Kind:       "DocumentDB",
 				},
 				ObjectMeta: metav1.ObjectMeta{

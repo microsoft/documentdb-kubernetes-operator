@@ -501,7 +501,7 @@ metadata:
     app.kubernetes.io/name: documentdb
     app.kubernetes.io/instance: "{{ .Values.documentdb.name }}"
     app.kubernetes.io/component: database
-    documentdb.microsoft.com/instance: "{{ .Values.documentdb.name }}"
+    documentdb.documentdb.io/instance: "{{ .Values.documentdb.name }}"
 ```
 
 ### Prometheus Recording Rules (Updated for OpenTelemetry metrics)
@@ -600,7 +600,7 @@ rules:
 - apiGroups: ["apps"]
   resources: ["daemonsets", "deployments", "replicasets"]
   verbs: ["get", "list", "watch"]
-- apiGroups: ["db.microsoft.com"]
+- apiGroups: ["documentdb.io"]
   resources: ["documentdbs"]
   verbs: ["get", "list", "watch"]
 - nonResourceURLs: ["/metrics", "/metrics/cadvisor"]

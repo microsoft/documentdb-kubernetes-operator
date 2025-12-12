@@ -11,7 +11,9 @@ spec:
     kind: DocumentDB
     listKind: DocumentDBList
     plural: dbs
-    singular: db
+    shortNames:
+    - documentdb
+    singular: documentdb
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -26,7 +28,7 @@ spec:
     name: preview
     schema:
       openAPIV3Schema:
-        description: DocumentDB is the Schema for the documentdbs API.
+        description: DocumentDB is the Schema for the dbs API.
         properties:
           apiVersion:
             description: |-

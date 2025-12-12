@@ -227,6 +227,7 @@ type TLSStatus struct {
 
 // +kubebuilder:printcolumn:name="Status",type=string,JSONPath=".status.status",description="CNPG Cluster Status"
 // +kubebuilder:printcolumn:name="Connection String",type=string,JSONPath=".status.connectionString",description="DocumentDB Connection String"
+// +kubebuilder:resource:path=dbs,scope=Namespaced,singular=documentdb,shortName=documentdb
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 

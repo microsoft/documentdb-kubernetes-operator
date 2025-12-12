@@ -116,4 +116,4 @@ WORKDIR /home/postgres
 # inside docker: `/scripts/start_oss_server.sh`
 # 
 # Alternative: Use official image directly:
-# docker pull ghcr.io/documentdb/documentdb/documentdb-local:latest
+# docker pull ghcr.io/microsoft/documentdb/documentdb-local:latest

@@ -43,7 +43,7 @@ spec:
       pvcSize: "10Gi"
   documentDBImage: "mcr.microsoft.com/documentdb/documentdb:16-v1.3.0"
   # Explicitly specify gateway image
-  gatewayImage: "ghcr.io/documentdb/documentdb/documentdb-local:17"
+  gatewayImage: "ghcr.io/microsoft/documentdb/documentdb-local:17"
   exposeViaService:
     serviceType: "ClusterIP"
 ```
@@ -92,7 +92,7 @@ spec:
   plugins:
     - name: cnpg-i-sidecar-injector.documentdb.io
       parameters:
-        gatewayImage: "ghcr.io/documentdb/documentdb/documentdb-local:17"
+        gatewayImage: "ghcr.io/microsoft/documentdb/documentdb-local:17"
         labels: '{"environment":"production","team":"data"}'
         annotations: '{"prometheus.io/scrape":"true"}'
 ```
@@ -112,7 +112,7 @@ spec:
   resource:
     storage:
       pvcSize: "10Gi"
-  gatewayImage: "ghcr.io/documentdb/documentdb/documentdb-local:17"
+  gatewayImage: "ghcr.io/microsoft/documentdb/documentdb-local:17"
 ```
 
 ### Advanced Configuration (All Parameters)
@@ -129,7 +129,7 @@ spec:
     storage:
       pvcSize: "20Gi"
   documentDBImage: "mcr.microsoft.com/documentdb/documentdb:16-v1.3.0"
-  gatewayImage: "ghcr.io/documentdb/documentdb/documentdb-local:17"
+  gatewayImage: "ghcr.io/microsoft/documentdb/documentdb-local:17"
   sidecarInjectorPluginName: "cnpg-i-sidecar-injector.documentdb.io"
   exposeViaService:
     serviceType: "LoadBalancer"
